@@ -31,6 +31,13 @@ func NewPusher(collectorURL, token string) *Pusher {
 	}
 }
 
+// HTTPClient returns the Pusher's underlying http.Client, so callers
+// (tests, mainly) can adjust its Transport — e.g. to trust a
+// self-signed Collector certificate.
+func (p *Pusher) HTTPClient() *http.Client {
+	return p.client
+}
+
 // Push sends b to the Collector's ingest endpoint and returns an error
 // if the request fails or the response is not 204 No Content.
 func (p *Pusher) Push(ctx context.Context, b checker.Batch) error {
