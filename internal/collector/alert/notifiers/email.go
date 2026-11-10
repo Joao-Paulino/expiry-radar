@@ -13,10 +13,10 @@ import (
 
 // EmailConfig configures the Email notifier's SMTP relay.
 type EmailConfig struct {
-	SMTPHost string
-	SMTPPort int
-	From     string
-	To       string
+	SMTPHost string `json:"smtp_host"`
+	SMTPPort int    `json:"smtp_port"`
+	From     string `json:"from"`
+	To       string `json:"to"`
 }
 
 // Email sends a plain-text message over SMTP, with no authentication

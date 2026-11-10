@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -26,27 +27,65 @@ import (
 // Config configures the Collector, loaded by cmd/collector from a
 // JSON file given as the binary's only CLI argument.
 type Config struct {
-	DBPath     string
-	ListenAddr string
+	DBPath     string `json:"db_path"`
+	ListenAddr string `json:"listen_addr"`
 	// AuthTokens authenticate Agents pushing to /ingest.
-	AuthTokens []string
+	AuthTokens []string `json:"auth_tokens"`
 	// AdminTokens authenticate the dashboard, mute/assign-owner, and
 	// export endpoints — distinct from AuthTokens, so an agent's
 	// ingest token can never read or mute the inventory.
-	AdminTokens     []string
-	AlertInterval   time.Duration
-	WebhookURL      string
-	SlackWebhookURL string
-	TeamsWebhookURL string
-	Email           notifiers.EmailConfig
-	TLSCertFile     string
-	TLSKeyFile      string
+	AdminTokens []string `json:"admin_tokens"`
+	// AlertInterval is how code (tests, mainly) sets the alert
+	// interval directly as a time.Duration. A JSON config instead sets
+	// AlertIntervalSeconds, an integer number of seconds — Go's
+	// encoding/json has no built-in way to parse "1h" into a
+	// time.Duration, and a bare JSON number would otherwise be
+	// nanoseconds, turning "3600" into a 3.6µs tight loop rather than
+	// an hour. EffectiveAlertInterval reconciles the two.
+	AlertInterval        time.Duration         `json:"-"`
+	AlertIntervalSeconds int                   `json:"alert_interval_seconds"`
+	WebhookURL           string                `json:"webhook_url"`
+	SlackWebhookURL      string                `json:"slack_webhook_url"`
+	TeamsWebhookURL      string                `json:"teams_webhook_url"`
+	Email                notifiers.EmailConfig `json:"email"`
+	TLSCertFile          string                `json:"tls_cert_file"`
+	TLSKeyFile           string                `json:"tls_key_file"`
 
 	// Ready, if non-nil, receives the actual bound address once the
 	// listener starts, letting tests use ListenAddr "host:0".
 	Ready chan<- string `json:"-"`
 	// Done, if non-nil, signals Run to stop serving and return.
 	Done <-chan struct{} `json:"-"`
+}
+
+// EffectiveAlertInterval returns AlertInterval when it's set directly
+// (the common case for code/tests), otherwise AlertIntervalSeconds
+// converted to a Duration (the common case for a JSON config file).
+func (c Config) EffectiveAlertInterval() time.Duration {
+	if c.AlertInterval > 0 {
+		return c.AlertInterval
+	}
+	return time.Duration(c.AlertIntervalSeconds) * time.Second
+}
+
+// Validate reports an error describing the first missing required
+// field, so a misconfigured Collector fails fast and loudly instead
+// of starting up silently non-functional (no auth tokens, an empty
+// database path, no TLS files).
+func (c Config) Validate() error {
+	if c.DBPath == "" {
+		return fmt.Errorf("server: Config.DBPath is required")
+	}
+	if c.ListenAddr == "" {
+		return fmt.Errorf("server: Config.ListenAddr is required")
+	}
+	if len(c.AuthTokens) == 0 {
+		return fmt.Errorf("server: Config.AuthTokens must have at least one token")
+	}
+	if c.TLSCertFile == "" || c.TLSKeyFile == "" {
+		return fmt.Errorf("server: Config.TLSCertFile and TLSKeyFile are required")
+	}
+	return nil
 }
 
 func buildNotifiers(cfg Config) []notifiers.Notifier {
@@ -95,6 +134,10 @@ func runAlertLoop(engine *alert.Engine, ns []notifiers.Notifier, interval time.D
 // Run wires up storage, ingest, alerting, and the dashboard, then
 // serves them over HTTPS until an error occurs or cfg.Done is closed.
 func Run(cfg Config) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		return err
@@ -110,14 +153,14 @@ func Run(cfg Config) error {
 	mux.Handle("/", auth.Middleware(cfg.AdminTokens, dashboardMux))
 	mux.Handle("POST /ingest", auth.Middleware(cfg.AuthTokens, ingest.Handler(st)))
 
-	if cfg.AlertInterval > 0 {
+	if interval := cfg.EffectiveAlertInterval(); interval > 0 {
 		engine := &alert.Engine{Store: st, Rules: rs, Thresholds: alert.DefaultThresholds()}
 		ns := buildNotifiers(cfg)
 		done := cfg.Done
 		if done == nil {
 			done = make(chan struct{})
 		}
-		go runAlertLoop(engine, ns, cfg.AlertInterval, done)
+		go runAlertLoop(engine, ns, interval, done)
 	}
 
 	listener, err := net.Listen("tcp", cfg.ListenAddr)

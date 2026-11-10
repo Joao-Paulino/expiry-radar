@@ -2,14 +2,75 @@ package server_test
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"net/http"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/auth"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/server"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/testhelpers"
 )
+
+// TestConfig_UnmarshalJSON_ParsesSnakeCaseFields proves a config file
+// written in the same snake_case style as the agent's (db_path,
+// auth_tokens, alert_interval_seconds, ...) is actually understood —
+// Config previously had no JSON tags at all, so every one of these
+// fields silently decoded to its zero value instead of erroring,
+// leaving the collector running with no auth tokens, an empty (and
+// therefore throwaway/temporary) database path, and alerting off.
+func TestConfig_UnmarshalJSON_ParsesSnakeCaseFields(t *testing.T) {
+	data := []byte(`{
+		"db_path": "/var/lib/expiry-radar/radar.db",
+		"listen_addr": "0.0.0.0:8443",
+		"auth_tokens": ["agent-token"],
+		"admin_tokens": ["admin-token"],
+		"alert_interval_seconds": 3600,
+		"webhook_url": "https://example.com/hook",
+		"tls_cert_file": "/etc/radar/cert.pem",
+		"tls_key_file": "/etc/radar/key.pem",
+		"email": {"smtp_host": "smtp.example.com", "smtp_port": 25, "from": "a@example.com", "to": "b@example.com"}
+	}`)
+
+	var cfg server.Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.DBPath != "/var/lib/expiry-radar/radar.db" {
+		t.Fatalf("DBPath = %q", cfg.DBPath)
+	}
+	if len(cfg.AuthTokens) != 1 || cfg.AuthTokens[0] != "agent-token" {
+		t.Fatalf("AuthTokens = %+v", cfg.AuthTokens)
+	}
+	if len(cfg.AdminTokens) != 1 || cfg.AdminTokens[0] != "admin-token" {
+		t.Fatalf("AdminTokens = %+v", cfg.AdminTokens)
+	}
+	if cfg.EffectiveAlertInterval() != time.Hour {
+		t.Fatalf("EffectiveAlertInterval() = %v, want 1h", cfg.EffectiveAlertInterval())
+	}
+	if cfg.Email.SMTPHost != "smtp.example.com" || cfg.Email.SMTPPort != 25 {
+		t.Fatalf("Email = %+v", cfg.Email)
+	}
+}
+
+// TestRun_ReturnsErrorForInvalidConfig proves a Config missing
+// required fields (here, no AuthTokens at all, which would otherwise
+// leave /ingest rejecting every agent with 401) fails fast with a
+// clear error rather than silently starting a non-functional server.
+func TestRun_ReturnsErrorForInvalidConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := server.Config{
+		DBPath:     filepath.Join(dir, "radar.db"),
+		ListenAddr: "127.0.0.1:0",
+		// AuthTokens intentionally left empty.
+		TLSCertFile: "cert.pem",
+		TLSKeyFile:  "key.pem",
+	}
+	if err := server.Run(cfg); err == nil {
+		t.Fatal("expected an error for a Config with no AuthTokens")
+	}
+}
 
 // TestRun_DashboardRequiresAdminToken proves the dashboard (and its
 // mute/export endpoints) cannot be read or written by anyone who can
