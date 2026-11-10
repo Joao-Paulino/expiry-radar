@@ -15,7 +15,7 @@ import (
 )
 
 type fakeStore struct {
-	saved []checker.ExpiryRecord
+	saved  []checker.ExpiryRecord
 	health []struct {
 		name, reportedBy string
 		err              error
@@ -29,7 +29,7 @@ func (f *fakeStore) SaveRecords(ctx context.Context, agentID string, records []c
 func (f *fakeStore) RecordCheckerHealth(ctx context.Context, name, reportedBy string, err error) error {
 	f.health = append(f.health, struct {
 		name, reportedBy string
-		err               error
+		err              error
 	}{name, reportedBy, err})
 	return nil
 }
@@ -37,7 +37,9 @@ func (f *fakeStore) ListCurrent(ctx context.Context) ([]store.StoredRecord, erro
 func (f *fakeStore) History(ctx context.Context, source, name, kind string) ([]store.StoredRecord, error) {
 	return nil, nil
 }
-func (f *fakeStore) CheckerHealth(ctx context.Context) ([]store.CheckerHealth, error) { return nil, nil }
+func (f *fakeStore) CheckerHealth(ctx context.Context) ([]store.CheckerHealth, error) {
+	return nil, nil
+}
 
 func TestHandler_ValidBatch_SavesRecordsAndHealth(t *testing.T) {
 	fs := &fakeStore{}

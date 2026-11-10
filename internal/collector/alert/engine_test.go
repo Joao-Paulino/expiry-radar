@@ -26,7 +26,9 @@ func (f *fakeStore) ListCurrent(ctx context.Context) ([]store.StoredRecord, erro
 func (f *fakeStore) History(ctx context.Context, source, name, kind string) ([]store.StoredRecord, error) {
 	return nil, nil
 }
-func (f *fakeStore) CheckerHealth(ctx context.Context) ([]store.CheckerHealth, error) { return nil, nil }
+func (f *fakeStore) CheckerHealth(ctx context.Context) ([]store.CheckerHealth, error) {
+	return nil, nil
+}
 
 type fakeRulesStore struct {
 	rule  rules.Rule
