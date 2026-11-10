@@ -45,7 +45,7 @@ antes que algo expire.
 | 📴 | Local queue when the collector is down, sent later | Fila local quando o collector está em baixo, enviada depois |
 | 📊 | Dashboard with history, mute and owner per record | Painel com histórico, silenciamento e responsável por registo |
 | 📤 | JSON and CSV export | Exportação em JSON e CSV |
-| 🔔 | Alerts: Slack, Microsoft Teams, webhook, email | Alertas: Slack, Microsoft Teams, webhook, email |
+| 🔔 | Alerts: Slack, Microsoft Teams, webhook, encrypted email | Alertas: Slack, Microsoft Teams, webhook, email encriptado |
 | 🔑 | Separate agent and admin tokens, HTTPS only | Tokens separados para agentes e administração, só HTTPS |
 | 🙈 | Never stores secret values, only names and dates | Nunca guarda valores secretos, só nomes e datas |
 
@@ -82,22 +82,80 @@ go build -o collector ./cmd/collector
   "listen_addr": "0.0.0.0:8443",
   "tls_cert_file": "/etc/expiry-radar/collector.crt",
   "tls_key_file": "/etc/expiry-radar/collector.key",
-  "auth_tokens": ["<agent token>"],
-  "admin_tokens": ["<admin token>"],
+  "auth_tokens": ["<agent token, see Tokens below>"],
+  "admin_tokens": ["<admin token, see Tokens below>"],
   "alert_interval_seconds": 3600,
   "slack_webhook_url": "",
   "teams_webhook_url": "",
   "webhook_url": "",
-  "email": { "smtp_host": "", "smtp_port": 25, "from": "", "to": "" }
+  "email": {
+    "smtp_host": "smtp.example.com",
+    "smtp_port": 587,
+    "security": "starttls",
+    "username": "alerts@example.com",
+    "password": "<smtp password>",
+    "from": "alerts@example.com",
+    "to": "secops@example.com"
+  }
 }
 ```
 
+Leave `smtp_host` empty to disable email. Deixa `smtp_host` vazio para desligar o email.
+
 ```bash
+chmod 600 collector.json      # it holds tokens and the SMTP password
 ./collector collector.json
 ```
 
-Open `https://<collector>:8443/` with `Authorization: Bearer <admin token>`.
-Abre `https://<collector>:8443/` com `Authorization: Bearer <admin token>`.
+### 🔑 Tokens
+
+Tokens are shared secrets, so generate them randomly; never invent them.
+Os tokens são segredos partilhados, por isso gera-os aleatoriamente; nunca os inventes.
+
+```bash
+# Linux / macOS
+openssl rand -hex 32
+```
+
+```powershell
+# Windows (PowerShell 7+)
+[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLower()
+```
+
+Each command prints a 64-character token. Run it once per token.
+Cada comando gera um token de 64 caracteres. Corre-o uma vez por token.
+
+| | EN | PT |
+|---|---|---|
+| `auth_tokens` | Tokens agents use to send results. Use one per agent (or per group of agents) and copy it into that agent's `token`. | Tokens que os agentes usam para enviar resultados. Usa um por agente (ou por grupo) e copia-o para o `token` desse agente. |
+| `admin_tokens` | Tokens for the dashboard, mute and export. Must be different from every agent token. | Tokens para o painel, silenciamento e exportação. Têm de ser diferentes de todos os tokens de agente. |
+| Rules | At least 32 characters; empty, short or shared tokens stop the collector from starting. | Mínimo de 32 caracteres; tokens vazios, curtos ou repetidos impedem o collector de arrancar. |
+| Rotate | Add the new token, update the agents, then remove the old one. Both work in between. | Adiciona o novo token, atualiza os agentes e depois remove o antigo. Ambos funcionam entretanto. |
+| Revoke | Remove the token from the list and restart the collector. | Remove o token da lista e reinicia o collector. |
+
+To open the dashboard, send the admin token as a header (for example with
+`curl`, or a header extension in your browser):
+Para abrir o painel, envia o token de administração num cabeçalho (por
+exemplo com `curl`, ou com uma extensão de cabeçalhos no browser):
+
+```bash
+curl -H "Authorization: Bearer <admin token>" https://<collector>:8443/export.json
+```
+
+### 📧 Email
+
+Email is always encrypted; there is no plaintext mode.
+O email é sempre encriptado; não existe modo sem encriptação.
+
+| `security` | Port / Porta | EN | PT |
+|---|---|---|---|
+| `starttls` (default) | 587 | Upgrades to TLS and refuses to send if the server does not offer STARTTLS | Passa a TLS e recusa enviar se o servidor não suportar STARTTLS |
+| `tls` | 465 | TLS from the first byte | TLS desde o primeiro byte |
+
+`username` and `password` are optional (SMTP AUTH), and are only sent after the
+connection is encrypted. The server certificate is verified, TLS 1.2 minimum.
+`username` e `password` são opcionais (SMTP AUTH) e só são enviados depois de a
+ligação estar encriptada. O certificado do servidor é verificado, com TLS 1.2 no mínimo.
 
 ### 🛰️ Agent / Agente
 
@@ -107,7 +165,7 @@ Abre `https://<collector>:8443/` com `Authorization: Bearer <admin token>`.
 {
   "collector_url": "https://collector.example.com:8443/ingest",
   "collector_ca_file": "/etc/expiry-radar/collector-ca.pem",
-  "token": "<agent token>",
+  "token": "<one of the collector's auth_tokens>",
   "agent_id": "web-01",
   "queue_path": "/var/lib/expiry-radar/queue.jsonl",
   "interval_seconds": 3600,
@@ -119,6 +177,7 @@ Abre `https://<collector>:8443/` com `Authorization: Bearer <admin token>`.
 ```
 
 ```bash
+chmod 600 agent.json          # it holds the agent token
 ./agent agent.json
 ```
 
