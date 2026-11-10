@@ -25,20 +25,19 @@ func Handler(st store.Store) http.HandlerFunc {
 		}
 
 		for _, result := range batch.Results {
-			if result.ErrMsg == "" {
+			if len(result.Records) > 0 {
 				if err := st.SaveRecords(ctx, batch.AgentID, result.Records); err != nil {
 					log.Printf("ingest: SaveRecords error: %s", logging.Sanitize(err.Error()))
 					w.WriteHeader(http.StatusInternalServerError)
 					return
 				}
-				if err := st.RecordCheckerHealth(ctx, result.CheckerName, batch.AgentID, nil); err != nil {
-					log.Printf("ingest: RecordCheckerHealth error: %s", logging.Sanitize(err.Error()))
-					w.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-				continue
 			}
-			if err := st.RecordCheckerHealth(ctx, result.CheckerName, batch.AgentID, errors.New(result.ErrMsg)); err != nil {
+
+			var checkErr error
+			if result.ErrMsg != "" {
+				checkErr = errors.New(result.ErrMsg)
+			}
+			if err := st.RecordCheckerHealth(ctx, result.CheckerName, batch.AgentID, checkErr); err != nil {
 				log.Printf("ingest: RecordCheckerHealth error: %s", logging.Sanitize(err.Error()))
 				w.WriteHeader(http.StatusInternalServerError)
 				return

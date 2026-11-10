@@ -26,9 +26,14 @@ import (
 // Config configures the Collector, loaded by cmd/collector from a
 // JSON file given as the binary's only CLI argument.
 type Config struct {
-	DBPath          string
-	ListenAddr      string
-	AuthTokens      []string
+	DBPath     string
+	ListenAddr string
+	// AuthTokens authenticate Agents pushing to /ingest.
+	AuthTokens []string
+	// AdminTokens authenticate the dashboard, mute/assign-owner, and
+	// export endpoints — distinct from AuthTokens, so an agent's
+	// ingest token can never read or mute the inventory.
+	AdminTokens     []string
 	AlertInterval   time.Duration
 	WebhookURL      string
 	SlackWebhookURL string
@@ -99,7 +104,10 @@ func Run(cfg Config) error {
 	st := store.NewSQLite(database)
 	rs := rules.NewSQLite(database)
 
-	mux := dashboard.NewMux(st, rs)
+	dashboardMux := dashboard.NewMux(st, rs)
+
+	mux := http.NewServeMux()
+	mux.Handle("/", auth.Middleware(cfg.AdminTokens, dashboardMux))
 	mux.Handle("POST /ingest", auth.Middleware(cfg.AuthTokens, ingest.Handler(st)))
 
 	if cfg.AlertInterval > 0 {

@@ -6,6 +6,7 @@ package tls
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -65,18 +66,79 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 	return records, errors.Join(errs...)
 }
 
+// dialConfig returns the TLS config used to establish the connection
+// itself. It always sets InsecureSkipVerify so that an expired,
+// self-signed, or otherwise untrusted certificate never prevents the
+// connection (and therefore the expiry record) from being obtained;
+// verifyError performs the real verification afterward and the result
+// is reported via metadata instead of as a Check failure. ServerName
+// is set explicitly because some targets (SMTP STARTTLS in
+// particular) are addressed by bare host/IP and the tls/smtp packages
+// require ServerName or InsecureSkipVerify to be set — relying only on
+// InsecureSkipVerify here keeps SNI correct for virtual-hosted
+// targets.
+func (c *Checker) dialConfig(host string) *tls.Config {
+	cfg := &tls.Config{InsecureSkipVerify: true, ServerName: host}
+	if c.TLSConfig != nil && c.TLSConfig.RootCAs != nil {
+		cfg.RootCAs = c.TLSConfig.RootCAs
+	}
+	return cfg
+}
+
+// verifyError runs real chain verification against leaf (using any
+// remaining peerCerts as intermediates) and returns a non-empty
+// string describing the failure, or "" if the certificate verifies
+// against roots (nil roots means the system trust store).
+func verifyError(leaf *x509.Certificate, peerCerts []*x509.Certificate, roots *x509.CertPool, serverName string) string {
+	opts := x509.VerifyOptions{DNSName: serverName, Roots: roots, Intermediates: x509.NewCertPool()}
+	for _, ic := range peerCerts[1:] {
+		opts.Intermediates.AddCert(ic)
+	}
+	if _, err := leaf.Verify(opts); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func (c *Checker) recordFor(addr string, peerCerts []*x509.Certificate, serverName string) (checker.ExpiryRecord, error) {
+	if len(peerCerts) == 0 {
+		return checker.ExpiryRecord{}, fmt.Errorf("no peer certificates presented")
+	}
+	cert := peerCerts[0]
+
+	metadata := map[string]string{
+		"issuer": cert.Issuer.CommonName,
+		"serial": cert.SerialNumber.String(),
+	}
+	var roots *x509.CertPool
+	if c.TLSConfig != nil {
+		roots = c.TLSConfig.RootCAs
+	}
+	if msg := verifyError(cert, peerCerts, roots, serverName); msg != "" {
+		metadata["verify_error"] = msg
+	}
+
+	return checker.ExpiryRecord{
+		Source:    addr,
+		Name:      cert.Subject.CommonName,
+		Kind:      "certificate",
+		ExpiresAt: cert.NotAfter,
+		Metadata:  metadata,
+	}, nil
+}
+
 func (c *Checker) checkTarget(ctx context.Context, target Target) (checker.ExpiryRecord, error) {
 	addr := fmt.Sprintf("%s:%d", target.Host, target.Port)
 
-	var tlsConn *tls.Conn
 	switch target.StartTLS {
 	case "":
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		conn, err := tls.DialWithDialer(dialer, "tcp", addr, c.TLSConfig)
+		conn, err := tls.DialWithDialer(dialer, "tcp", addr, c.dialConfig(target.Host))
 		if err != nil {
 			return checker.ExpiryRecord{}, err
 		}
-		tlsConn = conn
+		defer conn.Close()
+		return c.recordFor(addr, conn.ConnectionState().PeerCertificates, target.Host)
 	case "smtp":
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
 		rawConn, err := dialer.DialContext(ctx, "tcp", addr)
@@ -88,50 +150,16 @@ func (c *Checker) checkTarget(ctx context.Context, target Target) (checker.Expir
 			rawConn.Close()
 			return checker.ExpiryRecord{}, err
 		}
-		if err := client.StartTLS(c.TLSConfig); err != nil {
-			client.Close()
+		defer client.Close()
+		if err := client.StartTLS(c.dialConfig(target.Host)); err != nil {
 			return checker.ExpiryRecord{}, err
 		}
 		state, ok := client.TLSConnectionState()
 		if !ok {
-			client.Close()
 			return checker.ExpiryRecord{}, fmt.Errorf("no TLS connection state after STARTTLS")
 		}
-		if len(state.PeerCertificates) == 0 {
-			client.Close()
-			return checker.ExpiryRecord{}, fmt.Errorf("no peer certificates presented")
-		}
-		cert := state.PeerCertificates[0]
-		client.Close()
-		return checker.ExpiryRecord{
-			Source:    addr,
-			Name:      cert.Subject.CommonName,
-			Kind:      "certificate",
-			ExpiresAt: cert.NotAfter,
-			Metadata: map[string]string{
-				"issuer": cert.Issuer.CommonName,
-				"serial": cert.SerialNumber.String(),
-			},
-		}, nil
+		return c.recordFor(addr, state.PeerCertificates, target.Host)
 	default:
 		return checker.ExpiryRecord{}, fmt.Errorf("unsupported StartTLS protocol %q", target.StartTLS)
 	}
-	defer tlsConn.Close()
-
-	state := tlsConn.ConnectionState()
-	if len(state.PeerCertificates) == 0 {
-		return checker.ExpiryRecord{}, fmt.Errorf("no peer certificates presented")
-	}
-	cert := state.PeerCertificates[0]
-
-	return checker.ExpiryRecord{
-		Source:    addr,
-		Name:      cert.Subject.CommonName,
-		Kind:      "certificate",
-		ExpiresAt: cert.NotAfter,
-		Metadata: map[string]string{
-			"issuer": cert.Issuer.CommonName,
-			"serial": cert.SerialNumber.String(),
-		},
-	}, nil
 }

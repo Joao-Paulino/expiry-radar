@@ -21,6 +21,7 @@ func TestRun_ServesIngestAndDashboardOverHTTPS(t *testing.T) {
 		DBPath:      filepath.Join(dir, "radar.db"),
 		ListenAddr:  "127.0.0.1:0", // run() must report the actual bound port, e.g. via a channel/field for the test to use
 		AuthTokens:  []string{"test-token"},
+		AdminTokens: []string{"admin-token"},
 		TLSCertFile: certFile,
 		TLSKeyFile:  keyFile,
 	}
@@ -40,7 +41,9 @@ func TestRun_ServesIngestAndDashboardOverHTTPS(t *testing.T) {
 		t.Fatalf("ingest: err=%v status=%v", err, resp)
 	}
 
-	dashResp, err := client.Get("https://" + addr + "/")
+	dashReq, _ := http.NewRequest("GET", "https://"+addr+"/", nil)
+	auth.AttachToken(dashReq, "admin-token")
+	dashResp, err := client.Do(dashReq)
 	if err != nil || dashResp.StatusCode != http.StatusOK {
 		t.Fatalf("dashboard: err=%v status=%v", err, dashResp)
 	}

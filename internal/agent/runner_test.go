@@ -58,6 +58,42 @@ func TestRunner_RunOnce_IsolatesCheckerFailureAndPushesBoth(t *testing.T) {
 	}
 }
 
+// TestRunner_RunOnce_KeepsRecordsEvenWhenCheckerAlsoErrors proves a
+// checker that returns BOTH partial records and an error (as
+// tls.Checker does for a multi-target run where some targets fail,
+// see internal/checker/tls's own PartialFailureKeepsOtherResults
+// test) does not have its records silently dropped at the Runner
+// level just because ErrMsg is also set.
+func TestRunner_RunOnce_KeepsRecordsEvenWhenCheckerAlsoErrors(t *testing.T) {
+	var gotBatch checker.Batch
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBatch)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	partialChecker := &fakeChecker{
+		name:    "tls-checker",
+		records: []checker.ExpiryRecord{{Source: "a", Name: "b", Kind: "certificate", ExpiresAt: time.Now()}},
+		err:     errors.New("one target unreachable"),
+	}
+
+	r := NewRunner("agent-1", []checker.Checker{partialChecker}, NewPusher(srv.URL, "t"), NewQueue(filepath.Join(t.TempDir(), "q.jsonl")))
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce failed: %v", err)
+	}
+
+	if len(gotBatch.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(gotBatch.Results))
+	}
+	if len(gotBatch.Results[0].Records) != 1 {
+		t.Fatalf("expected the partial checker's record to survive, got %+v", gotBatch.Results[0])
+	}
+	if gotBatch.Results[0].ErrMsg != "one target unreachable" {
+		t.Fatalf("ErrMsg = %q, want %q", gotBatch.Results[0].ErrMsg, "one target unreachable")
+	}
+}
+
 func TestRunner_RunOnce_QueuesOnPushFailure(t *testing.T) {
 	unreachableURL := "http://127.0.0.1:1" // nothing listening
 	qPath := filepath.Join(t.TempDir(), "q.jsonl")

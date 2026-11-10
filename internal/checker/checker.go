@@ -49,8 +49,13 @@ type Checker interface {
 	Check(ctx context.Context) ([]ExpiryRecord, error)
 }
 
-// Result is one Checker's outcome from a single run: either Records
-// (success, possibly empty) or ErrMsg (non-empty), never both.
+// Result is one Checker's outcome from a single run. Records holds
+// whatever the Checker collected (possibly empty); ErrMsg, when
+// non-empty, carries an error encountered during the run. The two are
+// not mutually exclusive: a Checker covering several targets (see
+// tls.Checker) can return some successful Records alongside an ErrMsg
+// describing the targets that failed, and callers must not discard
+// Records just because ErrMsg is also set.
 type Result struct {
 	CheckerName string         `json:"checker_name"`
 	Records     []ExpiryRecord `json:"records,omitempty"`

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/agent"
+	"github.com/Joao-Paulino/expiry-radar/internal/auth"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
 	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
 	collector "github.com/Joao-Paulino/expiry-radar/internal/collector/server"
@@ -32,6 +33,7 @@ func TestEndToEnd_CertExpiryFlowsFromAgentToDashboard(t *testing.T) {
 		DBPath:        filepath.Join(dir, "radar.db"),
 		ListenAddr:    "127.0.0.1:0",
 		AuthTokens:    []string{"e2e-token"},
+		AdminTokens:   []string{"e2e-admin-token"},
 		TLSCertFile:   certFile,
 		TLSKeyFile:    keyFile,
 		AlertInterval: 100 * time.Millisecond,
@@ -63,7 +65,9 @@ func TestEndToEnd_CertExpiryFlowsFromAgentToDashboard(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
-	resp, err := client.Get("https://" + collectorAddr + "/export.json")
+	exportReq, _ := http.NewRequest("GET", "https://"+collectorAddr+"/export.json", nil)
+	auth.AttachToken(exportReq, "e2e-admin-token")
+	resp, err := client.Do(exportReq)
 	if err != nil {
 		t.Fatal(err)
 	}

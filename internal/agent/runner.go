@@ -36,11 +36,11 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	var results []checker.Result
 	for _, c := range r.Checkers {
 		records, err := c.Check(ctx)
+		result := checker.Result{CheckerName: c.Name(), Records: records}
 		if err != nil {
-			results = append(results, checker.Result{CheckerName: c.Name(), ErrMsg: err.Error()})
-			continue
+			result.ErrMsg = err.Error()
 		}
-		results = append(results, checker.Result{CheckerName: c.Name(), Records: records})
+		results = append(results, result)
 	}
 
 	batch := checker.Batch{AgentID: r.AgentID, Results: results}
