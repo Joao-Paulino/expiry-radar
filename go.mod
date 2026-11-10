@@ -2,8 +2,6 @@ module github.com/Joao-Paulino/expiry-radar
 
 go 1.24.7
 
-replace golang.org/x/sys v0.28.0 => github.com/golang/sys v0.28.0
-
 require github.com/ncruces/go-sqlite3 v0.21.0
 
 require (
