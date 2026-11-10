@@ -1,5 +1,7 @@
 # Expiry Radar
 
+**English** · [Português (PT-PT)](README.pt-PT.md)
+
 Know what is about to expire before it causes an incident.
 
 Expiry Radar is a self-hosted, open-source tool that tracks expiry dates across
