@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
@@ -33,10 +34,11 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 		log.Printf("agent: queue drain failed, will retry later: %s", logging.Sanitize(err.Error()))
 	}
 
+	checkedAt := time.Now().UTC()
 	var results []checker.Result
 	for _, c := range r.Checkers {
 		records, err := c.Check(ctx)
-		result := checker.Result{CheckerName: c.Name(), Records: records}
+		result := checker.Result{CheckerName: c.Name(), Records: records, CheckedAt: checkedAt}
 		if err != nil {
 			result.ErrMsg = err.Error()
 		}

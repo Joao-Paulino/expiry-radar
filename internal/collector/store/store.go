@@ -27,7 +27,13 @@ type CheckerHealth struct {
 
 // Store is the Collector's persistence interface.
 type Store interface {
-	SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord) error
+	// SaveRecords persists records, stamped with checkedAt — the time
+	// the Agent actually ran the check, not when the Collector
+	// received it. A retried batch that arrives late must still carry
+	// its original check time so ListCurrent can tell it apart from a
+	// newer check, rather than appearing to be the most recent one
+	// just because it was inserted most recently.
+	SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error
 	RecordCheckerHealth(ctx context.Context, checkerName, reportedBy string, checkErr error) error
 	ListCurrent(ctx context.Context) ([]StoredRecord, error)
 	History(ctx context.Context, source, name, kind string) ([]StoredRecord, error)
@@ -44,8 +50,13 @@ func NewSQLite(database *sql.DB) *SQLite {
 	return &SQLite{db: database}
 }
 
-func (s *SQLite) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord) error {
-	checkedAt := time.Now().UTC()
+func (s *SQLite) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error {
+	// Stored as unix nanoseconds (an integer) rather than as text:
+	// comparing RFC3339Nano strings lexically is only correct if every
+	// value has the same number of fractional digits, and the driver
+	// trims trailing zeros, which breaks MAX(checked_at) for values
+	// within the same second.
+	checkedAtNanos := checkedAt.UTC().UnixNano()
 	for _, r := range records {
 		metadataJSON, err := json.Marshal(r.Metadata)
 		if err != nil {
@@ -54,7 +65,7 @@ func (s *SQLite) SaveRecords(ctx context.Context, agentID string, records []chec
 		_, err = s.db.ExecContext(ctx, `
 			INSERT INTO expiry_records (source, name, kind, expires_at, metadata_json, reported_by, checked_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, r.Source, r.Name, r.Kind, r.ExpiresAt.UTC(), string(metadataJSON), agentID, checkedAt)
+		`, r.Source, r.Name, r.Kind, r.ExpiresAt.UTC(), string(metadataJSON), agentID, checkedAtNanos)
 		if err != nil {
 			return err
 		}
@@ -114,9 +125,11 @@ func scanStoredRecords(rows *sql.Rows) ([]StoredRecord, error) {
 	for rows.Next() {
 		var rec StoredRecord
 		var metadataJSON string
-		if err := rows.Scan(&rec.Source, &rec.Name, &rec.Kind, &rec.ExpiresAt, &metadataJSON, &rec.ReportedBy, &rec.CheckedAt); err != nil {
+		var checkedAtNanos int64
+		if err := rows.Scan(&rec.Source, &rec.Name, &rec.Kind, &rec.ExpiresAt, &metadataJSON, &rec.ReportedBy, &checkedAtNanos); err != nil {
 			return nil, err
 		}
+		rec.CheckedAt = time.Unix(0, checkedAtNanos).UTC()
 		if metadataJSON != "" && metadataJSON != "null" {
 			if err := json.Unmarshal([]byte(metadataJSON), &rec.Metadata); err != nil {
 				return nil, err

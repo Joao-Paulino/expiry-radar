@@ -22,7 +22,7 @@ type fakeStore struct {
 	}
 }
 
-func (f *fakeStore) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord) error {
+func (f *fakeStore) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error {
 	f.saved = append(f.saved, records...)
 	return nil
 }

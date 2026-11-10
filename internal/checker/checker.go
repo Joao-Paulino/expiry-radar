@@ -60,6 +60,11 @@ type Result struct {
 	CheckerName string         `json:"checker_name"`
 	Records     []ExpiryRecord `json:"records,omitempty"`
 	ErrMsg      string         `json:"err_msg,omitempty"`
+	// CheckedAt is when the Agent actually ran this check, stamped by
+	// the Runner. The Collector must key "latest" off this value, not
+	// off when the batch happened to arrive — a batch retried from the
+	// Agent's local queue can arrive after a newer one.
+	CheckedAt time.Time `json:"checked_at"`
 }
 
 // Batch is what an Agent pushes to the Collector in one request.

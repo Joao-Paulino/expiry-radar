@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS expiry_records (
     expires_at DATETIME NOT NULL,
     metadata_json TEXT NOT NULL,
     reported_by TEXT NOT NULL,
-    checked_at DATETIME NOT NULL
+    checked_at INTEGER NOT NULL -- unix nanoseconds; see store.SaveRecords
 );
 CREATE INDEX IF NOT EXISTS idx_expiry_records_key ON expiry_records(source, name, kind);
 
