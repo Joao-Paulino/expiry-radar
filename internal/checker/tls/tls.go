@@ -18,11 +18,11 @@ import (
 // Target identifies one host/port to check, optionally behind a
 // STARTTLS handshake.
 type Target struct {
-	Host string
-	Port int
+	Host string `json:"host"`
+	Port int    `json:"port"`
 	// StartTLS names the protocol to speak before the TLS handshake
 	// (currently only "smtp"), or "" for a direct TLS connection.
-	StartTLS string
+	StartTLS string `json:"start_tls"`
 }
 
 // Checker checks TLS certificate expiry for a configured list of targets.
