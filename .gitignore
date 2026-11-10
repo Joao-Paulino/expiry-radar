@@ -1,3 +1,4 @@
 .superpowers/
 dist/
 *.db
+.claude/worktrees/
