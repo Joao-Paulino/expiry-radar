@@ -5,11 +5,15 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,7 +26,11 @@ import (
 // Config configures the agent binary, loaded from a JSON file given
 // as the binary's only CLI argument.
 type Config struct {
-	CollectorURL    string              `json:"collector_url"`
+	CollectorURL string `json:"collector_url"`
+	// CollectorCAFile, if set, is a PEM file of CA certificates the
+	// agent trusts for the Collector in addition to the system store,
+	// so a Collector using a self-signed certificate can be reached.
+	CollectorCAFile string              `json:"collector_ca_file"`
 	Token           string              `json:"token"`
 	AgentID         string              `json:"agent_id"`
 	QueuePath       string              `json:"queue_path"`
@@ -52,6 +60,9 @@ func (c Config) Validate() error {
 	if c.CollectorURL == "" {
 		return fmt.Errorf("agent: collector_url is required")
 	}
+	if !strings.HasPrefix(strings.ToLower(c.CollectorURL), "https://") {
+		return fmt.Errorf("agent: collector_url must use https:// (the agent token must never travel in plain text)")
+	}
 	if c.Token == "" {
 		return fmt.Errorf("agent: token is required")
 	}
@@ -67,6 +78,33 @@ func (c Config) Validate() error {
 	return nil
 }
 
+// trustCAFile adds the PEM certificates in path to the roots the
+// pusher trusts for the Collector, on top of the system store.
+func trustCAFile(p *agent.Pusher, path string) error {
+	pemBytes, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("agent: reading collector_ca_file: %w", err)
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		return fmt.Errorf("agent: collector_ca_file contains no PEM certificates")
+	}
+
+	client := p.HTTPClient()
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport == nil {
+		transport = http.DefaultTransport.(*http.Transport).Clone()
+	} else {
+		transport = transport.Clone()
+	}
+	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	client.Transport = transport
+	return nil
+}
+
 // run validates cfg, runs one check immediately, then repeats every
 // IntervalSeconds until ctx is cancelled.
 func run(ctx context.Context, cfg Config) error {
@@ -74,11 +112,18 @@ func run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
+	pusher := agent.NewPusher(cfg.CollectorURL, cfg.Token)
+	if cfg.CollectorCAFile != "" {
+		if err := trustCAFile(pusher, cfg.CollectorCAFile); err != nil {
+			return err
+		}
+	}
+
 	tlsChecker := tlschecker.New(cfg.TLSTargets)
 	runner := agent.NewRunner(
 		cfg.AgentID,
 		[]checker.Checker{tlsChecker},
-		agent.NewPusher(cfg.CollectorURL, cfg.Token),
+		pusher,
 		agent.NewQueue(cfg.QueuePath),
 	)
 

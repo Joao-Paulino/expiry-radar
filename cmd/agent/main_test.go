@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -65,17 +66,19 @@ func TestConfig_Validate_RejectsMissingOrZeroFields(t *testing.T) {
 // the documented default) before reporting anything.
 func TestRun_ChecksImmediatelyAtStartup(t *testing.T) {
 	pushed := make(chan struct{}, 10)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pushed <- struct{}{}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
 
+	dir := t.TempDir()
 	cfg := Config{
 		CollectorURL:    srv.URL + "/ingest",
+		CollectorCAFile: writeCAForTest(t, dir, srv),
 		Token:           "t",
 		AgentID:         "a",
-		QueuePath:       filepath.Join(t.TempDir(), "queue.jsonl"),
+		QueuePath:       filepath.Join(dir, "queue.jsonl"),
 		IntervalSeconds: 3600,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -91,4 +94,62 @@ func TestRun_ChecksImmediatelyAtStartup(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
+}
+
+// TestRun_TrustsSelfSignedCollectorViaCAFile proves an agent can push
+// to a Collector using a self-signed certificate (allowed by the spec)
+// once collector_ca_file points at that certificate. Before, the agent
+// only trusted the system store, so this deployment could never work.
+func TestRun_TrustsSelfSignedCollectorViaCAFile(t *testing.T) {
+	pushed := make(chan struct{}, 10)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pushed <- struct{}{}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	caFile := writeCAForTest(t, dir, srv)
+
+	cfg := Config{
+		CollectorURL:    srv.URL + "/ingest",
+		CollectorCAFile: caFile,
+		Token:           "t",
+		AgentID:         "a",
+		QueuePath:       filepath.Join(dir, "queue.jsonl"),
+		IntervalSeconds: 3600,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, cfg) }()
+
+	select {
+	case <-pushed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent never reached the self-signed collector")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+}
+
+// TestConfig_Validate_RejectsPlainHTTPCollector proves the agent
+// refuses to send its bearer token over plain HTTP.
+func TestConfig_Validate_RejectsPlainHTTPCollector(t *testing.T) {
+	c := Config{CollectorURL: "http://collector.example.com", Token: "t", AgentID: "a", QueuePath: "/q", IntervalSeconds: 60}
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected an error for a plain http:// collector_url")
+	}
+}
+
+// writeCAForTest writes srv's self-signed certificate as a PEM CA file.
+func writeCAForTest(t *testing.T, dir string, srv *httptest.Server) string {
+	t.Helper()
+	caFile := filepath.Join(dir, "collector-ca.pem")
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	if err := os.WriteFile(caFile, pemBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return caFile
 }
