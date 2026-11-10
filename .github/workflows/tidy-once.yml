@@ -19,7 +19,7 @@ jobs:
           go-version-file: go.mod
       - name: Drop replace and tidy
         run: |
-          go mod edit -dropreplace golang.org/x/sys
+          go mod edit -dropreplace golang.org/x/sys@v0.28.0
           go mod tidy
           go vet ./...
           go test ./...
