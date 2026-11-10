@@ -13,8 +13,8 @@ import (
 // StoredRecord is an ExpiryRecord as the Collector persisted it.
 type StoredRecord struct {
 	checker.ExpiryRecord
-	ReportedBy string
-	CheckedAt  time.Time
+	ReportedBy string    `json:"reported_by"`
+	CheckedAt  time.Time `json:"checked_at"`
 }
 
 // CheckerHealth is the last known success/failure state of one checker.
