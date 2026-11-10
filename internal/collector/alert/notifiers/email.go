@@ -2,6 +2,8 @@ package notifiers
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/smtp"
@@ -11,22 +13,41 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/alert"
 )
 
-// EmailConfig configures the Email notifier's SMTP relay.
+// EmailConfig configures the Email notifier's SMTP server. The
+// connection is always encrypted: "starttls" (the default, usually
+// port 587) upgrades a plain connection and refuses to continue if the
+// server does not offer STARTTLS; "tls" (usually port 465) uses TLS
+// from the first byte. There is deliberately no plaintext mode.
 type EmailConfig struct {
 	SMTPHost string `json:"smtp_host"`
 	SMTPPort int    `json:"smtp_port"`
+	Security string `json:"security"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 	From     string `json:"from"`
 	To       string `json:"to"`
 }
 
-// Email sends a plain-text message over SMTP, with no authentication
-// (local/relay SMTP only in M1).
+// Validate reports an invalid Security value.
+func (c EmailConfig) Validate() error {
+	switch c.Security {
+	case "", "starttls", "tls":
+		return nil
+	default:
+		return fmt.Errorf("notifiers: email security must be \"starttls\" or \"tls\", got %q", c.Security)
+	}
+}
+
+// Email sends a plain-text alert over an encrypted SMTP connection,
+// authenticating with Username/Password when Username is set.
 type Email struct {
 	cfg EmailConfig
 	// timeout bounds the whole SMTP exchange (dial + every command),
 	// so one unresponsive relay can never block the other configured
 	// notifiers from being attempted for the same alert.
 	timeout time.Duration
+	// rootCAs overrides the system trust store (tests only).
+	rootCAs *x509.CertPool
 }
 
 // NewEmail returns an Email notifier for the given SMTP configuration.
@@ -45,15 +66,25 @@ func sanitizeHeaderValue(s string) string {
 }
 
 func (e *Email) Send(ctx context.Context, n alert.Notification) error {
+	if err := e.cfg.Validate(); err != nil {
+		return err
+	}
 	addr := fmt.Sprintf("%s:%d", e.cfg.SMTPHost, e.cfg.SMTPPort)
+	tlsConfig := &tls.Config{ServerName: e.cfg.SMTPHost, RootCAs: e.rootCAs, MinVersion: tls.VersionTLS12}
 
 	deadline := time.Now().Add(e.timeout)
 	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 		deadline = ctxDeadline
 	}
 
-	dialer := &net.Dialer{Timeout: e.timeout}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	netDialer := &net.Dialer{Timeout: e.timeout}
+	var conn net.Conn
+	var err error
+	if e.cfg.Security == "tls" {
+		conn, err = (&tls.Dialer{NetDialer: netDialer, Config: tlsConfig}).DialContext(ctx, "tcp", addr)
+	} else {
+		conn, err = netDialer.DialContext(ctx, "tcp", addr)
+	}
 	if err != nil {
 		return err
 	}
@@ -67,6 +98,21 @@ func (e *Email) Send(ctx context.Context, n alert.Notification) error {
 		return err
 	}
 	defer client.Close()
+
+	if e.cfg.Security != "tls" {
+		if ok, _ := client.Extension("STARTTLS"); !ok {
+			return fmt.Errorf("notifiers: %s does not offer STARTTLS; refusing to send unencrypted", addr)
+		}
+		if err := client.StartTLS(tlsConfig); err != nil {
+			return err
+		}
+	}
+
+	if e.cfg.Username != "" {
+		if err := client.Auth(smtp.PlainAuth("", e.cfg.Username, e.cfg.Password, e.cfg.SMTPHost)); err != nil {
+			return err
+		}
+	}
 
 	if err := client.Mail(e.cfg.From); err != nil {
 		return err

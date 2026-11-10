@@ -3,7 +3,10 @@ package notifiers
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,11 +17,9 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/store"
 )
 
-// fakeSMTPServer scripts the minimal 220/250/354/250/221 exchange that
-// net/smtp.SendMail performs without authentication, so Email.Send can
-// be proven to actually dial and speak SMTP rather than silently
-// succeed.
-func fakeSMTPServer(conn net.Conn) {
+// fakeSMTPServer scripts a minimal SMTP exchange. ehloExts are extra
+// EHLO lines (e.g. "STARTTLS"); every command received is sent to seen.
+func fakeSMTPServer(conn net.Conn, ehloExts []string, seen chan<- string) {
 	write := func(s string) { conn.Write([]byte(s + "\r\n")) }
 	reader := bufio.NewReader(conn)
 
@@ -29,12 +30,26 @@ func fakeSMTPServer(conn net.Conn) {
 			return
 		}
 		line = strings.TrimSpace(line)
+		if seen != nil {
+			seen <- line
+		}
 		switch {
 		case strings.HasPrefix(line, "EHLO"), strings.HasPrefix(line, "HELO"):
-			write("250 fake.smtp.local")
-		case strings.HasPrefix(line, "MAIL FROM"):
-			write("250 OK")
-		case strings.HasPrefix(line, "RCPT TO"):
+			if len(ehloExts) == 0 {
+				write("250 fake.smtp.local")
+				continue
+			}
+			write("250-fake.smtp.local")
+			for i, ext := range ehloExts {
+				if i == len(ehloExts)-1 {
+					write("250 " + ext)
+				} else {
+					write("250-" + ext)
+				}
+			}
+		case strings.HasPrefix(line, "AUTH"):
+			write("235 Authentication successful")
+		case strings.HasPrefix(line, "MAIL FROM"), strings.HasPrefix(line, "RCPT TO"):
 			write("250 OK")
 		case strings.HasPrefix(line, "DATA"):
 			write("354 End data with <CR><LF>.<CR><LF>")
@@ -57,12 +72,25 @@ func fakeSMTPServer(conn net.Conn) {
 	}
 }
 
-func TestEmail_Send_DialsConfiguredSMTPServer(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+func testNotification() alert.Notification {
+	return alert.Notification{Severity: "critical", Record: store.StoredRecord{ExpiryRecord: checker.ExpiryRecord{Source: "a", Name: "b"}}}
+}
+
+// TestEmail_Send_ImplicitTLSWithAuth proves security "tls" (port 465
+// style) encrypts the whole session and logs in before sending.
+func TestEmail_Send_ImplicitTLSWithAuth(t *testing.T) {
+	srv := httptest.NewUnstartedServer(nil)
+	srv.StartTLS() // only to obtain a self-signed certificate and its pool
+	cert := srv.TLS.Certificates[0]
+	roots := srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	srv.Close()
+
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ln.Close()
+	seen := make(chan string, 50)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -71,16 +99,73 @@ func TestEmail_Send_DialsConfiguredSMTPServer(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		fakeSMTPServer(conn)
+		fakeSMTPServer(conn, []string{"AUTH PLAIN"}, seen)
+	}()
+
+	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+	e := NewEmail(EmailConfig{SMTPHost: host, SMTPPort: port, Security: "tls", Username: "radar", Password: "pw", From: "radar@example.com", To: "oncall@example.com"})
+	e.rootCAs = roots
+	if err := e.Send(context.Background(), testNotification()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	<-done
+	close(seen)
+	var authed bool
+	for cmd := range seen {
+		if strings.HasPrefix(cmd, "AUTH PLAIN") {
+			authed = true
+		}
+	}
+	if !authed {
+		t.Fatal("client never authenticated")
+	}
+}
+
+// TestEmail_Send_RefusesPlaintextWhenStartTLSMissing proves the default
+// (starttls) mode never falls back to sending mail unencrypted when the
+// server does not offer STARTTLS.
+func TestEmail_Send_RefusesPlaintextWhenStartTLSMissing(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	seen := make(chan string, 50)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		fakeSMTPServer(conn, nil, seen)
+		close(seen)
 	}()
 
 	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
 	port, _ := strconv.Atoi(portStr)
 	e := NewEmail(EmailConfig{SMTPHost: host, SMTPPort: port, From: "radar@example.com", To: "oncall@example.com"})
-	if err := e.Send(context.Background(), alert.Notification{Severity: "critical", Record: store.StoredRecord{ExpiryRecord: checker.ExpiryRecord{Source: "a", Name: "b"}}}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := e.Send(context.Background(), testNotification()); err == nil {
+		t.Fatal("expected an error: server offers no STARTTLS")
 	}
-	<-done
+	for cmd := range seen {
+		if strings.HasPrefix(cmd, "MAIL FROM") || strings.HasPrefix(cmd, "AUTH") {
+			t.Fatalf("sent %q over an unencrypted connection", cmd)
+		}
+	}
+}
+
+// TestEmailConfig_Validate_RejectsUnknownSecurity proves a typo in
+// security fails at startup instead of at the first alert.
+func TestEmailConfig_Validate_RejectsUnknownSecurity(t *testing.T) {
+	for _, ok := range []string{"", "starttls", "tls"} {
+		if err := (EmailConfig{SMTPHost: "h", Security: ok}).Validate(); err != nil {
+			t.Errorf("security %q rejected: %v", ok, err)
+		}
+	}
+	if err := (EmailConfig{SMTPHost: "h", Security: "none"}).Validate(); err == nil {
+		t.Error("security \"none\" must be rejected")
+	}
 }
 
 // TestEmail_Send_DoesNotHangForever proves Send bounds the whole SMTP

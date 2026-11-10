@@ -108,6 +108,11 @@ func (c Config) Validate() error {
 	if c.TLSCertFile == "" || c.TLSKeyFile == "" {
 		return fmt.Errorf("server: Config.TLSCertFile and TLSKeyFile are required")
 	}
+	if c.Email.SMTPHost != "" {
+		if err := c.Email.Validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
