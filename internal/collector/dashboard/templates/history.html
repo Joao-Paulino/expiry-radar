@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><title>Expiry Radar - History</title></head>
+<body>
+<h1>History: {{.Source}} / {{.Name}} / {{.Kind}}</h1>
+<p><a href="/">Back</a></p>
+<table>
+<thead>
+<tr><th>Expires At</th><th>Reported By</th><th>Checked At</th></tr>
+</thead>
+<tbody>
+{{range .Records}}
+<tr>
+<td>{{.ExpiresAt}}</td>
+<td>{{.ReportedBy}}</td>
+<td>{{.CheckedAt}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</body>
+</html>

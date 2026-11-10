@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head><title>Expiry Radar</title></head>
+<body>
+<h1>Expiry Radar</h1>
+<table>
+<thead>
+<tr><th>Source</th><th>Name</th><th>Kind</th><th>Expires At</th><th>Reported By</th><th>Checked At</th><th>Muted</th><th>Owner</th></tr>
+</thead>
+<tbody>
+{{range .}}
+<tr>
+<td>{{.Record.Source}}</td>
+<td><a href="/history?source={{.Record.Source}}&name={{.Record.Name}}&kind={{.Record.Kind}}">{{.Record.Name}}</a></td>
+<td>{{.Record.Kind}}</td>
+<td>{{.Record.ExpiresAt}}</td>
+<td>{{.Record.ReportedBy}}</td>
+<td>{{.Record.CheckedAt}}</td>
+<td>{{.Muted}}</td>
+<td>{{.Owner}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+<h2>Mute / assign owner</h2>
+<form method="post" action="/rules">
+<input type="text" name="source" placeholder="source" required>
+<input type="text" name="name" placeholder="name" required>
+<input type="text" name="kind" placeholder="kind" required>
+<label><input type="checkbox" name="muted"> Muted</label>
+<input type="text" name="owner" placeholder="owner">
+<button type="submit">Save</button>
+</form>
+<p><a href="/export.json">Export JSON</a> | <a href="/export.csv">Export CSV</a></p>
+</body>
+</html>
