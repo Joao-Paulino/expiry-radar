@@ -160,8 +160,15 @@ checks.
   author's other public tools.
 - Pre-built agent binaries per platform (Windows, RedHat, Debian, Arch,
   generic Linux) and a Collector binary, attached to each release.
-- A Docker image for the Collector, for anyone who prefers running it in
-  a container.
+- Docker images for both the Agent and the Collector.
+- A Helm chart / Kubernetes manifests for running the Collector (and the
+  Agent as a DaemonSet, where applicable) in a cluster.
+- Terraform modules to deploy the Collector (and the Agent via
+  cloud-init/VM extensions where relevant) on Azure, AWS, and GCP, plus
+  listings on each provider's marketplace for one-click installs.
+- For VMware: a Terraform module (vSphere provider) to deploy the
+  Collector, plus a ready-to-import OVA/vApp template for anyone who
+  prefers importing it directly into vCenter instead of using Terraform.
 - Installation and usage documentation in PT-PT and EN.
 
 ## 10. Open items carried forward (not blocking M1)
@@ -174,3 +181,7 @@ checks.
 - Software license keys, SaaS subscriptions, and OT/ICS support: each
   gets its own short design pass when its milestone comes up, reusing
   this spec's architecture unchanged.
+- Full distribution surface (Helm chart, Terraform modules, marketplace
+  listings, OVA/vApp template) is release engineering, not core product
+  code — it is built out progressively, starting with binaries + Docker
+  images at M1, so it does not block the M1 implementation plan.
