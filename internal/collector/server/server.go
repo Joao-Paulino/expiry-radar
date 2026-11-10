@@ -68,6 +68,11 @@ func (c Config) EffectiveAlertInterval() time.Duration {
 	return time.Duration(c.AlertIntervalSeconds) * time.Second
 }
 
+// MinTokenLength is the shortest token Validate accepts. An empty
+// token would match a request carrying no Authorization header at all;
+// 32 characters is the hex encoding of 16 random bytes.
+const MinTokenLength = 32
+
 // Validate reports an error describing the first missing required
 // field, so a misconfigured Collector fails fast and loudly instead
 // of starting up silently non-functional (no auth tokens, an empty
@@ -81,6 +86,24 @@ func (c Config) Validate() error {
 	}
 	if len(c.AuthTokens) == 0 {
 		return fmt.Errorf("server: Config.AuthTokens must have at least one token")
+	}
+	if len(c.AdminTokens) == 0 {
+		return fmt.Errorf("server: Config.AdminTokens must have at least one token")
+	}
+	agentTokens := make(map[string]bool, len(c.AuthTokens))
+	for _, tok := range c.AuthTokens {
+		if len(tok) < MinTokenLength {
+			return fmt.Errorf("server: every auth_tokens entry must be at least %d characters", MinTokenLength)
+		}
+		agentTokens[tok] = true
+	}
+	for _, tok := range c.AdminTokens {
+		if len(tok) < MinTokenLength {
+			return fmt.Errorf("server: every admin_tokens entry must be at least %d characters", MinTokenLength)
+		}
+		if agentTokens[tok] {
+			return fmt.Errorf("server: an admin token must not also be an agent token")
+		}
 	}
 	if c.TLSCertFile == "" || c.TLSKeyFile == "" {
 		return fmt.Errorf("server: Config.TLSCertFile and TLSKeyFile are required")

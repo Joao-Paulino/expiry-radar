@@ -24,8 +24,8 @@ func TestConfig_UnmarshalJSON_ParsesSnakeCaseFields(t *testing.T) {
 	data := []byte(`{
 		"db_path": "/var/lib/expiry-radar/radar.db",
 		"listen_addr": "0.0.0.0:8443",
-		"auth_tokens": ["agent-token"],
-		"admin_tokens": ["admin-token"],
+		"auth_tokens": ["agent-token-0123456789abcdef0123456789"],
+		"admin_tokens": ["admin-token-0123456789abcdef0123456789"],
 		"alert_interval_seconds": 3600,
 		"webhook_url": "https://example.com/hook",
 		"tls_cert_file": "/etc/radar/cert.pem",
@@ -40,10 +40,10 @@ func TestConfig_UnmarshalJSON_ParsesSnakeCaseFields(t *testing.T) {
 	if cfg.DBPath != "/var/lib/expiry-radar/radar.db" {
 		t.Fatalf("DBPath = %q", cfg.DBPath)
 	}
-	if len(cfg.AuthTokens) != 1 || cfg.AuthTokens[0] != "agent-token" {
+	if len(cfg.AuthTokens) != 1 || cfg.AuthTokens[0] != "agent-token-0123456789abcdef0123456789" {
 		t.Fatalf("AuthTokens = %+v", cfg.AuthTokens)
 	}
-	if len(cfg.AdminTokens) != 1 || cfg.AdminTokens[0] != "admin-token" {
+	if len(cfg.AdminTokens) != 1 || cfg.AdminTokens[0] != "admin-token-0123456789abcdef0123456789" {
 		t.Fatalf("AdminTokens = %+v", cfg.AdminTokens)
 	}
 	if cfg.EffectiveAlertInterval() != time.Hour {
@@ -83,8 +83,8 @@ func TestRun_DashboardRequiresAdminToken(t *testing.T) {
 	cfg := server.Config{
 		DBPath:      filepath.Join(dir, "radar.db"),
 		ListenAddr:  "127.0.0.1:0",
-		AuthTokens:  []string{"agent-token"},
-		AdminTokens: []string{"admin-token"},
+		AuthTokens:  []string{"agent-token-0123456789abcdef0123456789"},
+		AdminTokens: []string{"admin-token-0123456789abcdef0123456789"},
 		TLSCertFile: certFile,
 		TLSKeyFile:  keyFile,
 	}
@@ -105,7 +105,7 @@ func TestRun_DashboardRequiresAdminToken(t *testing.T) {
 	}
 
 	req, _ := http.NewRequest("GET", "https://"+addr+"/", nil)
-	auth.AttachToken(req, "admin-token")
+	auth.AttachToken(req, "admin-token-0123456789abcdef0123456789")
 	resp, err = client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -116,12 +116,45 @@ func TestRun_DashboardRequiresAdminToken(t *testing.T) {
 
 	// An agent ingest token must not also work as an admin token.
 	req2, _ := http.NewRequest("GET", "https://"+addr+"/", nil)
-	auth.AttachToken(req2, "agent-token")
+	auth.AttachToken(req2, "agent-token-0123456789abcdef0123456789")
 	resp2, err := client.Do(req2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resp2.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("dashboard request with an agent ingest token: got %d, want 401", resp2.StatusCode)
+	}
+}
+
+// TestConfig_Validate_RejectsWeakTokens proves an empty or short token
+// can never be configured. An empty string in auth_tokens would match
+// a request with no Authorization header at all, opening the endpoint.
+func TestConfig_Validate_RejectsWeakTokens(t *testing.T) {
+	strong := "0123456789abcdef0123456789abcdef"
+	base := server.Config{
+		DBPath:      "radar.db",
+		ListenAddr:  "127.0.0.1:0",
+		AuthTokens:  []string{strong},
+		AdminTokens: []string{strong + "x"},
+		TLSCertFile: "cert.pem",
+		TLSKeyFile:  "key.pem",
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("strong config rejected: %v", err)
+	}
+	cases := map[string]func(c *server.Config){
+		"empty agent token":  func(c *server.Config) { c.AuthTokens = []string{""} },
+		"short agent token":  func(c *server.Config) { c.AuthTokens = []string{"abc"} },
+		"no admin tokens":    func(c *server.Config) { c.AdminTokens = nil },
+		"empty admin token":  func(c *server.Config) { c.AdminTokens = []string{""} },
+		"short admin token":  func(c *server.Config) { c.AdminTokens = []string{"admin"} },
+		"admin reuses agent": func(c *server.Config) { c.AdminTokens = []string{strong} },
+	}
+	for name, mutate := range cases {
+		c := base
+		mutate(&c)
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: expected a validation error", name)
+		}
 	}
 }

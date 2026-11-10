@@ -32,8 +32,8 @@ func TestEndToEnd_CertExpiryFlowsFromAgentToDashboard(t *testing.T) {
 	collectorAddr, stopCollector, err := testhelpers.StartForTest(collector.Config{
 		DBPath:        filepath.Join(dir, "radar.db"),
 		ListenAddr:    "127.0.0.1:0",
-		AuthTokens:    []string{"e2e-token"},
-		AdminTokens:   []string{"e2e-admin-token"},
+		AuthTokens:    []string{"e2e-agent-token-0123456789abcdef0123"},
+		AdminTokens:   []string{"e2e-admin-token-0123456789abcdef0123"},
 		TLSCertFile:   certFile,
 		TLSKeyFile:    keyFile,
 		AlertInterval: 100 * time.Millisecond,
@@ -54,7 +54,7 @@ func TestEndToEnd_CertExpiryFlowsFromAgentToDashboard(t *testing.T) {
 	// field exists precisely for this test-injection purpose (see
 	// internal/checker/tls's own tests).
 	tlsChecker.TLSConfig = &tls.Config{InsecureSkipVerify: true}
-	pusher := agent.NewPusher("https://"+collectorAddr, "e2e-token")
+	pusher := agent.NewPusher("https://"+collectorAddr, "e2e-agent-token-0123456789abcdef0123")
 	// The Pusher's http.Client must trust the Collector's self-signed test
 	// cert; set this via the same InsecureSkipVerify pattern used in Task 17's test.
 	pusher.HTTPClient().Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
@@ -66,7 +66,7 @@ func TestEndToEnd_CertExpiryFlowsFromAgentToDashboard(t *testing.T) {
 
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	exportReq, _ := http.NewRequest("GET", "https://"+collectorAddr+"/export.json", nil)
-	auth.AttachToken(exportReq, "e2e-admin-token")
+	auth.AttachToken(exportReq, "e2e-admin-token-0123456789abcdef0123")
 	resp, err := client.Do(exportReq)
 	if err != nil {
 		t.Fatal(err)

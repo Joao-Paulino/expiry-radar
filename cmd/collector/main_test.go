@@ -20,8 +20,8 @@ func TestRun_ServesIngestAndDashboardOverHTTPS(t *testing.T) {
 	cfg := Config{
 		DBPath:      filepath.Join(dir, "radar.db"),
 		ListenAddr:  "127.0.0.1:0", // run() must report the actual bound port, e.g. via a channel/field for the test to use
-		AuthTokens:  []string{"test-token"},
-		AdminTokens: []string{"admin-token"},
+		AuthTokens:  []string{"test-token-0123456789abcdef0123456789"},
+		AdminTokens: []string{"admin-token-0123456789abcdef0123456789"},
 		TLSCertFile: certFile,
 		TLSKeyFile:  keyFile,
 	}
@@ -35,14 +35,14 @@ func TestRun_ServesIngestAndDashboardOverHTTPS(t *testing.T) {
 	batch := checker.Batch{AgentID: "agent-1", Results: []checker.Result{{CheckerName: "tls-checker", Records: []checker.ExpiryRecord{{Source: "a", Name: "b", Kind: "certificate", ExpiresAt: time.Now().Add(48 * time.Hour)}}}}}
 	body, _ := json.Marshal(batch)
 	req, _ := http.NewRequest("POST", "https://"+addr+"/ingest", bytes.NewReader(body))
-	auth.AttachToken(req, "test-token")
+	auth.AttachToken(req, "test-token-0123456789abcdef0123456789")
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("ingest: err=%v status=%v", err, resp)
 	}
 
 	dashReq, _ := http.NewRequest("GET", "https://"+addr+"/", nil)
-	auth.AttachToken(dashReq, "admin-token")
+	auth.AttachToken(dashReq, "admin-token-0123456789abcdef0123456789")
 	dashResp, err := client.Do(dashReq)
 	if err != nil || dashResp.StatusCode != http.StatusOK {
 		t.Fatalf("dashboard: err=%v status=%v", err, dashResp)
