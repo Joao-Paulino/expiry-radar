@@ -41,6 +41,11 @@ func Handler(st store.Store) http.HandlerFunc {
 				// than storing a zero timestamp.
 				checkedAt = time.Now().UTC()
 			}
+			// An agent clock far ahead would mark runs in the future and
+			// hide new items until then: never beyond now + 5 min.
+			if limit := time.Now().UTC().Add(5 * time.Minute); checkedAt.After(limit) {
+				checkedAt = limit
+			}
 			// Saved even with no records: an error-free run with nothing
 			// in it means every item of this checker is gone.
 			if err := st.SaveResult(ctx, batch.AgentID, result.CheckerName, result.Records, checkedAt, result.ErrMsg == ""); err != nil {

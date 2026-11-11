@@ -201,7 +201,7 @@ func deliver(ctx context.Context, engine *alert.Engine, state *alert.StateStore,
 	for _, n := range notifications {
 		evaluated[n.Key()] = true
 	}
-	notifications = append(notifications, goneResolutions(ctx, state, evaluated)...)
+	notifications = append(notifications, goneResolutions(ctx, engine, state, evaluated)...)
 	for _, n := range notifications {
 		key := n.Key()
 		if n.Muted {
@@ -237,7 +237,7 @@ func deliver(ctx context.Context, engine *alert.Engine, state *alert.StateStore,
 // alert whose item is no longer current (deleted, renamed, rotated
 // away, or its agent forgotten), so the alert is resolved once instead
 // of staying open.
-func goneResolutions(ctx context.Context, state *alert.StateStore, evaluated map[string]bool) []alert.Notification {
+func goneResolutions(ctx context.Context, engine *alert.Engine, state *alert.StateStore, evaluated map[string]bool) []alert.Notification {
 	keys, err := state.OpenKeys(ctx, "expiry|")
 	if err != nil {
 		log.Printf("collector: alert state error: %s", logging.Sanitize(err.Error()))
@@ -255,7 +255,13 @@ func goneResolutions(ctx context.Context, state *alert.StateStore, evaluated map
 		}
 		var r store.StoredRecord
 		r.Source, r.Name, r.Kind = rest[:i], rest[i+1:j], rest[j+1:]
-		out = append(out, alert.Notification{Type: alert.TypeExpiry, Record: r, Severity: alert.SeverityOK,
+		muted := false
+		if engine.Rules != nil {
+			if rule, found, err := engine.Rules.Get(ctx, r.Source, r.Name, r.Kind); err == nil && found {
+				muted = rule.Muted
+			}
+		}
+		out = append(out, alert.Notification{Type: alert.TypeExpiry, Record: r, Severity: alert.SeverityOK, Gone: true, Muted: muted,
 			Detail: "no longer reported (deleted, renamed or rotated away)"})
 	}
 	return out

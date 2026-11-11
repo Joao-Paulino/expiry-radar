@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -40,6 +41,10 @@ func TestListCurrent_ItemMissingFromCompleteRunIsGone(t *testing.T) {
 	if err := s.SaveResult(ctx, "agent-1", "vault", []checker.ExpiryRecord{rec("kept")}, t0.Add(time.Minute), true); err != nil {
 		t.Fatal(err)
 	}
+	if got := currentNames(t, s); !got["agent-1/old"] {
+		t.Fatalf("hidden after one run without it (a load balancer may alternate): %v", got)
+	}
+	s.SaveResult(ctx, "agent-1", "vault", []checker.ExpiryRecord{rec("kept")}, t0.Add(2*time.Minute), true)
 	got := currentNames(t, s)
 	if got["agent-1/old"] || !got["agent-1/kept"] {
 		t.Fatalf("current: %v", got)
@@ -66,6 +71,7 @@ func TestListCurrent_EmptyCompleteRunClearsChecker(t *testing.T) {
 	t0 := time.Now().Add(-time.Hour)
 	s.SaveResult(ctx, "agent-1", "vault", []checker.ExpiryRecord{rec("a")}, t0, true)
 	s.SaveResult(ctx, "agent-1", "vault", nil, t0.Add(time.Minute), true)
+	s.SaveResult(ctx, "agent-1", "vault", nil, t0.Add(2*time.Minute), true)
 	if got := currentNames(t, s); len(got) != 0 {
 		t.Fatalf("want nothing current, got %v", got)
 	}
@@ -81,6 +87,7 @@ func TestListCurrent_GoneIsPerAgentAndChecker(t *testing.T) {
 	s.SaveResult(ctx, "agent-1", "tls-checker", []checker.ExpiryRecord{rec("t")}, t0, true)
 	s.SaveResult(ctx, "agent-2", "vault", []checker.ExpiryRecord{rec("v2")}, t0, true)
 	s.SaveResult(ctx, "agent-1", "vault", nil, t0.Add(2*time.Minute), true)                            // agent-1 vault: all gone
+	s.SaveResult(ctx, "agent-1", "vault", nil, t0.Add(3*time.Minute), true)                            // twice
 	s.SaveResult(ctx, "agent-1", "vault", []checker.ExpiryRecord{rec("v")}, t0.Add(time.Minute), true) // late retry of an older batch
 	got := currentNames(t, s)
 	if got["agent-1/v"] || !got["agent-1/t"] || !got["agent-2/v2"] {
@@ -99,7 +106,9 @@ func TestListCurrent_LegacyRowsWithoutChecker(t *testing.T) {
 	if got := currentNames(t, s); !got["agent-1/legacy-gone"] {
 		t.Fatal("legacy row hidden before any complete run")
 	}
+	s.RecordCheckerHealth(ctx, "vault", "agent-1", nil)
 	s.SaveResult(ctx, "agent-1", "vault", []checker.ExpiryRecord{rec("legacy-kept")}, t0.Add(time.Minute), true)
+	s.SaveResult(ctx, "agent-1", "vault", []checker.ExpiryRecord{rec("legacy-kept")}, t0.Add(2*time.Minute), true)
 	got := currentNames(t, s)
 	if got["agent-1/legacy-gone"] || !got["agent-1/legacy-kept"] {
 		t.Fatalf("current: %v", got)
@@ -142,5 +151,52 @@ func TestListCurrent_ForgottenAgentItemsAreGone(t *testing.T) {
 	s.SaveResult(ctx, "agent-1", "vault", []checker.ExpiryRecord{rec("a")}, time.Now().Add(time.Minute), true)
 	if got := currentNames(t, s); !got["agent-1/a"] {
 		t.Fatalf("agent reporting again: %v", got)
+	}
+}
+
+// Another agent still reporting the item keeps it current, even if the
+// newest row came from an agent that no longer sees it.
+func TestListCurrent_OtherAgentStillReporting(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	t0 := time.Now().Add(-time.Hour)
+	s.SaveResult(ctx, "agent-b", "tls-checker", []checker.ExpiryRecord{rec("shared")}, t0, true)
+	s.SaveResult(ctx, "agent-a", "tls-checker", []checker.ExpiryRecord{rec("shared")}, t0.Add(10*time.Minute), true)
+	s.SaveResult(ctx, "agent-a", "tls-checker", nil, t0.Add(20*time.Minute), true)
+	s.SaveResult(ctx, "agent-a", "tls-checker", nil, t0.Add(30*time.Minute), true)
+	if got := currentNames(t, s); !got["agent-b/shared"] {
+		t.Fatalf("item still reported by agent-b hidden: %v", got)
+	}
+}
+
+// Old-version rows of a failing checker must not be hidden by another
+// checker's success.
+func TestListCurrent_LegacyRowsKeptWhileACheckerFails(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	t0 := time.Now().Add(-time.Hour)
+	s.SaveRecords(ctx, "agent-1", []checker.ExpiryRecord{rec("legacy-vault")}, t0)
+	s.RecordCheckerHealth(ctx, "vault", "agent-1", errors.New("sealed"))
+	s.RecordCheckerHealth(ctx, "tls-checker", "agent-1", nil)
+	for i := 1; i <= 2; i++ {
+		s.SaveResult(ctx, "agent-1", "tls-checker", nil, t0.Add(time.Duration(i)*time.Minute), true)
+		s.SaveResult(ctx, "agent-1", "vault", nil, t0.Add(time.Duration(i)*time.Minute), false)
+	}
+	if got := currentNames(t, s); !got["agent-1/legacy-vault"] {
+		t.Fatalf("legacy item of a failing checker hidden: %v", got)
+	}
+}
+
+// Forget uses the agent's own clock: an agent running behind the
+// collector that reports again after being forgotten is shown.
+func TestListCurrent_ForgottenAgentWithSlowClockComesBack(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	slow := time.Now().Add(-2 * time.Hour)
+	s.SaveResult(ctx, "agent-1", "vault", []checker.ExpiryRecord{rec("a")}, slow, true)
+	s.ForgetAgent(ctx, "agent-1")
+	s.SaveResult(ctx, "agent-1", "vault", []checker.ExpiryRecord{rec("a")}, slow.Add(time.Minute), true)
+	if got := currentNames(t, s); !got["agent-1/a"] {
+		t.Fatalf("agent with a slow clock hidden after reporting again: %v", got)
 	}
 }

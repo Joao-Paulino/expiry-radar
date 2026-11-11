@@ -25,6 +25,7 @@ func NewWebhook(url string) *Webhook {
 type webhookPayload struct {
 	Type      string    `json:"type"`
 	Resolved  bool      `json:"resolved"`
+	Gone      bool      `json:"gone,omitempty"`
 	Severity  string    `json:"severity"`
 	Source    string    `json:"source,omitempty"`
 	Name      string    `json:"name,omitempty"`
@@ -43,6 +44,7 @@ func payloadFor(n alert.Notification) webhookPayload {
 	return webhookPayload{
 		Type:      string(t),
 		Resolved:  n.Resolved,
+		Gone:      n.Gone,
 		Agent:     n.Agent,
 		Checker:   n.Checker,
 		Detail:    n.Detail,

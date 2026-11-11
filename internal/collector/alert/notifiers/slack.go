@@ -41,6 +41,9 @@ func messageFor(n alert.Notification) string {
 		return fmt.Sprintf("%s agent %s stopped reporting", tag, n.Agent)
 	default:
 		r := n.Record
+		if n.Gone {
+			return fmt.Sprintf("%s %s/%s (%s) is no longer reported (deleted, renamed or rotated away); verify it was removed on purpose", tag, r.Source, r.Name, r.Kind)
+		}
 		if n.Resolved {
 			return fmt.Sprintf("%s %s/%s (%s) no longer near expiry, now expires at %s", tag, r.Source, r.Name, r.Kind, r.ExpiresAt.Format(time.RFC3339))
 		}

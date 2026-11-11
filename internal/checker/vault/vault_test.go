@@ -168,8 +168,10 @@ func TestCheck_KVSecretsWithExpiryDate(t *testing.T) {
 	cfg := appRoleConfig(t, f)
 	cfg.KVMounts = []string{"secret"}
 	recs, err := newChecker(t, f, cfg).Check(context.Background())
-	if err != nil {
-		t.Fatalf("a bad date must not fail the run: %v", err)
+	// A bad date makes the run incomplete (so the item is not treated as
+	// gone) while every other secret is still reported.
+	if err == nil || !strings.Contains(err.Error(), "apps/bad-date") {
+		t.Fatalf("bad date not reported as an error: %v", err)
 	}
 	got := map[string]checker.ExpiryRecord{}
 	for _, r := range recs {

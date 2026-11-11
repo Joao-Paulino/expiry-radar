@@ -22,13 +22,14 @@ CREATE TABLE IF NOT EXISTS expiry_records (
 );
 CREATE INDEX IF NOT EXISTS idx_expiry_records_key ON expiry_records(source, name, kind);
 
--- When each agent last completed a run of each checker without errors
--- (unix nanoseconds of the check). An item missing from such a run is
+-- The last two error-free runs of each checker on each agent (unix
+-- nanoseconds of the check, agent clock). An item missing from both is
 -- gone; see store.ListCurrent.
 CREATE TABLE IF NOT EXISTS checker_runs (
     agent_id TEXT NOT NULL,
     checker_name TEXT NOT NULL,
     last_complete_at INTEGER NOT NULL,
+    prev_complete_at INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, checker_name)
 );
 
@@ -135,7 +136,12 @@ func migrate(database *sql.DB) error {
 		return err
 	}
 	// Rows written before checker_name existed keep '' (see store.ListCurrent).
-	return addColumnIfMissing(database, "expiry_records", "checker_name", "TEXT NOT NULL DEFAULT ''")
+	if err := addColumnIfMissing(database, "expiry_records", "checker_name", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	// ListCurrent picks the newest row per item and agent.
+	_, err := database.Exec(`CREATE INDEX IF NOT EXISTS idx_expiry_records_item_agent ON expiry_records(source, name, kind, reported_by, checked_at)`)
+	return err
 }
 
 func addColumnIfMissing(database *sql.DB, table, column, decl string) error {
