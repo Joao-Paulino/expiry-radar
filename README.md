@@ -108,12 +108,75 @@ go install github.com/Joao-Paulino/expiry-radar/cmd/agent@latest
 }
 ```
 
-Leave `smtp_host` empty to disable email. Deixa `smtp_host` vazio para desligar o email.
+| Field / Campo | EN | PT |
+|---|---|---|
+| `db_path` | SQLite database file, created if missing | Ficheiro da base de dados SQLite, criado se não existir |
+| `listen_addr` | Address and port the collector listens on (HTTPS only) | Endereço e porta onde o collector escuta (só HTTPS) |
+| `tls_cert_file` | Collector certificate, PEM. See [🔒 Collector certificate](#-collector-certificate--certificado-do-collector) | Certificado do collector, em PEM. Ver [🔒 Certificado](#-collector-certificate--certificado-do-collector) |
+| `tls_key_file` | Private key of that certificate, PEM | Chave privada desse certificado, em PEM |
+| `auth_tokens` | Tokens agents use to send results. See [🔑 Tokens](#-tokens) | Tokens que os agentes usam para enviar resultados. Ver [🔑 Tokens](#-tokens) |
+| `admin_tokens` | Tokens for the dashboard, mute and export. See [🔑 Tokens](#-tokens) | Tokens para o painel, silenciamento e exportação. Ver [🔑 Tokens](#-tokens) |
+| `alert_interval_seconds` | How often alerts are evaluated; `0` disables alerting | De quanto em quanto tempo os alertas são avaliados; `0` desliga os alertas |
+| `slack_webhook_url` / `teams_webhook_url` / `webhook_url` | Incoming webhook URLs; leave empty to disable | URLs de webhook; vazio desliga |
+| `email` | SMTP settings. See [📧 Email](#-email). Empty `smtp_host` disables email | Definições SMTP. Ver [📧 Email](#-email). `smtp_host` vazio desliga o email |
 
 ```bash
 chmod 600 collector.json      # it holds tokens and the SMTP password
 ./collector collector.json
 ```
+
+### 🔒 Collector certificate / Certificado do collector
+
+The collector only speaks HTTPS, so it needs a certificate (`tls_cert_file`) and
+its private key (`tls_key_file`), both in PEM format. The certificate must name
+the address agents use in `collector_url` in its Subject Alternative Name (SAN):
+Go ignores the CN.
+
+O collector só fala HTTPS, por isso precisa de um certificado (`tls_cert_file`)
+e da respetiva chave privada (`tls_key_file`), ambos em PEM. O certificado tem
+de incluir no Subject Alternative Name (SAN) o endereço que os agentes usam em
+`collector_url`: o Go ignora o CN.
+
+| Option / Opção | EN | PT |
+|---|---|---|
+| **A. Public CA** (e.g. Let's Encrypt) | Best when the collector has a public DNS name. Agents trust it with no extra setting. | O melhor quando o collector tem nome DNS público. Os agentes confiam sem configuração extra. |
+| **B. Internal CA** | Use your company PKI. Give agents the CA certificate in `collector_ca_file` unless it is already in the system trust store. | Usa a PKI da empresa. Dá aos agentes o certificado da CA em `collector_ca_file`, se ainda não estiver no repositório de confiança do sistema. |
+| **C. Self-signed** | Quick for labs and small setups. Copy the certificate to every agent as `collector_ca_file`. | Rápido para laboratórios e instalações pequenas. Copia o certificado para cada agente como `collector_ca_file`. |
+
+**A. Let's Encrypt**
+
+```bash
+sudo certbot certonly --standalone -d collector.example.com
+# tls_cert_file: /etc/letsencrypt/live/collector.example.com/fullchain.pem
+# tls_key_file:  /etc/letsencrypt/live/collector.example.com/privkey.pem
+```
+
+**C. Self-signed / Autoassinado** (OpenSSL 1.1.1+; on Windows use the `openssl` bundled with Git for Windows)
+
+```bash
+sudo mkdir -p /etc/expiry-radar
+sudo openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 \
+  -days 365 -nodes \
+  -keyout /etc/expiry-radar/collector.key \
+  -out    /etc/expiry-radar/collector.crt \
+  -subj   "/CN=collector.example.com" \
+  -addext "subjectAltName=DNS:collector.example.com,IP:10.0.0.10"
+sudo chmod 600 /etc/expiry-radar/collector.key
+```
+
+Replace the DNS name and IP with the ones agents will use. Then copy
+`collector.crt` (never the `.key`) to each agent and point `collector_ca_file` to it.
+
+Substitui o nome DNS e o IP pelos que os agentes vão usar. Depois copia o
+`collector.crt` (nunca o `.key`) para cada agente e aponta o `collector_ca_file` para ele.
+
+> 💡 The collector loads its certificate at startup: restart it after renewing.
+> Add the collector itself to an agent's `tls_targets` and Expiry Radar will warn
+> you before its own certificate expires.
+>
+> 💡 O collector carrega o certificado no arranque: reinicia-o depois de o renovar.
+> Junta o próprio collector aos `tls_targets` de um agente e o Expiry Radar avisa-te
+> antes de o seu próprio certificado expirar.
 
 ### 🔑 Tokens
 
@@ -189,8 +252,15 @@ chmod 600 agent.json          # it holds the agent token
 ./agent agent.json
 ```
 
-`collector_ca_file` is only needed for a self-signed collector certificate.
-`collector_ca_file` só é necessário se o collector usar um certificado autoassinado.
+| Field / Campo | EN | PT |
+|---|---|---|
+| `collector_url` | Collector ingest URL; must start with `https://` | URL de ingestão do collector; tem de começar por `https://` |
+| `collector_ca_file` | Collector CA certificate, PEM; only for internal CA or self-signed (options B and C above) | Certificado da CA do collector, em PEM; só para CA interna ou autoassinado (opções B e C acima) |
+| `token` | One of the collector's `auth_tokens` | Um dos `auth_tokens` do collector |
+| `agent_id` | Name of this agent, shown on the dashboard | Nome deste agente, mostrado no painel |
+| `queue_path` | Local file where results wait while the collector is unreachable | Ficheiro local onde os resultados esperam enquanto o collector não responde |
+| `interval_seconds` | Seconds between checks; the first check runs at startup | Segundos entre verificações; a primeira corre no arranque |
+| `tls_targets` | Hosts to check: `host`, `port`, and `start_tls: "smtp"` for mail servers | Servidores a verificar: `host`, `port`, e `start_tls: "smtp"` para servidores de email |
 
 ## ⚠️ Known limitations / Limitações conhecidas
 
