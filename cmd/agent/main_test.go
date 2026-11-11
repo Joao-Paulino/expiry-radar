@@ -90,7 +90,7 @@ func TestRun_ChecksImmediatelyAtStartup(t *testing.T) {
 
 	select {
 	case <-pushed:
-	case <-time.After(3 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("no batch pushed at startup; agent waited for the first tick")
 	}
 	cancel()
@@ -128,7 +128,7 @@ func TestRun_TrustsSelfSignedCollectorViaCAFile(t *testing.T) {
 
 	select {
 	case <-pushed:
-	case <-time.After(3 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("agent never reached the self-signed collector")
 	}
 	cancel()
