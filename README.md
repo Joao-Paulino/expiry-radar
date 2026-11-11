@@ -239,7 +239,8 @@ Depois abre `https://<collector>:8443/` e entra com a password e o código atual
 
 | | EN | PT |
 |---|---|---|
-| 🔒 Lockout | 5 failed logins lock the account for 15 minutes | 5 tentativas falhadas bloqueiam a conta durante 15 minutos |
+| 🔒 Lockout | 5 failed logins from one address block that address for 15 minutes; 20 failures in a row from anywhere lock the account for 15 minutes | 5 tentativas falhadas do mesmo endereço bloqueiam esse endereço durante 15 minutos; 20 falhas seguidas, de qualquer origem, bloqueiam a conta durante 15 minutos |
+| 🧰 Locked out? | The admin token still works with `curl`, and `set-admin-password` clears the lock | O token de administração continua a funcionar com `curl`, e o `set-admin-password` limpa o bloqueio |
 | ⏱️ Session | Ends after 30 min idle or 8 h in total; **Sign out** ends it now | Termina após 30 min sem atividade ou 8 h no total; **Sair** termina-a já |
 | 🔁 Codes | Each authenticator code and each recovery code works only once | Cada código da app e cada código de recuperação só funciona uma vez |
 | 🆘 Lost phone | Run `set-admin-totp` again on the server (new key, new recovery codes) | Corre de novo `set-admin-totp` no servidor (nova chave, novos códigos) |

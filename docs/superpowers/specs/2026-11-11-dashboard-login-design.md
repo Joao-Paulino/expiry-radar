@@ -83,9 +83,16 @@ the HTTP server.
 
 ## 7. Brute-force and replay protection
 
-- After 5 consecutive failed logins the account is locked for 15 minutes;
-  a successful login resets the counter. Lockout is stored in the DB, so it
-  survives restarts.
+- Per client address: 5 failed logins in 15 minutes block that address
+  (in memory), without evaluating further attempts.
+- Account-wide backstop: 20 consecutive failed logins from anywhere lock the
+  account for 15 minutes. Counting and the lock check are one atomic SQL
+  statement, so parallel attempts cannot exceed it. A successful login resets
+  the counter; an expired lock restarts it. Stored in the DB, so it survives
+  restarts. (Revised after the final review: a global limit of 5 let any
+  reachable host lock the only admin out at will.)
+- At most max(1, NumCPU/2) password hashes run at once, and the HTTP server
+  has read/write/idle timeouts, so `/login` cannot exhaust the CPU.
 - TOTP accepts the current step ±1 (30 s each) and rejects any step at or
   below `totp_last_step`.
 - Recovery codes are single use.
