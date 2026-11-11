@@ -37,12 +37,37 @@ CREATE TABLE IF NOT EXISTS rules (
     owner TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (source, name, kind)
 );
+
+CREATE TABLE IF NOT EXISTS admin_account (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    password_hash TEXT NOT NULL DEFAULT '',
+    totp_secret TEXT NOT NULL DEFAULT '',
+    totp_last_step INTEGER NOT NULL DEFAULT 0,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until INTEGER NOT NULL DEFAULT 0, -- unix seconds, 0 = not locked
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS admin_recovery_codes (
+    code_hash TEXT PRIMARY KEY,
+    used_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    id_hash TEXT PRIMARY KEY,
+    csrf_token TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL
+);
 `
 
 // Open opens (creating if absent) a SQLite database at path and runs
 // all schema migrations.
 func Open(path string) (*sql.DB, error) {
-	database, err := sql.Open("sqlite3", path)
+	// busy_timeout makes concurrent writers (ingest, login attempts)
+	// wait for the write lock instead of failing with SQLITE_BUSY.
+	dsn := "file:" + path + "?_pragma=busy_timeout(10000)"
+	database, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, err
 	}
