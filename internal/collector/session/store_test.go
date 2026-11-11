@@ -116,3 +116,26 @@ func TestCookieAttributes(t *testing.T) {
 		t.Fatalf("bad expired cookie: %+v", e)
 	}
 }
+
+// TestStore_DeleteExpired removes sessions that nobody will ever use
+// again, without touching live ones.
+func TestStore_DeleteExpired(t *testing.T) {
+	ctx := context.Background()
+	st, c := newTestStore(t)
+	old, _, _ := st.Create(ctx)
+	c.t = c.t.Add(31 * time.Minute)
+	live, _, _ := st.Create(ctx)
+	n, err := st.DeleteExpired(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("deleted %d, err %v; want 1", n, err)
+	}
+	var count int
+	st.DB.QueryRow(`SELECT COUNT(*) FROM admin_sessions`).Scan(&count)
+	if count != 1 {
+		t.Fatalf("%d sessions left, want 1", count)
+	}
+	if _, ok, _ := st.Lookup(ctx, live); !ok {
+		t.Fatal("live session deleted")
+	}
+	_ = old
+}

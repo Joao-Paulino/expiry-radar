@@ -161,6 +161,36 @@ func runAlertLoop(engine *alert.Engine, ns []notifiers.Notifier, interval time.D
 	}
 }
 
+// securityHeaders forbids framing (clickjacking), MIME sniffing and,
+// since the Collector only serves HTTPS, pins browsers to HTTPS.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Strict-Transport-Security", "max-age=31536000")
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// runSessionCleanup deletes expired sessions every interval until done.
+func runSessionCleanup(sessions *session.Store, interval time.Duration, done <-chan struct{}) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if _, err := sessions.DeleteExpired(context.Background()); err != nil {
+				log.Printf("collector: session cleanup error: %s", logging.Sanitize(err.Error()))
+			}
+		case <-done:
+			return
+		}
+	}
+}
+
 // NewHTTPServer returns the Collector's HTTP server with timeouts, so
 // slow or idle clients cannot hold connections open indefinitely.
 func NewHTTPServer(h http.Handler) *http.Server {
@@ -212,6 +242,12 @@ func Run(cfg Config) error {
 		go runAlertLoop(engine, ns, interval, done)
 	}
 
+	cleanupDone := cfg.Done
+	if cleanupDone == nil {
+		cleanupDone = make(chan struct{})
+	}
+	go runSessionCleanup(sessions, 10*time.Minute, cleanupDone)
+
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
 		return err
@@ -221,7 +257,7 @@ func Run(cfg Config) error {
 		cfg.Ready <- listener.Addr().String()
 	}
 
-	srv := NewHTTPServer(mux)
+	srv := NewHTTPServer(securityHeaders(mux))
 
 	if cfg.Done != nil {
 		go func() {

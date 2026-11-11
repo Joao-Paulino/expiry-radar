@@ -65,6 +65,7 @@ func Middleware(st *Store, adminTokens []string, next http.Handler) http.Handler
 			if ok {
 				if !safeMethod(r.Method) {
 					if subtle.ConstantTimeCompare([]byte(r.PostFormValue("csrf_token")), []byte(sess.CSRFToken)) != 1 {
+						log.Printf("session: CSRF token rejected for %s %s (from %s)", r.Method, logging.Sanitize(r.URL.Path), logging.Sanitize(r.RemoteAddr))
 						http.Error(w, "invalid CSRF token", http.StatusForbidden)
 						return
 					}

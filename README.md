@@ -245,6 +245,8 @@ Depois abre `https://<collector>:8443/` e entra com a password e o código atual
 | 🔁 Codes | Each authenticator code and each recovery code works only once | Cada código da app e cada código de recuperação só funciona uma vez |
 | 🆘 Lost phone | Run `set-admin-totp` again on the server (new key, new recovery codes) | Corre de novo `set-admin-totp` no servidor (nova chave, novos códigos) |
 | 🚪 Sign out everyone | Running either command signs out every open session | Correr qualquer um dos comandos termina todas as sessões abertas |
+| 🔀 Reverse proxy | Login limits and logs use the client address the collector sees; behind a proxy that is the proxy's address, so expose the collector directly | Os limites de login e os logs usam o endereço que o collector vê; atrás de um proxy é o do proxy, por isso expõe o collector diretamente |
+| 📝 Audit | Logins, failures, lockouts, recovery-code use (with codes left) and CSRF rejections are logged; secrets never are | Logins, falhas, bloqueios, uso de códigos de recuperação (com os que restam) e rejeições CSRF ficam no log; segredos nunca |
 | 🕒 Clock | The server clock must be correct (NTP) for codes to match | O relógio do servidor tem de estar certo (NTP) para os códigos baterem certo |
 
 ### 📧 Email

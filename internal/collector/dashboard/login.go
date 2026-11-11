@@ -61,7 +61,7 @@ func LoginHandlers(auth *admin.Authenticator, sessions *session.Store) (get, pos
 			render(w, genericLoginError)
 			return
 		}
-		err := auth.Login(ctx, r.PostFormValue("password"), r.PostFormValue("code"))
+		res, err := auth.Authenticate(ctx, r.PostFormValue("password"), r.PostFormValue("code"))
 		if errors.Is(err, admin.ErrInvalidCredentials) || errors.Is(err, admin.ErrLocked) {
 			throttle.Fail(addr, time.Now())
 		}
@@ -96,7 +96,11 @@ func LoginHandlers(auth *admin.Authenticator, sessions *session.Store) (get, pos
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("dashboard: login success (from %s)", logging.Sanitize(r.RemoteAddr))
+		if res.RecoveryCode {
+			log.Printf("dashboard: login success with a recovery code, %d left (from %s)", res.RecoveryCodesLeft, logging.Sanitize(r.RemoteAddr))
+		} else {
+			log.Printf("dashboard: login success (from %s)", logging.Sanitize(r.RemoteAddr))
+		}
 		http.SetCookie(w, session.Cookie(id))
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})

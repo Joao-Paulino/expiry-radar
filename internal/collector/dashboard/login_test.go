@@ -2,9 +2,11 @@ package dashboard
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -173,5 +175,31 @@ func TestLoginPost_PerAddressThrottle(t *testing.T) {
 	}
 	if rec := attempt("198.51.100.7:5000", loginPassword, code); sessionCookie(rec) == nil {
 		t.Fatalf("other address could not sign in: %s", rec.Body.String())
+	}
+}
+
+func captureLog(t *testing.T) *strings.Builder {
+	t.Helper()
+	var b strings.Builder
+	log.SetOutput(&b)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	return &b
+}
+
+// TestLoginPost_LogsRecoveryCodeUse proves a recovery-code login is
+// visible in the audit log (it usually means a lost phone).
+func TestLoginPost_LogsRecoveryCodeUse(t *testing.T) {
+	e := newLoginEnv(t, true)
+	plain, hashes, _ := admin.NewRecoveryCodes()
+	e.auth.Store.SetTOTP(context.Background(), e.secret, hashes)
+	logs := captureLog(t)
+	if rec := e.postLogin(t, loginPassword, plain[0]); sessionCookie(rec) == nil {
+		t.Fatal("recovery login failed")
+	}
+	if !strings.Contains(logs.String(), "recovery code") || !strings.Contains(logs.String(), "7 left") {
+		t.Fatalf("log does not mention the recovery code: %q", logs.String())
+	}
+	if strings.Contains(logs.String(), plain[0]) {
+		t.Fatal("recovery code written to the log")
 	}
 }

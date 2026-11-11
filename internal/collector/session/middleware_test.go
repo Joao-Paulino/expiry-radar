@@ -2,9 +2,11 @@ package session
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 )
@@ -121,5 +123,29 @@ func TestMiddleware_ExpiredSessionCookieIsUnauthenticated(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("got %d", rec.Code)
+	}
+}
+
+// TestMiddleware_LogsCSRFRejection proves rejected CSRF attempts reach
+// the log with the client address, and never the token itself.
+func TestMiddleware_LogsCSRFRejection(t *testing.T) {
+	st, _ := newTestStore(t)
+	id, s, _ := st.Create(context.Background())
+	var b strings.Builder
+	log.SetOutput(&b)
+	defer log.SetOutput(os.Stderr)
+	var csrf string
+	h := Middleware(st, nil, handlerRecordingCSRF(&csrf))
+	req := httptest.NewRequest("POST", "/rules", strings.NewReader("csrf_token=bogus"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = "203.0.113.5:1234"
+	req.AddCookie(Cookie(id))
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	out := b.String()
+	if !strings.Contains(out, "CSRF") || !strings.Contains(out, "203.0.113.5") {
+		t.Fatalf("CSRF rejection not logged: %q", out)
+	}
+	if strings.Contains(out, s.CSRFToken) || strings.Contains(out, id) {
+		t.Fatal("secret written to the log")
 	}
 }

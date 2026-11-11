@@ -110,6 +110,19 @@ func (s *Store) DeleteAll(ctx context.Context) error {
 	return err
 }
 
+// DeleteExpired removes every session past its idle or absolute
+// timeout, including ones no browser will ever present again, and
+// returns how many were removed.
+func (s *Store) DeleteExpired(ctx context.Context) (int64, error) {
+	now := s.Now()
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM admin_sessions WHERE last_seen_at < ? OR created_at < ?`,
+		now.Add(-idleTimeout).Unix(), now.Add(-absoluteLifetime).Unix())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // Cookie returns the session cookie for id.
 func Cookie(id string) *http.Cookie {
 	return &http.Cookie{Name: CookieName, Value: id, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode}

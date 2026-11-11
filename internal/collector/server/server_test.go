@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -206,5 +207,34 @@ func TestNewHTTPServer_HasTimeouts(t *testing.T) {
 	srv := server.NewHTTPServer(http.NewServeMux())
 	if srv.ReadHeaderTimeout <= 0 || srv.ReadTimeout <= 0 || srv.WriteTimeout <= 0 || srv.IdleTimeout <= 0 {
 		t.Fatalf("missing timeouts: %+v", srv)
+	}
+}
+
+// TestRun_SetsSecurityHeaders proves every response forbids framing
+// (clickjacking) and pins HTTPS (HSTS).
+func TestRun_SetsSecurityHeaders(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := testhelpers.WriteSelfSignedCertForTest(t, dir)
+	addr, stop, err := testhelpers.StartForTest(server.Config{
+		DBPath:      filepath.Join(dir, "radar.db"),
+		ListenAddr:  "127.0.0.1:0",
+		AuthTokens:  []string{"agent-token-0123456789abcdef0123456789"},
+		AdminTokens: []string{"admin-token-0123456789abcdef0123456789"},
+		TLSCertFile: certFile,
+		TLSKeyFile:  keyFile,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	resp, err := client.Get("https://" + addr + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := resp.Header
+	if h.Get("X-Frame-Options") != "DENY" || !strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") ||
+		!strings.HasPrefix(h.Get("Strict-Transport-Security"), "max-age=") || h.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("missing security headers: %v", h)
 	}
 }
