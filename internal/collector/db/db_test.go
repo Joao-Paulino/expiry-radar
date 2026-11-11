@@ -1,6 +1,7 @@
 package db
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -18,6 +19,26 @@ func TestOpen_CreatesSchema(t *testing.T) {
 		err := database.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name)
 		if err != nil {
 			t.Fatalf("table %q not created: %v", table, err)
+		}
+	}
+}
+
+// TestOpen_PathWithSpecialCharacters proves a db_path containing URL
+// metacharacters opens exactly that file, not a truncated path.
+func TestOpen_PathWithSpecialCharacters(t *testing.T) {
+	for _, name := range []string{"hash#dir", "question?dir", "pct%20dir", "space dir"} {
+		dir := filepath.Join(t.TempDir(), name)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "radar.db")
+		database, err := Open(path)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		database.Close()
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s: database not created at %s: %v", name, path, err)
 		}
 	}
 }
