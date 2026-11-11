@@ -119,3 +119,17 @@ func (s *Store) UseRecoveryCode(ctx context.Context, hash string, now time.Time)
 	n, err := res.RowsAffected()
 	return n == 1, err
 }
+
+// ClaimTOTPStep atomically records step as the last used TOTP step if
+// it is newer than the stored one. It returns false when another login
+// already used this (or a later) step, closing the replay race between
+// concurrent logins with the same code.
+func (s *Store) ClaimTOTPStep(ctx context.Context, step int64) (bool, error) {
+	res, err := s.DB.ExecContext(ctx, `UPDATE admin_account SET totp_last_step = ?
+		WHERE id = 1 AND totp_last_step < ?`, step, step)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
