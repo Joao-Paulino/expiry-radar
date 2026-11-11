@@ -49,8 +49,15 @@ func hashID(id string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Create starts a new session and returns its id (for the cookie).
+// Create starts a new session with the default 8-hour lifetime and
+// returns its id (for the cookie).
 func (s *Store) Create(ctx context.Context) (string, Session, error) {
+	return s.CreateWithLifetime(ctx, absoluteLifetime)
+}
+
+// CreateWithLifetime starts a session that ends at most lifetime after
+// creation (SSO sessions are shorter than local ones).
+func (s *Store) CreateWithLifetime(ctx context.Context, lifetime time.Duration) (string, Session, error) {
 	id, err := randomToken()
 	if err != nil {
 		return "", Session{}, err
@@ -60,8 +67,8 @@ func (s *Store) Create(ctx context.Context) (string, Session, error) {
 		return "", Session{}, err
 	}
 	now := s.Now()
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO admin_sessions (id_hash, csrf_token, created_at, last_seen_at)
-		VALUES (?, ?, ?, ?)`, hashID(id), csrf, now.Unix(), now.Unix()); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO admin_sessions (id_hash, csrf_token, created_at, last_seen_at, max_age_seconds)
+		VALUES (?, ?, ?, ?, ?)`, hashID(id), csrf, now.Unix(), now.Unix(), int64(lifetime/time.Second)); err != nil {
 		return "", Session{}, err
 	}
 	return id, Session{CSRFToken: csrf, CreatedAt: now, LastSeenAt: now}, nil
@@ -76,9 +83,9 @@ func (s *Store) Lookup(ctx context.Context, id string) (Session, bool, error) {
 	}
 	h := hashID(id)
 	var sess Session
-	var created, lastSeen int64
-	err := s.DB.QueryRowContext(ctx, `SELECT csrf_token, created_at, last_seen_at FROM admin_sessions WHERE id_hash = ?`, h).
-		Scan(&sess.CSRFToken, &created, &lastSeen)
+	var created, lastSeen, maxAge int64
+	err := s.DB.QueryRowContext(ctx, `SELECT csrf_token, created_at, last_seen_at, max_age_seconds FROM admin_sessions WHERE id_hash = ?`, h).
+		Scan(&sess.CSRFToken, &created, &lastSeen, &maxAge)
 	if err == sql.ErrNoRows {
 		return Session{}, false, nil
 	}
@@ -87,7 +94,7 @@ func (s *Store) Lookup(ctx context.Context, id string) (Session, bool, error) {
 	}
 	sess.CreatedAt, sess.LastSeenAt = time.Unix(created, 0), time.Unix(lastSeen, 0)
 	now := s.Now()
-	if now.Sub(sess.LastSeenAt) > idleTimeout || now.Sub(sess.CreatedAt) > absoluteLifetime {
+	if now.Sub(sess.LastSeenAt) > idleTimeout || now.Sub(sess.CreatedAt) > time.Duration(maxAge)*time.Second {
 		_, err := s.DB.ExecContext(ctx, `DELETE FROM admin_sessions WHERE id_hash = ?`, h)
 		return Session{}, false, err
 	}
@@ -115,8 +122,8 @@ func (s *Store) DeleteAll(ctx context.Context) error {
 // returns how many were removed.
 func (s *Store) DeleteExpired(ctx context.Context) (int64, error) {
 	now := s.Now()
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM admin_sessions WHERE last_seen_at < ? OR created_at < ?`,
-		now.Add(-idleTimeout).Unix(), now.Add(-absoluteLifetime).Unix())
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM admin_sessions WHERE last_seen_at < ? OR created_at + max_age_seconds < ?`,
+		now.Add(-idleTimeout).Unix(), now.Unix())
 	if err != nil {
 		return 0, err
 	}

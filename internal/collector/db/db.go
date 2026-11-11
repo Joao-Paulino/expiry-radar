@@ -82,7 +82,17 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
     id_hash TEXT PRIMARY KEY,
     csrf_token TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    last_seen_at INTEGER NOT NULL
+    last_seen_at INTEGER NOT NULL,
+    max_age_seconds INTEGER NOT NULL DEFAULT 28800 -- absolute lifetime
+);
+
+-- Pending SSO logins: state (hashed), nonce and PKCE verifier; 10 min, single use.
+CREATE TABLE IF NOT EXISTS sso_flows (
+    state_hash TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    verifier TEXT NOT NULL,
+    created_at INTEGER NOT NULL
 );
 `
 
@@ -101,5 +111,38 @@ func Open(path string) (*sql.DB, error) {
 		database.Close()
 		return nil, err
 	}
+	if err := migrate(database); err != nil {
+		database.Close()
+		return nil, err
+	}
 	return database, nil
+}
+
+// migrate upgrades tables created by older versions, where CREATE TABLE
+// IF NOT EXISTS cannot add columns.
+func migrate(database *sql.DB) error {
+	return addColumnIfMissing(database, "admin_sessions", "max_age_seconds", "INTEGER NOT NULL DEFAULT 28800")
+}
+
+func addColumnIfMissing(database *sql.DB, table, column, decl string) error {
+	rows, err := database.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	_, err = database.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + decl)
+	return err
 }

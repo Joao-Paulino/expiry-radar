@@ -139,3 +139,30 @@ func TestStore_DeleteExpired(t *testing.T) {
 	}
 	_ = old
 }
+
+// TestStore_CreateWithLifetime proves an SSO session ends at its own,
+// shorter lifetime, both on lookup and in cleanup.
+func TestStore_CreateWithLifetime(t *testing.T) {
+	ctx := context.Background()
+	st, c := newTestStore(t)
+	id, _, err := st.CreateWithLifetime(ctx, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ { // stay active
+		c.t = c.t.Add(25 * time.Minute)
+		if _, ok, _ := st.Lookup(ctx, id); !ok {
+			t.Fatalf("expired too early at step %d", i)
+		}
+	}
+	c.t = c.t.Add(11 * time.Minute) // 61 min since creation
+	if _, ok, _ := st.Lookup(ctx, id); ok {
+		t.Fatal("SSO session valid beyond its 1h lifetime")
+	}
+	id2, _, _ := st.CreateWithLifetime(ctx, time.Hour)
+	c.t = c.t.Add(61 * time.Minute)
+	if n, _ := st.DeleteExpired(ctx); n != 1 {
+		t.Fatalf("cleanup removed %d sessions, want 1", n)
+	}
+	_ = id2
+}
