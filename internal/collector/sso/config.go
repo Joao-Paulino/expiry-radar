@@ -22,8 +22,10 @@ type ProviderConfig struct {
 
 var nameRe = regexp.MustCompile(`^[a-z0-9-]+$`)
 
-// multiTenant are Entra issuers that accept accounts from any tenant.
-var multiTenant = []string{"/common/", "/organizations/", "/consumers/"}
+// multiTenant are Entra issuer path segments that accept accounts from
+// any tenant or any personal Microsoft account (the last one is the
+// documented tenant ID of personal accounts).
+var multiTenant = []string{"/common/", "/organizations/", "/consumers/", "/9188040d-6c67-4c5b-b112-36a304b66dad/"}
 
 // ClientSecret reads the client secret file, trimmed.
 func (p ProviderConfig) ClientSecret() (string, error) {
@@ -59,7 +61,7 @@ func ValidateProviders(ps []ProviderConfig, publicURL string) error {
 			return fmt.Errorf("sso: provider %q: issuer must be an https URL", p.Name)
 		}
 		for _, mt := range multiTenant {
-			if strings.Contains(iu.Path+"/", mt) {
+			if strings.Contains(strings.ToLower(iu.Path)+"/", mt) {
 				return fmt.Errorf("sso: provider %q: multi-tenant issuer %q would accept accounts from any organization; use your tenant ID", p.Name, p.Issuer)
 			}
 		}

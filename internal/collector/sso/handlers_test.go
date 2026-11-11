@@ -174,3 +174,53 @@ func TestButtons(t *testing.T) {
 		t.Fatalf("got %+v", b)
 	}
 }
+
+// TestLogin_SlowProviderDoesNotBlockOthers proves one unresponsive
+// identity provider never delays logins through another provider.
+func TestLogin_SlowProviderDoesNotBlockOthers(t *testing.T) {
+	e := newEnv(t, emailAllowed())
+	slow := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { time.Sleep(3 * time.Second) }))
+	defer slow.Close()
+	p2 := e.h.Providers[0]
+	p2.Name, p2.Issuer = "slow", slow.URL
+	e.h.Providers = append(e.h.Providers, p2)
+	go func() {
+		rec := httptest.NewRecorder()
+		e.mux.ServeHTTP(rec, httptest.NewRequest("GET", "/auth/slow/login", nil))
+	}()
+	time.Sleep(200 * time.Millisecond)
+	start := time.Now()
+	rec := httptest.NewRecorder()
+	e.mux.ServeHTTP(rec, httptest.NewRequest("GET", "/auth/test/login", nil))
+	if rec.Code != http.StatusFound || time.Since(start) > time.Second {
+		t.Fatalf("healthy provider waited %v (code %d)", time.Since(start), rec.Code)
+	}
+}
+
+// TestLogin_StartsAreThrottled proves anonymous clients cannot fill the
+// database with pending SSO flows.
+func TestLogin_StartsAreThrottled(t *testing.T) {
+	e := newEnv(t, emailAllowed())
+	login := func(addr string) int {
+		req := httptest.NewRequest("GET", "/auth/test/login", nil)
+		req.RemoteAddr = addr
+		rec := httptest.NewRecorder()
+		e.mux.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for i := 0; i < LoginStartsPerAddress; i++ {
+		if c := login("203.0.113.1:1000"); c != http.StatusFound {
+			t.Fatalf("start %d refused: %d", i, c)
+		}
+	}
+	if c := login("203.0.113.1:1001"); c != http.StatusTooManyRequests {
+		t.Fatalf("over the per-address limit: got %d", c)
+	}
+	if c := login("198.51.100.2:1000"); c != http.StatusFound {
+		t.Fatalf("other address refused: %d", c)
+	}
+	e.h.MaxPendingFlows = 1
+	if c := login("192.0.2.3:1000"); c != http.StatusServiceUnavailable {
+		t.Fatalf("over the global cap: got %d", c)
+	}
+}

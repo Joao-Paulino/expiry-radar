@@ -27,6 +27,7 @@ func TestAuthorize(t *testing.T) {
 		{"unverified email", `{"sub":"1","email":"joao@example.com","email_verified":false}`, false, "not verified"},
 		{"email without verification claim", `{"sub":"1","email":"joao@example.com"}`, false, "not verified"},
 		{"group", `{"sub":"1","groups":["other","g-ops"]}`, true, ""},
+		{"group id in other case", `{"sub":"1","groups":["G-OPS"]}`, true, ""},
 		{"role", `{"sub":"1","roles":["ExpiryRadar.Admin"]}`, true, ""},
 		{"groups overage", `{"sub":"1","_claim_names":{"groups":"src1"}}`, false, "overage"},
 		{"nobody", `{"sub":"1","email":"x@example.com","email_verified":true,"groups":["g2"],"roles":["r2"]}`, false, "not allowed"},

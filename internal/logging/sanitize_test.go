@@ -33,3 +33,12 @@ func TestSanitize_NoSecrets(t *testing.T) {
 		t.Fatalf("expected unchanged string, got %q", out)
 	}
 }
+
+// TestSanitize_NeutralizesLineBreaks proves attacker-supplied text can
+// never start a new, forged log line.
+func TestSanitize_NeutralizesLineBreaks(t *testing.T) {
+	got := Sanitize("x\n2026/11/11 10:00:00 sso: login success via google (ceo@corp.com)\r\x1b[2J")
+	if strings.ContainsAny(got, "\r\n\x1b") {
+		t.Fatalf("control characters survived: %q", got)
+	}
+}

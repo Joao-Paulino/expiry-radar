@@ -154,7 +154,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("server: Config.TLSCertFile and TLSKeyFile are required")
 	}
 	if c.SSOSessionHours < 0 || c.SSOSessionHours > 24 {
-		return fmt.Errorf("server: sso_session_hours must be between 1 and 24")
+		return fmt.Errorf("server: sso_session_hours must be between 1 and 24 (0 means the default, 1)")
 	}
 	if len(c.OIDCProviders) > 0 {
 		if err := sso.ValidateProviders(c.OIDCProviders, c.PublicURL); err != nil {
@@ -309,6 +309,7 @@ func Run(cfg Config) error {
 	ssoHandlers := &sso.Handlers{
 		Providers: cfg.OIDCProviders, PublicURL: cfg.PublicURL, Sessions: sessions,
 		Flows: &sso.FlowStore{DB: database, Now: time.Now}, SessionLifetime: cfg.SSOSessionLifetime(),
+		HTTPClient: &http.Client{Timeout: 15 * time.Second}, // discovery, token and signing-key requests
 	}
 	loginGet, loginPost, logout, revokeAll := dashboard.LoginHandlers(authenticator, sessions, ssoHandlers.Buttons())
 

@@ -3,7 +3,11 @@
 // first, so a stack trace or verbose log can never leak a secret.
 package logging
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+	"unicode"
+)
 
 var pemBlockRE = regexp.MustCompile(`(?s)-----BEGIN [^-]+-----.*?-----END [^-]+-----`)
 
@@ -11,9 +15,27 @@ var keyValueRE = regexp.MustCompile(`(?i)(password|secret|token|apikey|api_key|a
 
 // Sanitize scans s for substrings that look like secrets (PEM blocks,
 // or key=value/key: value pairs whose key names a credential) and
-// replaces them with redaction markers.
+// replaces them with redaction markers. It also escapes line breaks and
+// other control characters, so external text can never forge a new log
+// line or drive the terminal.
 func Sanitize(s string) string {
 	s = pemBlockRE.ReplaceAllString(s, "[REDACTED-PEM]")
 	s = keyValueRE.ReplaceAllString(s, "$1=[REDACTED]")
-	return s
+	if strings.IndexFunc(s, unicode.IsControl) < 0 {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case unicode.IsControl(r):
+			b.WriteString("?")
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

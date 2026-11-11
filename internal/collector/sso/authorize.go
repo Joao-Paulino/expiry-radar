@@ -44,11 +44,14 @@ func Authorize(p ProviderConfig, c Claims) (bool, string) {
 			return true, ""
 		}
 	}
-	for _, g := range c.Groups {
-		if slices.Contains(p.AllowedGroups, g) {
+	for _, g := range c.Groups { // object IDs: compare without case
+		if slices.ContainsFunc(p.AllowedGroups, func(a string) bool { return strings.EqualFold(a, g) }) {
 			return true, ""
 		}
 	}
+	// Only an explicit email_verified=true counts. Entra ID tokens do not
+	// carry it (and Microsoft says the email claim is mutable), so an
+	// Entra email never matches: never treat a missing claim as true.
 	if c.Email != "" && len(p.AllowedEmails) > 0 {
 		listed := slices.ContainsFunc(p.AllowedEmails, func(e string) bool { return strings.EqualFold(e, c.Email) })
 		if listed && bool(c.EmailVerified) {

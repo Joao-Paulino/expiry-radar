@@ -29,9 +29,13 @@ func TestValidateProviders(t *testing.T) {
 		"entra common":        func(p *ProviderConfig) { p.Issuer = "https://login.microsoftonline.com/common/v2.0" },
 		"entra organizations": func(p *ProviderConfig) { p.Issuer = "https://login.microsoftonline.com/organizations/v2.0" },
 		"entra consumers":     func(p *ProviderConfig) { p.Issuer = "https://login.microsoftonline.com/consumers/v2.0" },
-		"no client id":        func(p *ProviderConfig) { p.ClientID = "" },
-		"no allow rule":       func(p *ProviderConfig) { p.AllowedGroups = nil },
-		"missing secret":      func(p *ProviderConfig) { p.ClientSecretFile = "/nonexistent" },
+		"entra Common casing": func(p *ProviderConfig) { p.Issuer = "https://login.microsoftonline.com/Common/v2.0" },
+		"entra MSA tenant": func(p *ProviderConfig) {
+			p.Issuer = "https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0"
+		},
+		"no client id":   func(p *ProviderConfig) { p.ClientID = "" },
+		"no allow rule":  func(p *ProviderConfig) { p.AllowedGroups = nil },
+		"missing secret": func(p *ProviderConfig) { p.ClientSecretFile = "/nonexistent" },
 	}
 	for name, mutate := range cases {
 		p := validProvider(t)

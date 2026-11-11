@@ -252,10 +252,11 @@ Qualquer fornecedor OpenID Connect pode ser adicionado, vários ao mesmo tempo; 
 | 🔵 Google | OAuth client (web application). Google tokens carry no groups: use `allowed_emails` (only **verified** emails count) | Cliente OAuth (aplicação web). Os tokens Google não trazem grupos: usa `allowed_emails` (só contam emails **verificados**) |
 | 🚫 Multi-tenant | `/common`, `/organizations` and `/consumers` issuers are refused: use your tenant ID | Emissores `/common`, `/organizations` e `/consumers` são recusados: usa o ID do teu tenant |
 | 👥 200+ groups | Entra omits `groups` when a user has more than 200: use app roles or assign groups to the application | O Entra omite `groups` quando o utilizador tem mais de 200: usa app roles ou atribui grupos à aplicação |
-| ⏱️ Sessions | SSO sessions last at most `sso_session_hours` (default 1, max 24); removing someone at the provider blocks their next login | As sessões SSO duram no máximo `sso_session_hours` (por omissão 1, máx. 24); retirar alguém no fornecedor bloqueia o login seguinte |
+| ⏱️ Sessions | SSO sessions last at most `sso_session_hours` (default 1, max 24); removing someone from the allowed Entra group/role, or from `allowed_emails`, blocks their next login | As sessões SSO duram no máximo `sso_session_hours` (por omissão 1, máx. 24); retirar alguém do grupo/role do Entra autorizado, ou de `allowed_emails`, bloqueia o login seguinte |
 | ✂️ Cut access now | **Sign out all sessions** on the dashboard ends every session immediately | **Terminar todas as sessões** no painel termina todas as sessões de imediato |
 | 🔐 Protections | Authorization Code + PKCE, `state` and `nonce` (single use, 10 min), browser-bound callback, ID token signature/issuer/audience/expiry checks | Authorization Code + PKCE, `state` e `nonce` (uso único, 10 min), callback ligado ao browser, verificação de assinatura/emissor/destinatário/validade do ID token |
 | 🌐 Provider down | The collector and the local login keep working; the SSO button shows an error until the provider is back | O collector e o login local continuam a funcionar; o botão SSO mostra erro até o fornecedor voltar |
+| 🚦 Limits | 20 login starts per address per 10 min; at most 10 000 pending logins | 20 inícios de login por endereço a cada 10 min; no máximo 10 000 logins pendentes |
 
 ### 🔑 Tokens
 

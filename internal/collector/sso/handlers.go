@@ -5,8 +5,10 @@ package sso
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 )
@@ -34,9 +37,22 @@ type Handlers struct {
 	SessionLifetime time.Duration
 	HTTPClient      *http.Client // for provider calls; nil = default
 
-	mu      sync.Mutex
-	clients map[string]*providerClient // discovered lazily, so an IdP outage never blocks startup
+	// MaxPendingFlows caps unfinished logins across all providers
+	// (default 10000), so anonymous requests cannot fill the database.
+	MaxPendingFlows int
+
+	mu       sync.Mutex
+	clients  map[string]*providerClient // discovered lazily, so an IdP outage never blocks startup
+	locks    map[string]*sync.Mutex     // one per provider: a slow provider only delays itself
+	failedAt map[string]time.Time       // recent discovery failures, retried after failureBackoff
+	starts   *admin.Throttle
 }
+
+// LoginStartsPerAddress is how many SSO logins one client address may
+// start per 10 minutes.
+const LoginStartsPerAddress = 20
+
+const failureBackoff = 30 * time.Second
 
 type providerClient struct {
 	oauth    *oauth2.Config
@@ -81,14 +97,58 @@ func (h *Handlers) ctx(ctx context.Context) context.Context {
 	return ctx
 }
 
-// client discovers the provider on first use and caches only success,
-// so a provider that was down is retried on the next login.
+// client discovers the provider on first use and caches only success.
+// Discovery runs under a per-provider lock, so a slow or dead provider
+// never delays another one, and a recent failure is returned at once
+// for failureBackoff instead of hammering the provider.
 func (h *Handlers) client(ctx context.Context, p ProviderConfig) (*providerClient, error) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if c, ok := h.clients[p.Name]; ok {
+		h.mu.Unlock()
 		return c, nil
 	}
+	if t, ok := h.failedAt[p.Name]; ok && time.Since(t) < failureBackoff {
+		h.mu.Unlock()
+		return nil, errors.New("provider discovery failed recently; retrying shortly")
+	}
+	if h.locks == nil {
+		h.locks = map[string]*sync.Mutex{}
+	}
+	l, ok := h.locks[p.Name]
+	if !ok {
+		l = &sync.Mutex{}
+		h.locks[p.Name] = l
+	}
+	h.mu.Unlock()
+
+	l.Lock()
+	defer l.Unlock()
+	h.mu.Lock()
+	if c, ok := h.clients[p.Name]; ok { // another request finished discovery meanwhile
+		h.mu.Unlock()
+		return c, nil
+	}
+	h.mu.Unlock()
+
+	c, err := h.discover(ctx, p)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err != nil {
+		if h.failedAt == nil {
+			h.failedAt = map[string]time.Time{}
+		}
+		h.failedAt[p.Name] = time.Now()
+		return nil, err
+	}
+	if h.clients == nil {
+		h.clients = map[string]*providerClient{}
+	}
+	delete(h.failedAt, p.Name)
+	h.clients[p.Name] = c
+	return c, nil
+}
+
+func (h *Handlers) discover(ctx context.Context, p ProviderConfig) (*providerClient, error) {
 	dctx, cancel := context.WithTimeout(h.ctx(ctx), discoveryTimeout)
 	defer cancel()
 	op, err := oidc.NewProvider(dctx, p.Issuer)
@@ -99,22 +159,47 @@ func (h *Handlers) client(ctx context.Context, p ProviderConfig) (*providerClien
 	if err != nil {
 		return nil, err
 	}
-	c := &providerClient{
+	return &providerClient{
 		oauth: &oauth2.Config{ClientID: p.ClientID, ClientSecret: secret, Endpoint: op.Endpoint(),
 			RedirectURL: RedirectURL(h.PublicURL, p.Name), Scopes: []string{oidc.ScopeOpenID, "email", "profile"}},
 		verifier: op.Verifier(&oidc.Config{ClientID: p.ClientID}),
+	}, nil
+}
+
+func clientAddress(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
 	}
-	if h.clients == nil {
-		h.clients = map[string]*providerClient{}
-	}
-	h.clients[p.Name] = c
-	return c, nil
+	return host
 }
 
 func (h *Handlers) login(w http.ResponseWriter, r *http.Request) {
 	p, ok := h.provider(r.PathValue("name"))
 	if !ok {
 		http.NotFound(w, r)
+		return
+	}
+	addr := clientAddress(r)
+	h.mu.Lock()
+	if h.starts == nil {
+		h.starts = admin.NewThrottle(LoginStartsPerAddress, 10*time.Minute)
+	}
+	starts := h.starts
+	h.mu.Unlock()
+	if starts.Blocked(addr, time.Now()) {
+		log.Printf("sso: login starts throttled (from %s)", logging.Sanitize(addr))
+		http.Error(w, "Too many sign-in attempts; try again later.", http.StatusTooManyRequests)
+		return
+	}
+	starts.Fail(addr, time.Now()) // every start counts
+	max := h.MaxPendingFlows
+	if max <= 0 {
+		max = 10000
+	}
+	if n, err := h.Flows.Pending(r.Context()); err != nil || n >= max {
+		log.Printf("sso: too many pending logins (%d), refusing new ones", n)
+		http.Error(w, "Sign-in is temporarily unavailable; try again later.", http.StatusServiceUnavailable)
 		return
 	}
 	c, err := h.client(r.Context(), p)

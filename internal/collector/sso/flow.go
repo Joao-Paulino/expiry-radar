@@ -82,3 +82,11 @@ func (s *FlowStore) DeleteExpired(ctx context.Context) (int64, error) {
 	}
 	return res.RowsAffected()
 }
+
+// Pending counts unfinished flows (including expired ones not yet
+// cleaned up).
+func (s *FlowStore) Pending(ctx context.Context) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM sso_flows`).Scan(&n)
+	return n, err
+}
