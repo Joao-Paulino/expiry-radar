@@ -19,12 +19,13 @@ func TestIntegration_RealVaultPKI(t *testing.T) {
 		t.Skip("VAULT_TEST_ADDR not set")
 	}
 	c := New(Config{Address: addr, CAFile: os.Getenv("VAULT_TEST_CA"), PKIMounts: []string{"pki"}, KVMounts: []string{"secret"}, CheckTokens: true, AppRoleMounts: []string{"approle"},
-		Auth: Auth{AppRole: &AppRole{RoleID: os.Getenv("VAULT_TEST_ROLE_ID"), SecretIDFile: os.Getenv("VAULT_TEST_SECRET_ID_FILE")}}})
+		LeasePrefixes: []string{"ssh/creds/", "ssh-short/creds/"},
+		Auth:          Auth{AppRole: &AppRole{RoleID: os.Getenv("VAULT_TEST_ROLE_ID"), SecretIDFile: os.Getenv("VAULT_TEST_SECRET_ID_FILE")}}})
 	recs, err := c.Check(context.Background())
 	if err != nil {
 		t.Fatalf("check: %v", err)
 	}
-	var api, old, ca, kv, tok, sid int
+	var api, old, ca, kv, tok, sid, lease int
 	for _, r := range recs {
 		t.Logf("%s %s %s expires %s", r.Kind, r.Name, r.Source, r.ExpiresAt.Format(time.RFC3339))
 		switch {
@@ -44,6 +45,10 @@ func TestIntegration_RealVaultPKI(t *testing.T) {
 			if !strings.Contains(r.Name, "ci-long") {
 				t.Errorf("unexpected token %q (short-lived and root tokens must be skipped)", r.Name)
 			}
+		case r.Kind == "secret" && r.Metadata["role"] == "ssh/creds/otp":
+			lease++
+		case r.Kind == "secret" && strings.HasPrefix(r.Name, "ssh-short/"):
+			t.Errorf("1-hour lease reported: %q", r.Name)
 		case r.Kind == "secret" && strings.HasPrefix(r.Name, "ci secret-id · "):
 			sid++
 		case r.Kind == "secret" && r.Metadata["role"] != "":
@@ -55,8 +60,8 @@ func TestIntegration_RealVaultPKI(t *testing.T) {
 			}
 		}
 	}
-	if api != 1 || old != 0 || ca != 1 || kv != 2 || tok != 1 || sid != 1 {
-		t.Fatalf("api=%d (want 1) revoked=%d (want 0) ca=%d (want 1) kv=%d (want 2) token=%d (want 1) ci secret-id=%d (want 1)",
-			api, old, ca, kv, tok, sid)
+	if api != 1 || old != 0 || ca != 1 || kv != 2 || tok != 1 || sid != 1 || lease != 1 {
+		t.Fatalf("api=%d (want 1) revoked=%d (want 0) ca=%d (want 1) kv=%d (want 2) token=%d (want 1) ci secret-id=%d (want 1) lease=%d (want 1)",
+			api, old, ca, kv, tok, sid, lease)
 	}
 }

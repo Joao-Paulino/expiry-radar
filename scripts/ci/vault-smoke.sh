@@ -27,6 +27,16 @@ v kv put secret/apps/team/db password=never_read >/dev/null
 v kv metadata put -custom-metadata=expires_at=2027-01-15T10:00:00Z secret/apps/team/db >/dev/null
 v kv put secret/no-expiry value=x >/dev/null
 
+# Dynamic secrets without external services: SSH OTP credentials are
+# leased. ssh/ uses the default lease TTL (32 days in dev mode);
+# ssh-short/ issues 1-hour leases, which must be skipped.
+v secrets enable ssh >/dev/null
+v write ssh/roles/otp key_type=otp default_user=ubuntu cidr_list=10.0.0.0/8 >/dev/null
+v write ssh/creds/otp ip=10.0.0.5 >/dev/null
+v secrets enable -path=ssh-short -default-lease-ttl=1h ssh >/dev/null
+v write ssh-short/roles/otp key_type=otp default_user=ubuntu cidr_list=10.0.0.0/8 >/dev/null
+v write ssh-short/creds/otp ip=10.0.0.6 >/dev/null
+
 docker exec -i -e VAULT_ADDR=https://127.0.0.1:8200 -e VAULT_CACERT=/certs/vault-ca.pem -e VAULT_TOKEN=root vault \
   vault policy write expiry-radar - <<'HCL' >/dev/null
 path "pki/certs"    { capabilities = ["list"] }
@@ -39,6 +49,9 @@ path "auth/token/lookup-accessor" { capabilities = ["update"] }
 path "auth/approle/role"                             { capabilities = ["list"] }
 path "auth/approle/role/+/secret-id"                 { capabilities = ["list"] }
 path "auth/approle/role/+/secret-id-accessor/lookup" { capabilities = ["update"] }
+path "sys/leases/lookup/ssh/creds/*"       { capabilities = ["list", "sudo"] }
+path "sys/leases/lookup/ssh-short/creds/*" { capabilities = ["list", "sudo"] }
+path "sys/leases/lookup"                   { capabilities = ["update"] }
 HCL
 v auth enable approle >/dev/null
 v write auth/approle/role/expiry-radar token_policies=expiry-radar token_ttl=5m secret_id_ttl=10m >/dev/null

@@ -40,6 +40,12 @@ type fakeVault struct {
 	tokenDB   map[string]fakeToken                          // accessor -> token metadata
 	selfAcc   string                                        // accessor of the agent's own token
 	secretIDs map[string]map[string]map[string]fakeSecretID // approle mount -> role -> accessor -> secret ID
+	leases    map[string]fakeLease                          // lease id -> lease
+}
+
+// fakeLease is a dynamic secret lease (times in RFC 3339; "" = none).
+type fakeLease struct {
+	issue, lastRenewal, expire string
 }
 
 type fakeToken struct {
@@ -78,7 +84,7 @@ func makePEMCA(t *testing.T, cn string, notAfter time.Time, serial int64, isCA b
 
 func newFakeVault(t *testing.T) *fakeVault {
 	t.Helper()
-	f := &fakeVault{certs: map[string][]fakeCert{}, issuers: map[string]map[string]string{}, issuerNm: map[string]map[string]string{}, kv: map[string]map[string]fakeKV{}, tokenDB: map[string]fakeToken{}, secretIDs: map[string]map[string]map[string]fakeSecretID{}}
+	f := &fakeVault{certs: map[string][]fakeCert{}, issuers: map[string]map[string]string{}, issuerNm: map[string]map[string]string{}, kv: map[string]map[string]fakeKV{}, tokenDB: map[string]fakeToken{}, leases: map[string]fakeLease{}, secretIDs: map[string]map[string]map[string]fakeSecretID{}}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -114,6 +120,44 @@ func (f *fakeVault) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case strings.HasPrefix(p, "sys/leases/lookup/") && isList:
+		prefix := strings.TrimPrefix(p, "sys/leases/lookup/")
+		seen := map[string]bool{}
+		var keys []string
+		for id := range f.leases {
+			if !strings.HasPrefix(id, prefix) {
+				continue
+			}
+			k := strings.TrimPrefix(id, prefix)
+			if i := strings.Index(k, "/"); i >= 0 {
+				k = k[:i+1]
+			}
+			if !seen[k] {
+				seen[k] = true
+				keys = append(keys, k)
+			}
+		}
+		if len(keys) == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		reply(w, map[string]any{"data": map[string]any{"keys": keys}})
+		return
+	case p == "sys/leases/lookup" && (r.Method == http.MethodPost || r.Method == http.MethodPut):
+		var b map[string]string
+		json.NewDecoder(r.Body).Decode(&b)
+		l, ok := f.leases[b["lease_id"]]
+		if !ok {
+			http.Error(w, `{"errors":["invalid lease"]}`, 400)
+			return
+		}
+		var lr any
+		if l.lastRenewal != "" {
+			lr = l.lastRenewal
+		}
+		reply(w, map[string]any{"data": map[string]any{"id": b["lease_id"], "issue_time": l.issue, "expire_time": l.expire,
+			"last_renewal_time": lr, "renewable": true}})
+		return
 	case p == "auth/token/lookup-self":
 		reply(w, map[string]any{"data": map[string]any{"accessor": f.selfAcc}})
 		return
