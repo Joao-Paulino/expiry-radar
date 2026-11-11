@@ -8,9 +8,10 @@
 package main
 
 import (
-	"encoding/json"
+	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/server"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
@@ -20,20 +21,37 @@ import (
 // file given as the binary's only CLI argument.
 type Config = server.Config
 
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage:\n  collector <config.json>\n  collector set-admin-password <config.json>\n  collector set-admin-totp <config.json>")
+	os.Exit(2)
+}
+
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: collector <config.json>")
+		usage()
 	}
 
-	data, err := os.ReadFile(os.Args[1])
+	switch os.Args[1] {
+	case "set-admin-password", "set-admin-totp":
+		if len(os.Args) != 3 {
+			usage()
+		}
+		var err error
+		if os.Args[1] == "set-admin-password" {
+			err = runSetAdminPassword(os.Args[2], os.Stdin, os.Stdout)
+		} else {
+			err = runSetAdminTOTP(os.Args[2], os.Stdin, os.Stdout, time.Now)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "collector: %s\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	cfg, err := loadConfig(os.Args[1])
 	if err != nil {
-		log.Printf("collector: reading config: %s", logging.Sanitize(err.Error()))
-		os.Exit(1)
-	}
-
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		log.Printf("collector: parsing config: %s", logging.Sanitize(err.Error()))
+		log.Printf("collector: %s", logging.Sanitize(err.Error()))
 		os.Exit(1)
 	}
 
