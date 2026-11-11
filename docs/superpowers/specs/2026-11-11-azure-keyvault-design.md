@@ -15,9 +15,10 @@ M3 order (agreed): **1. Key Vault + authentication** → 2. App Registration cre
 - **Which vaults:** `key_vaults` (names; least privilege: *Key Vault Reader* on each) and/or `subscriptions` (discovery via ARM `GET /subscriptions/<id>/resources?$filter=resourceType eq 'Microsoft.KeyVault/vaults'`, needs *Reader* on the subscription; finds new vaults automatically). Both may be set; duplicates are checked once.
 - **What is reported** per vault (data plane api-version 7.5, `nextLink` pagination), current versions only, items with an `exp` attribute only:
   - certificates → kind `certificate`; secrets → kind `secret`; keys → kind `key`;
-  - name = item name; source `azure://<vault>.vault.azure.net`; metadata `vault`, `version`;
+  - name = item name; source `azure://<vault>.vault.azure.net`; metadata `vault`, `version`, plus `location`, `resource_group`, `subscription` when the vault was discovered via ARM (shown on the dashboard and in CSV);
   - skipped: disabled items; secrets and keys with `managed: true` (the ones Key Vault creates behind each certificate; otherwise each certificate would appear three times).
   - Never reads values: list endpoints return attributes only.
+- **Regions and networks:** discovery lists every vault in a subscription whatever its region, and the data plane address is global, so one agent covers all regions. What limits is the network: a vault with public access disabled (private endpoint) or a firewall must be reachable from the agent (VNet + `privatelink.vaultcore.azure.net` DNS, or an allowed IP); otherwise it is that vault's error and the others still count. README explains the typical errors (403 `ForbiddenByFirewall`, DNS) and the one-agent-per-VNet/hub pattern.
 - **Errors:** a failing vault or subscription does not hide the others (records + joined error, as Vault and TLS do). An authentication failure is the checker's error, so the existing failing-checker alert fires.
 - **Validation:** `tenant_id`/`client_id` required for `certificate`/`workload_identity` (after env defaults); vault names `^[A-Za-z][A-Za-z0-9-]{1,22}[A-Za-z0-9]$`; subscription IDs are GUIDs; at least one of `key_vaults`/`subscriptions`.
 
