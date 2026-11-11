@@ -9,5 +9,8 @@
 <p><label>Authenticator or recovery code / Código do autenticador ou de recuperação<br><input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" required></label></p>
 <button type="submit">Sign in / Entrar</button>
 </form>
+{{if .Buttons}}<p>or / ou</p>
+{{range .Buttons}}<p><a href="{{.URL}}">Sign in with {{.Label}} / Entrar com {{.Label}}</a></p>
+{{end}}{{end}}
 </body>
 </html>

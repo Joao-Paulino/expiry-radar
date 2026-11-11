@@ -3,7 +3,8 @@
 <head><title>Expiry Radar</title></head>
 <body>
 <h1>Expiry Radar</h1>
-{{if .CSRF}}<form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit">Sign out / Sair</button></form>{{end}}
+{{if .CSRF}}<form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit">Sign out / Sair</button></form>
+<form method="post" action="/sessions/revoke-all"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit" title="Ends every open dashboard session, including yours">Sign out all sessions / Terminar todas as sessões</button></form>{{end}}
 <table>
 <thead>
 <tr><th>Source</th><th>Name</th><th>Kind</th><th>Expires At</th><th>Reported By</th><th>Checked At</th><th>Muted</th><th>Owner</th></tr>

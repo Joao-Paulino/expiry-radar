@@ -3,7 +3,9 @@ package server_test
 import (
 	"crypto/tls"
 	"encoding/json"
+	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/Joao-Paulino/expiry-radar/internal/auth"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/server"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/sso"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/testhelpers"
 )
 
@@ -255,5 +258,39 @@ func TestConfig_SSOSessionHours(t *testing.T) {
 		if c.Validate() == nil {
 			t.Errorf("sso_session_hours %d accepted", bad)
 		}
+	}
+}
+
+// TestRun_UnreachableSSOProviderDoesNotBlockStartup proves an identity
+// provider outage never stops the collector or the local login.
+func TestRun_UnreachableSSOProviderDoesNotBlockStartup(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := testhelpers.WriteSelfSignedCertForTest(t, dir)
+	secret := filepath.Join(dir, "secret")
+	os.WriteFile(secret, []byte("s"), 0o600)
+	addr, stop, err := testhelpers.StartForTest(server.Config{
+		DBPath: filepath.Join(dir, "radar.db"), ListenAddr: "127.0.0.1:0",
+		AuthTokens:  []string{"agent-token-0123456789abcdef0123456789"},
+		AdminTokens: []string{"admin-token-0123456789abcdef0123456789"},
+		TLSCertFile: certFile, TLSKeyFile: keyFile, PublicURL: "https://collector.test",
+		OIDCProviders: []sso.ProviderConfig{{Name: "down", DisplayName: "Down IdP", Issuer: "https://127.0.0.1:1",
+			ClientID: "c", ClientSecretFile: secret, AllowedEmails: []string{"a@example.com"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	resp, err := client.Get("https://" + addr + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || !strings.Contains(string(b), "Down IdP") {
+		t.Fatalf("login page: %d %s", resp.StatusCode, b)
+	}
+	resp, err = client.Get("https://" + addr + "/auth/down/login")
+	if err != nil || resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("down provider: %v %v", resp.StatusCode, err)
 	}
 }

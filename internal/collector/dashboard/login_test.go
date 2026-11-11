@@ -15,17 +15,19 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/db"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/sso"
 )
 
 const loginPassword = "correct horse battery staple"
 
 type loginEnv struct {
-	auth     *admin.Authenticator
-	sessions *session.Store
-	secret   string
-	get      http.Handler
-	post     http.Handler
-	logout   http.Handler
+	auth      *admin.Authenticator
+	sessions  *session.Store
+	secret    string
+	get       http.Handler
+	post      http.Handler
+	logout    http.Handler
+	revokeAll http.Handler
 }
 
 func newLoginEnv(t *testing.T, configured bool) *loginEnv {
@@ -48,7 +50,7 @@ func newLoginEnv(t *testing.T, configured bool) *loginEnv {
 		_, hashes, _ := admin.NewRecoveryCodes()
 		as.SetTOTP(ctx, e.secret, hashes)
 	}
-	e.get, e.post, e.logout = LoginHandlers(e.auth, e.sessions)
+	e.get, e.post, e.logout, e.revokeAll = LoginHandlers(e.auth, e.sessions, []sso.Button{{Label: "Microsoft", URL: "/auth/microsoft/login"}})
 	return e
 }
 
@@ -147,8 +149,8 @@ func TestListPage_IncludesCSRFFieldForSessions(t *testing.T) {
 	if !strings.Contains(body, `name="csrf_token" value="`+s.CSRFToken+`"`) {
 		t.Fatalf("CSRF field missing: %s", body)
 	}
-	if !strings.Contains(body, `action="/logout"`) {
-		t.Fatal("logout form missing")
+	if !strings.Contains(body, `action="/logout"`) || !strings.Contains(body, `action="/sessions/revoke-all"`) {
+		t.Fatal("logout or revoke-all form missing")
 	}
 }
 
@@ -201,5 +203,34 @@ func TestLoginPost_LogsRecoveryCodeUse(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), plain[0]) {
 		t.Fatal("recovery code written to the log")
+	}
+}
+
+func TestLoginPage_ShowsSSOButtons(t *testing.T) {
+	e := newLoginEnv(t, true)
+	rec := httptest.NewRecorder()
+	e.get.ServeHTTP(rec, httptest.NewRequest("GET", "/login", nil))
+	if !strings.Contains(rec.Body.String(), `href="/auth/microsoft/login"`) || !strings.Contains(rec.Body.String(), "Microsoft") {
+		t.Fatalf("no SSO button: %s", rec.Body.String())
+	}
+}
+
+// TestRevokeAll_EndsEverySession proves the dashboard can cut access
+// for everyone at once (e.g. after removing someone from the IdP group).
+func TestRevokeAll_EndsEverySession(t *testing.T) {
+	e := newLoginEnv(t, true)
+	a, _, _ := e.sessions.Create(context.Background())
+	b, _, _ := e.sessions.Create(context.Background())
+	req := httptest.NewRequest("POST", "/sessions/revoke-all", nil)
+	req.AddCookie(session.Cookie(a))
+	rec := httptest.NewRecorder()
+	e.revokeAll.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/login" {
+		t.Fatalf("code=%d location=%q", rec.Code, rec.Header().Get("Location"))
+	}
+	for _, id := range []string{a, b} {
+		if _, ok, _ := e.sessions.Lookup(context.Background(), id); ok {
+			t.Fatal("a session survived revoke-all")
+		}
 	}
 }

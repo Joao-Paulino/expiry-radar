@@ -256,7 +256,7 @@ func securityHeaders(next http.Handler) http.Handler {
 }
 
 // runSessionCleanup deletes expired sessions every interval until done.
-func runSessionCleanup(sessions *session.Store, interval time.Duration, done <-chan struct{}) {
+func runSessionCleanup(sessions *session.Store, flows *sso.FlowStore, interval time.Duration, done <-chan struct{}) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -264,6 +264,9 @@ func runSessionCleanup(sessions *session.Store, interval time.Duration, done <-c
 		case <-ticker.C:
 			if _, err := sessions.DeleteExpired(context.Background()); err != nil {
 				log.Printf("collector: session cleanup error: %s", logging.Sanitize(err.Error()))
+			}
+			if _, err := flows.DeleteExpired(context.Background()); err != nil {
+				log.Printf("collector: SSO flow cleanup error: %s", logging.Sanitize(err.Error()))
 			}
 		case <-done:
 			return
@@ -303,12 +306,20 @@ func Run(cfg Config) error {
 
 	sessions := &session.Store{DB: database, Now: time.Now}
 	authenticator := &admin.Authenticator{Store: &admin.Store{DB: database}, Now: time.Now}
-	loginGet, loginPost, logout := dashboard.LoginHandlers(authenticator, sessions)
+	ssoHandlers := &sso.Handlers{
+		Providers: cfg.OIDCProviders, PublicURL: cfg.PublicURL, Sessions: sessions,
+		Flows: &sso.FlowStore{DB: database, Now: time.Now}, SessionLifetime: cfg.SSOSessionLifetime(),
+	}
+	loginGet, loginPost, logout, revokeAll := dashboard.LoginHandlers(authenticator, sessions, ssoHandlers.Buttons())
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /login", loginGet)
 	mux.Handle("POST /login", loginPost)
 	mux.Handle("POST /logout", session.Middleware(sessions, cfg.AdminTokens, logout))
+	mux.Handle("POST /sessions/revoke-all", session.Middleware(sessions, cfg.AdminTokens, revokeAll))
+	if len(cfg.OIDCProviders) > 0 {
+		ssoHandlers.Register(mux)
+	}
 	mux.Handle("/", session.Middleware(sessions, cfg.AdminTokens, dashboardMux))
 	mux.Handle("POST /ingest", auth.Middleware(cfg.AuthTokens, ingest.Handler(st)))
 
@@ -328,7 +339,7 @@ func Run(cfg Config) error {
 	if cleanupDone == nil {
 		cleanupDone = make(chan struct{})
 	}
-	go runSessionCleanup(sessions, 10*time.Minute, cleanupDone)
+	go runSessionCleanup(sessions, ssoHandlers.Flows, 10*time.Minute, cleanupDone)
 
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {

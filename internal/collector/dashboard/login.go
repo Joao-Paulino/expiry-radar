@@ -9,6 +9,7 @@ import (
 
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/sso"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 )
 
@@ -25,7 +26,8 @@ func clientAddress(r *http.Request) string {
 }
 
 type loginView struct {
-	Error string
+	Error   string
+	Buttons []sso.Button
 }
 
 // genericLoginError is shown for every failure, so the page never
@@ -36,11 +38,13 @@ const genericLoginError = "Invalid credentials. / Credenciais inválidas."
 // LoginHandlers returns the login page (GET), the login form handler
 // (POST) and the logout handler. get and post are public; logout must
 // be wrapped in session.Middleware so it is CSRF-protected.
-func LoginHandlers(auth *admin.Authenticator, sessions *session.Store) (get, post, logout http.Handler) {
+// buttons are the SSO providers shown on the login page. revokeAll
+// ends every session and, like logout, must sit behind session.Middleware.
+func LoginHandlers(auth *admin.Authenticator, sessions *session.Store, buttons []sso.Button) (get, post, logout, revokeAll http.Handler) {
 	render := func(w http.ResponseWriter, msg string) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		if err := templates.ExecuteTemplate(w, "login.html", loginView{Error: msg}); err != nil {
+		if err := templates.ExecuteTemplate(w, "login.html", loginView{Error: msg, Buttons: buttons}); err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
 	}
@@ -115,5 +119,15 @@ func LoginHandlers(auth *admin.Authenticator, sessions *session.Store) (get, pos
 		http.SetCookie(w, session.ExpiredCookie())
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	})
-	return get, post, logout
+	revokeAll = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := sessions.DeleteAll(r.Context()); err != nil {
+			log.Printf("dashboard: revoke-all error: %s", logging.Sanitize(err.Error()))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("dashboard: all sessions signed out (from %s)", logging.Sanitize(r.RemoteAddr))
+		http.SetCookie(w, session.ExpiredCookie())
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	})
+	return get, post, logout, revokeAll
 }
