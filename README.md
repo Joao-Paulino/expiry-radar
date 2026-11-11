@@ -225,6 +225,38 @@ Substitui o nome DNS e o IP pelos que os agentes vão usar. Depois copia o
 The dashboard's **Agents** section shows every agent and checker with last seen, last success and failures.
 A secção **Agents** do painel mostra cada agente e verificador com a última vez visto, último sucesso e falhas.
 
+### 🪪 SSO (Microsoft Entra ID, Google)
+
+Any OpenID Connect provider can be added, several at once; each gets a button on the login page. The local Administrator (password + TOTP) stays as the break-glass account.
+Qualquer fornecedor OpenID Connect pode ser adicionado, vários ao mesmo tempo; cada um tem um botão na página de login. O Administrator local (password + TOTP) fica como conta de emergência.
+
+```json
+"public_url": "https://collector.example.com:8443",
+"sso_session_hours": 1,
+"oidc_providers": [
+  { "name": "microsoft", "display_name": "Microsoft",
+    "issuer": "https://login.microsoftonline.com/<tenant-id>/v2.0",
+    "client_id": "<application (client) id>", "client_secret_file": "/etc/expiry-radar/entra.secret",
+    "allowed_groups": ["<group object id>"], "allowed_roles": ["ExpiryRadar.Admin"] },
+  { "name": "google", "display_name": "Google",
+    "issuer": "https://accounts.google.com",
+    "client_id": "<client id>", "client_secret_file": "/etc/expiry-radar/google.secret",
+    "allowed_emails": ["joao@example.com"] }
+]
+```
+
+| | EN | PT |
+|---|---|---|
+| ↩️ Redirect URI | Register `<public_url>/auth/<name>/callback` with the provider | Regista `<public_url>/auth/<name>/callback` no fornecedor |
+| 🏢 Entra ID | App registration (single tenant), web redirect URI, client secret in a file (`chmod 600`). Authorize with **groups** (`groups` claim: token configuration → groups) or **app roles** (`roles` claim). Microsoft advises against authorizing on email | Registo de aplicação (single tenant), redirect URI web, client secret num ficheiro (`chmod 600`). Autoriza por **grupos** (claim `groups`: token configuration → groups) ou **app roles** (claim `roles`). A Microsoft desaconselha autorizar pelo email |
+| 🔵 Google | OAuth client (web application). Google tokens carry no groups: use `allowed_emails` (only **verified** emails count) | Cliente OAuth (aplicação web). Os tokens Google não trazem grupos: usa `allowed_emails` (só contam emails **verificados**) |
+| 🚫 Multi-tenant | `/common`, `/organizations` and `/consumers` issuers are refused: use your tenant ID | Emissores `/common`, `/organizations` e `/consumers` são recusados: usa o ID do teu tenant |
+| 👥 200+ groups | Entra omits `groups` when a user has more than 200: use app roles or assign groups to the application | O Entra omite `groups` quando o utilizador tem mais de 200: usa app roles ou atribui grupos à aplicação |
+| ⏱️ Sessions | SSO sessions last at most `sso_session_hours` (default 1, max 24); removing someone at the provider blocks their next login | As sessões SSO duram no máximo `sso_session_hours` (por omissão 1, máx. 24); retirar alguém no fornecedor bloqueia o login seguinte |
+| ✂️ Cut access now | **Sign out all sessions** on the dashboard ends every session immediately | **Terminar todas as sessões** no painel termina todas as sessões de imediato |
+| 🔐 Protections | Authorization Code + PKCE, `state` and `nonce` (single use, 10 min), browser-bound callback, ID token signature/issuer/audience/expiry checks | Authorization Code + PKCE, `state` e `nonce` (uso único, 10 min), callback ligado ao browser, verificação de assinatura/emissor/destinatário/validade do ID token |
+| 🌐 Provider down | The collector and the local login keep working; the SSO button shows an error until the provider is back | O collector e o login local continuam a funcionar; o botão SSO mostra erro até o fornecedor voltar |
+
 ### 🔑 Tokens
 
 Tokens are shared secrets, so generate them randomly; never invent them.
@@ -370,7 +402,7 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 **Still open in M1 / Ainda em aberto no M1**
 
 - [x] Dashboard login (password + TOTP) / Login no painel (password + TOTP)
-- [ ] SSO via OIDC (Entra ID, Google) / SSO via OIDC (Entra ID, Google)
+- [x] SSO via OIDC (Entra ID, Google) / SSO via OIDC (Entra ID, Google)
 - [x] Alert deduplication / Deduplicação de alertas
 - [x] Alerts for failing checkers and silent agents / Alertas de verificadores em falha e agentes silenciosos
 - [x] Agent validated on Rocky Linux 9 (RedHat family), Debian 12, Arch in CI / Agente validado em Rocky Linux 9 (família RedHat), Debian 12, Arch no CI
