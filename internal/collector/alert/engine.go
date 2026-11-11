@@ -70,20 +70,55 @@ func Evaluate(record store.StoredRecord, now time.Time, thresholds Thresholds) S
 	}
 }
 
-// Notification pairs a StoredRecord with its computed Severity and
-// whether a mute rule applies to it.
+// Type is what a Notification is about.
+type Type string
+
+const (
+	TypeExpiry        Type = "expiry"         // a record nears or passed expiry
+	TypeCheckerFailed Type = "checker_failed" // a checker keeps failing on an agent
+	TypeAgentSilent   Type = "agent_silent"   // an agent stopped reporting
+)
+
+// Notification is one evaluated alert subject. For TypeExpiry, Record
+// is set; for health types, Agent (and Checker) are.
 type Notification struct {
+	Type     Type
 	Record   store.StoredRecord
+	Agent    string
+	Checker  string
+	Detail   string // last checker error, for TypeCheckerFailed
 	Severity Severity
 	Muted    bool
+	Resolved bool // set by the sender when this reports a return to OK
 }
+
+// Key identifies the alert subject for deduplication.
+func (n Notification) Key() string {
+	switch n.Type {
+	case TypeCheckerFailed:
+		return "checker|" + n.Agent + "|" + n.Checker
+	case TypeAgentSilent:
+		return "agent|" + n.Agent
+	default:
+		return "expiry|" + n.Record.Source + "|" + n.Record.Name + "|" + n.Record.Kind
+	}
+}
+
+const (
+	defaultFailThreshold = 3
+	defaultStaleAfter    = 3 * time.Hour
+)
 
 // Engine evaluates every current record against Thresholds and Rules.
 type Engine struct {
 	Store      store.Store
 	Rules      rules.Store
 	Thresholds Thresholds
-	StaleAfter time.Duration
+	// FailThreshold is how many consecutive failures make a checker
+	// alert (default 3); StaleAfter is how long an agent may stay
+	// silent before it alerts (default 3h).
+	FailThreshold int
+	StaleAfter    time.Duration
 }
 
 // Evaluate returns one Notification per current record, with muted
@@ -103,10 +138,48 @@ func (e *Engine) Evaluate(ctx context.Context, now time.Time) ([]Notification, e
 		}
 
 		notifications = append(notifications, Notification{
+			Type:     TypeExpiry,
 			Record:   record,
 			Severity: Evaluate(record, now, e.Thresholds),
 			Muted:    found && rule.Muted,
 		})
+	}
+
+	health, err := e.Store.CheckerHealth(ctx)
+	if err != nil {
+		return nil, err
+	}
+	failThreshold, staleAfter := e.FailThreshold, e.StaleAfter
+	if failThreshold <= 0 {
+		failThreshold = defaultFailThreshold
+	}
+	if staleAfter <= 0 {
+		staleAfter = defaultStaleAfter
+	}
+
+	lastSeen := map[string]time.Time{}
+	var agents []string
+	for _, h := range health {
+		sev := SeverityOK
+		if h.ConsecutiveFailures >= failThreshold {
+			sev = SeverityCritical
+		}
+		notifications = append(notifications, Notification{
+			Type: TypeCheckerFailed, Agent: h.ReportedBy, Checker: h.CheckerName, Detail: h.LastError, Severity: sev,
+		})
+		if _, seen := lastSeen[h.ReportedBy]; !seen {
+			agents = append(agents, h.ReportedBy)
+		}
+		if h.LastSeenAt.After(lastSeen[h.ReportedBy]) {
+			lastSeen[h.ReportedBy] = h.LastSeenAt
+		}
+	}
+	for _, agent := range agents {
+		sev := SeverityOK
+		if now.Sub(lastSeen[agent]) > staleAfter {
+			sev = SeverityCritical
+		}
+		notifications = append(notifications, Notification{Type: TypeAgentSilent, Agent: agent, Severity: sev})
 	}
 
 	return notifications, nil

@@ -12,6 +12,7 @@ import (
 
 type fakeStore struct {
 	current []store.StoredRecord
+	health  []store.CheckerHealth
 }
 
 func (f *fakeStore) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error {
@@ -27,7 +28,7 @@ func (f *fakeStore) History(ctx context.Context, source, name, kind string) ([]s
 	return nil, nil
 }
 func (f *fakeStore) CheckerHealth(ctx context.Context) ([]store.CheckerHealth, error) {
-	return nil, nil
+	return f.health, nil
 }
 
 type fakeRulesStore struct {
@@ -77,5 +78,62 @@ func TestEngine_Evaluate_MutedRecordStillReturnedButMarkedMuted(t *testing.T) {
 	}
 	if notifications[0].Severity != "critical" {
 		t.Fatalf("Severity = %q, want critical", notifications[0].Severity)
+	}
+}
+
+func healthOnly(ns []Notification) map[string]Notification {
+	m := map[string]Notification{}
+	for _, n := range ns {
+		if n.Type != TypeExpiry {
+			m[n.Key()] = n
+		}
+	}
+	return m
+}
+
+// TestEngine_Evaluate_CheckerFailedAndAgentSilent proves health turns
+// into notifications at the configured boundaries, per agent.
+func TestEngine_Evaluate_CheckerFailedAndAgentSilent(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	st := &fakeStore{health: []store.CheckerHealth{
+		{CheckerName: "tls", ReportedBy: "web-01", LastSeenAt: now.Add(-time.Hour), ConsecutiveFailures: 3, LastError: "timeout"},
+		{CheckerName: "tls", ReportedBy: "web-02", LastSeenAt: now.Add(-time.Hour), ConsecutiveFailures: 2},
+		{CheckerName: "tls", ReportedBy: "web-03", LastSeenAt: now.Add(-3*time.Hour - time.Minute)},
+		{CheckerName: "tls", ReportedBy: "web-04", LastSeenAt: now.Add(-3 * time.Hour)},
+	}}
+	e := &Engine{Store: st, Rules: &fakeRulesStore{}, Thresholds: DefaultThresholds(), FailThreshold: 3, StaleAfter: 3 * time.Hour}
+	ns, err := e.Evaluate(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := healthOnly(ns)
+	want := map[string]Severity{
+		"checker|web-01|tls": SeverityCritical, // 3 failures = threshold
+		"checker|web-02|tls": SeverityOK,
+		"checker|web-03|tls": SeverityOK,
+		"checker|web-04|tls": SeverityOK,
+		"agent|web-01":       SeverityOK,
+		"agent|web-02":       SeverityOK,
+		"agent|web-03":       SeverityCritical, // silent > 3h
+		"agent|web-04":       SeverityOK,       // exactly 3h
+	}
+	for k, sev := range want {
+		n, ok := h[k]
+		if !ok || n.Severity != sev {
+			t.Errorf("%s: got %+v (present=%v), want %s", k, n, ok, sev)
+		}
+	}
+	if n := h["checker|web-01|tls"]; n.Type != TypeCheckerFailed || n.Agent != "web-01" || n.Checker != "tls" || n.Detail != "timeout" {
+		t.Errorf("checker notification fields: %+v", n)
+	}
+	if n := h["agent|web-03"]; n.Type != TypeAgentSilent || n.Agent != "web-03" {
+		t.Errorf("agent notification fields: %+v", n)
+	}
+}
+
+func TestNotification_KeyForExpiry(t *testing.T) {
+	n := Notification{Type: TypeExpiry, Record: store.StoredRecord{ExpiryRecord: checker.ExpiryRecord{Source: "a:443", Name: "a", Kind: "certificate"}}}
+	if n.Key() != "expiry|a:443|a|certificate" {
+		t.Fatalf("got %q", n.Key())
 	}
 }
