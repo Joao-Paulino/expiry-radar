@@ -22,6 +22,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/ingest"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/rules"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/sso"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/store"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 )
@@ -47,16 +48,21 @@ type Config struct {
 	AlertInterval        time.Duration `json:"-"`
 	AlertIntervalSeconds int           `json:"alert_interval_seconds"`
 	// Alert noise and health settings (see README); nil/0 = default.
-	ReminderCriticalHours *int                  `json:"reminder_critical_hours"` // default 24, 0 = never
-	ReminderWarningHours  *int                  `json:"reminder_warning_hours"`  // default 0 = never
-	CheckerFailThreshold  int                   `json:"checker_fail_threshold"`  // default 3
-	AgentStaleHours       int                   `json:"agent_stale_hours"`       // default 3
-	WebhookURL            string                `json:"webhook_url"`
-	SlackWebhookURL       string                `json:"slack_webhook_url"`
-	TeamsWebhookURL       string                `json:"teams_webhook_url"`
-	Email                 notifiers.EmailConfig `json:"email"`
-	TLSCertFile           string                `json:"tls_cert_file"`
-	TLSKeyFile            string                `json:"tls_key_file"`
+	ReminderCriticalHours *int `json:"reminder_critical_hours"` // default 24, 0 = never
+	ReminderWarningHours  *int `json:"reminder_warning_hours"`  // default 0 = never
+	CheckerFailThreshold  int  `json:"checker_fail_threshold"`  // default 3
+	AgentStaleHours       int  `json:"agent_stale_hours"`       // default 3
+	// SSO (OIDC). PublicURL is the HTTPS address browsers use, for
+	// redirect URIs. SSOSessionHours bounds SSO sessions (default 1, max 24).
+	PublicURL       string                `json:"public_url"`
+	OIDCProviders   []sso.ProviderConfig  `json:"oidc_providers"`
+	SSOSessionHours int                   `json:"sso_session_hours"`
+	WebhookURL      string                `json:"webhook_url"`
+	SlackWebhookURL string                `json:"slack_webhook_url"`
+	TeamsWebhookURL string                `json:"teams_webhook_url"`
+	Email           notifiers.EmailConfig `json:"email"`
+	TLSCertFile     string                `json:"tls_cert_file"`
+	TLSKeyFile      string                `json:"tls_key_file"`
 
 	// Ready, if non-nil, receives the actual bound address once the
 	// listener starts, letting tests use ListenAddr "host:0".
@@ -104,6 +110,14 @@ func (c Config) agentStaleAfter() time.Duration {
 	return 3 * time.Hour
 }
 
+// SSOSessionLifetime is the maximum lifetime of an SSO session.
+func (c Config) SSOSessionLifetime() time.Duration {
+	if c.SSOSessionHours <= 0 {
+		return time.Hour
+	}
+	return time.Duration(c.SSOSessionHours) * time.Hour
+}
+
 // Validate reports an error describing the first missing required
 // field, so a misconfigured Collector fails fast and loudly instead
 // of starting up silently non-functional (no auth tokens, an empty
@@ -138,6 +152,14 @@ func (c Config) Validate() error {
 	}
 	if c.TLSCertFile == "" || c.TLSKeyFile == "" {
 		return fmt.Errorf("server: Config.TLSCertFile and TLSKeyFile are required")
+	}
+	if c.SSOSessionHours < 0 || c.SSOSessionHours > 24 {
+		return fmt.Errorf("server: sso_session_hours must be between 1 and 24")
+	}
+	if len(c.OIDCProviders) > 0 {
+		if err := sso.ValidateProviders(c.OIDCProviders, c.PublicURL); err != nil {
+			return err
+		}
 	}
 	if c.Email.SMTPHost != "" {
 		if err := c.Email.Validate(); err != nil {

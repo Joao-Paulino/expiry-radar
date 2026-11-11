@@ -238,3 +238,22 @@ func TestRun_SetsSecurityHeaders(t *testing.T) {
 		t.Fatalf("missing security headers: %v", h)
 	}
 }
+
+// TestConfig_SSOSessionHours proves the SSO session lifetime defaults to
+// 1 hour and stays within 1..24 hours.
+func TestConfig_SSOSessionHours(t *testing.T) {
+	for in, want := range map[int]time.Duration{0: time.Hour, 1: time.Hour, 8: 8 * time.Hour} {
+		if got := (server.Config{SSOSessionHours: in}).SSOSessionLifetime(); got != want {
+			t.Errorf("%d: got %v want %v", in, got, want)
+		}
+	}
+	base := server.Config{DBPath: "x", ListenAddr: "x", TLSCertFile: "x", TLSKeyFile: "x",
+		AuthTokens: []string{"agent-token-0123456789abcdef0123456789"}, AdminTokens: []string{"admin-token-0123456789abcdef0123456789"}}
+	for _, bad := range []int{-1, 25} {
+		c := base
+		c.SSOSessionHours = bad
+		if c.Validate() == nil {
+			t.Errorf("sso_session_hours %d accepted", bad)
+		}
+	}
+}
