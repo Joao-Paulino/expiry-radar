@@ -373,7 +373,7 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 - [ ] SSO via OIDC (Entra ID, Google) / SSO via OIDC (Entra ID, Google)
 - [x] Alert deduplication / Deduplicação de alertas
 - [x] Alerts for failing checkers and silent agents / Alertas de verificadores em falha e agentes silenciosos
-- [ ] Agent validated on RedHat, Debian, Arch / Agente validado em RedHat, Debian, Arch
+- [x] Agent validated on Rocky Linux 9 (RedHat family), Debian 12, Arch in CI / Agente validado em Rocky Linux 9 (família RedHat), Debian 12, Arch no CI
 - [x] GitHub release with binaries per platform / Release no GitHub com binários por plataforma
 - [x] Docker images for agent and collector / Imagens Docker do agente e do collector
 
