@@ -1,0 +1,8 @@
+.git
+.github
+.claude
+.superpowers
+dist
+go.work
+go.work.sum
+*.db

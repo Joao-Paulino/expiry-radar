@@ -1,0 +1,33 @@
+# Example: collector + one agent on the same host.
+# 1. Put collector.json, agent.json and the collector certificate/key in ./config
+#    (in collector.json use "db_path": "/data/radar.db" and the /etc/expiry-radar/... cert paths).
+# 2. docker compose -f docker-compose.example.yml up -d
+# 3. docker compose -f docker-compose.example.yml run --rm -it collector set-admin-password /etc/expiry-radar/collector.json
+#    docker compose -f docker-compose.example.yml run --rm -it collector set-admin-totp /etc/expiry-radar/collector.json
+services:
+  collector:
+    image: ghcr.io/joao-paulino/expiry-radar-collector:latest
+    restart: unless-stopped
+    ports: ["8443:8443"]
+    volumes:
+      - ./config:/etc/expiry-radar:ro
+      - collector-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  agent:
+    image: ghcr.io/joao-paulino/expiry-radar-agent:latest
+    restart: unless-stopped
+    volumes:
+      - ./config/agent.json:/etc/expiry-radar/agent.json:ro
+      - ./config/collector.crt:/etc/expiry-radar/collector-ca.pem:ro
+      - agent-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: [collector]
+
+volumes:
+  collector-data:
+  agent-data:

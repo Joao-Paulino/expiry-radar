@@ -149,6 +149,9 @@ func run(ctx context.Context, cfg Config) error {
 }
 
 func main() {
+	if handleVersion(os.Args, os.Stdout) {
+		return
+	}
 	if len(os.Args) < 2 {
 		log.Fatal("usage: agent <config.json>")
 	}

@@ -22,11 +22,14 @@ import (
 type Config = server.Config
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  collector <config.json>\n  collector set-admin-password <config.json>\n  collector set-admin-totp <config.json>")
+	fmt.Fprintln(os.Stderr, "usage:\n  collector <config.json>\n  collector version\n  collector set-admin-password <config.json>\n  collector set-admin-totp <config.json>")
 	os.Exit(2)
 }
 
 func main() {
+	if handleVersion(os.Args, os.Stdout) {
+		return
+	}
 	if len(os.Args) < 2 {
 		usage()
 	}

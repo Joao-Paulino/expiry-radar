@@ -61,6 +61,33 @@ antes que algo expire.
                                         └──────────────────────┘
 ```
 
+## 📦 Install / Instalar
+
+**Binaries / Binários:** download from [Releases](https://github.com/Joao-Paulino/expiry-radar/releases) and check them:
+descarrega de [Releases](https://github.com/Joao-Paulino/expiry-radar/releases) e verifica:
+
+```bash
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify expiry-radar-agent-<version>-linux-amd64 --repo Joao-Paulino/expiry-radar   # build provenance
+./expiry-radar-agent-<version>-linux-amd64 version
+```
+
+| Binary / Binário | Platforms / Plataformas |
+|---|---|
+| `expiry-radar-collector` | Linux amd64, arm64 |
+| `expiry-radar-agent` | Linux amd64, arm64 · Windows amd64 |
+
+**Docker:** multi-arch images (amd64, arm64), distroless, non-root / imagens multi-arquitetura, distroless, sem root:
+
+```bash
+docker pull ghcr.io/joao-paulino/expiry-radar-collector:latest
+docker pull ghcr.io/joao-paulino/expiry-radar-agent:latest
+```
+
+Full example / Exemplo completo: [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml).
+The images have no `stty`, so `set-admin-password` shows the password while you type (it warns you).
+As imagens não têm `stty`, por isso o `set-admin-password` mostra a password enquanto escreves (e avisa).
+
 ## 🚀 Quick start / Início rápido
 
 Requires Go 1.24 · Requer Go 1.24
@@ -70,7 +97,7 @@ git clone https://github.com/Joao-Paulino/expiry-radar.git
 cd expiry-radar
 go test ./...
 go build -o collector ./cmd/collector
-./scripts/build-agent.sh   # dist/agent-{windows-amd64.exe,linux-amd64,linux-arm64}
+./scripts/build-release.sh   # all binaries + SHA256SUMS in dist/ / todos os binários + SHA256SUMS em dist/
 ```
 
 Or install directly / Ou instala diretamente:
@@ -347,8 +374,8 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 - [x] Alert deduplication / Deduplicação de alertas
 - [x] Alerts for failing checkers and silent agents / Alertas de verificadores em falha e agentes silenciosos
 - [ ] Agent validated on RedHat, Debian, Arch / Agente validado em RedHat, Debian, Arch
-- [ ] GitHub release with binaries per platform / Release no GitHub com binários por plataforma
-- [ ] Docker images for agent and collector / Imagens Docker do agente e do collector
+- [x] GitHub release with binaries per platform / Release no GitHub com binários por plataforma
+- [x] Docker images for agent and collector / Imagens Docker do agente e do collector
 
 ## 🛡️ Security / Segurança
 
