@@ -41,6 +41,8 @@ type fakeAzure struct {
 	failVault    string
 	evilNextLink bool
 	subs         map[string][]map[string]any // subscription -> ARM resources
+	arcAuthSent  bool                        // an Authorization header reached the Arc endpoint
+	redirect     string                      // vault collection answered with a 307 to this path
 }
 
 func newFake(t *testing.T) *fakeAzure {
@@ -90,6 +92,7 @@ func (f *fakeAzure) serve(w http.ResponseWriter, r *http.Request) {
 	case p == "/arc":
 		f.tokenCalls++
 		if auth := r.Header.Get("Authorization"); auth != "" {
+			f.arcAuthSent = true
 			if auth != "Basic "+f.arcKey {
 				http.Error(w, "bad key", 401)
 				return
@@ -128,6 +131,10 @@ func (f *fakeAzure) serve(w http.ResponseWriter, r *http.Request) {
 		vault, coll := parts[0], parts[1]
 		if len(parts) != 2 || r.Method != http.MethodGet {
 			http.Error(w, "only list endpoints", 400)
+			return
+		}
+		if f.redirect != "" && r.URL.Path != f.redirect {
+			http.Redirect(w, r, f.redirect, http.StatusTemporaryRedirect)
 			return
 		}
 		if vault == f.failVault {

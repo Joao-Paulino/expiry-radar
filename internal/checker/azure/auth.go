@@ -93,7 +93,27 @@ func (c *cachedSource) token(ctx context.Context, resource string) (string, erro
 	return t.value, nil
 }
 
+// withoutProxy returns hc with a transport that never uses a proxy: the
+// managed identity endpoints are link-local or localhost, and a token
+// must not travel (in clear text, for IMDS) through a corporate proxy.
+func withoutProxy(hc *http.Client) *http.Client {
+	c := *hc
+	if tr, ok := hc.Transport.(*http.Transport); ok {
+		tr = tr.Clone()
+		tr.Proxy = nil
+		c.Transport = tr
+	} else if hc.Transport == nil {
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.Proxy = nil
+		c.Transport = tr
+	}
+	return &c
+}
+
 func newTokenSource(cfg Config, hc *http.Client, ep endpoints, getenv func(string) string) (tokenSource, error) {
+	if cfg.Auth == "managed_identity" {
+		hc = withoutProxy(hc)
+	}
 	a := &authenticator{cfg: cfg, http: hc, ep: ep, getenv: getenv}
 	var f fetchFunc
 	switch cfg.Auth {
@@ -197,7 +217,7 @@ func (a *authenticator) certificateAssertion() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("azure: certificate_file: %w", err)
 	}
-	var certDER []byte
+	var certs [][]byte
 	var key *rsa.PrivateKey
 	for {
 		var b *pem.Block
@@ -207,9 +227,7 @@ func (a *authenticator) certificateAssertion() (string, error) {
 		}
 		switch b.Type {
 		case "CERTIFICATE":
-			if certDER == nil {
-				certDER = b.Bytes
-			}
+			certs = append(certs, b.Bytes)
 		case "PRIVATE KEY":
 			k, err := x509.ParsePKCS8PrivateKey(b.Bytes)
 			if err != nil {
@@ -226,8 +244,21 @@ func (a *authenticator) certificateAssertion() (string, error) {
 			}
 		}
 	}
-	if certDER == nil || key == nil {
-		return "", errors.New("azure: certificate_file needs a CERTIFICATE and an RSA private key (unencrypted PEM)")
+	if key == nil {
+		return "", errors.New("azure: certificate_file needs an RSA private key (unencrypted PEM)")
+	}
+	// A chain file may hold CA certificates too: use the one that matches the key.
+	var certDER []byte
+	for _, der := range certs {
+		if c, err := x509.ParseCertificate(der); err == nil {
+			if pub, ok := c.PublicKey.(*rsa.PublicKey); ok && pub.Equal(&key.PublicKey) {
+				certDER = der
+				break
+			}
+		}
+	}
+	if certDER == nil {
+		return "", errors.New("azure: certificate_file has no certificate matching its private key")
 	}
 	thumb := sha256.Sum256(certDER)
 	hdr, _ := json.Marshal(map[string]string{"alg": "PS256", "typ": "JWT", "x5t#S256": b64(thumb[:])})
@@ -337,7 +368,12 @@ func (a *authenticator) arcKey(challenge string) (string, error) {
 		return "", errors.New("azure: Arc challenge without realm")
 	}
 	p := filepath.Clean(strings.Trim(strings.TrimSpace(realm), `"`))
-	if filepath.Dir(p) != filepath.Clean(a.ep.arcDir) || filepath.Ext(p) != ".key" {
+	dir := filepath.Clean(a.ep.arcDir)
+	sameDir := filepath.Dir(p) == dir
+	if runtime.GOOS == "windows" { // NTFS paths are case-insensitive
+		sameDir = strings.EqualFold(filepath.Dir(p), dir)
+	}
+	if a.ep.arcDir == "" || !filepath.IsAbs(dir) || !filepath.IsAbs(p) || !sameDir || !strings.EqualFold(filepath.Ext(p), ".key") {
 		return "", fmt.Errorf("azure: Arc challenge file %q is not in %s", p, a.ep.arcDir)
 	}
 	st, err := os.Lstat(p)
@@ -347,9 +383,19 @@ func (a *authenticator) arcKey(challenge string) (string, error) {
 	if !st.Mode().IsRegular() || st.Size() > maxArcKeyBytes {
 		return "", errors.New("azure: Arc challenge file is not a small regular file")
 	}
-	b, err := os.ReadFile(p)
+	f, err := os.Open(p)
 	if err != nil {
 		return "", err
+	}
+	defer f.Close()
+	// The file could be swapped (e.g. for a symlink) between Lstat and
+	// Open: the opened file must be the one checked, and is read capped.
+	if ost, err := f.Stat(); err != nil || !os.SameFile(st, ost) {
+		return "", errors.New("azure: Arc challenge file changed while being read")
+	}
+	b, err := io.ReadAll(io.LimitReader(f, maxArcKeyBytes+1))
+	if err != nil || len(b) > maxArcKeyBytes {
+		return "", errors.New("azure: Arc challenge file is too large")
 	}
 	return strings.TrimSpace(string(b)), nil
 }

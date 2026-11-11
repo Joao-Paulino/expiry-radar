@@ -142,3 +142,45 @@ func TestCheck_Pagination(t *testing.T) {
 		t.Fatalf("got %+v, %v", recs, err)
 	}
 }
+
+func TestSameOrigin(t *testing.T) {
+	first := "https://kv-prod.vault.azure.net/secrets?api-version=7.5"
+	for next, ok := range map[string]bool{
+		"https://kv-prod.vault.azure.net:443/secrets?api-version=7.5&$skiptoken=x": true, // as Key Vault returns it
+		"https://KV-PROD.vault.azure.net/secrets?$skiptoken=x":                     true,
+		"https://evil.example.com/secrets":                                         false,
+		"http://kv-prod.vault.azure.net/secrets":                                   false,
+		"https://kv-prod.vault.azure.net:8443/secrets":                             false,
+		"https://user@kv-prod.vault.azure.net/secrets":                             false,
+		"https://kv-prod.vault.azure.net/secrets/name":                             false, // a value endpoint
+		"https://%zz": false,
+	} {
+		if got := sameOrigin(first, next) == nil; got != ok {
+			t.Errorf("%s: allowed=%v, want %v", next, got, ok)
+		}
+	}
+}
+
+func TestCheck_RedirectNotFollowed(t *testing.T) {
+	f := newFake(t)
+	f.redirect = "/kv/elsewhere/secrets"
+	_, err := newTestChecker(t, f, Config{KeyVaults: []string{"kv-prod"}}).Check(context.Background())
+	if err == nil {
+		t.Fatal("redirect followed")
+	}
+	for _, p := range f.paths {
+		if strings.Contains(p, "elsewhere") {
+			t.Fatalf("redirect followed with the token: %q", p)
+		}
+	}
+}
+
+func TestCheck_TokenReusedAcrossRuns(t *testing.T) {
+	f := newFake(t)
+	c := newTestChecker(t, f, Config{KeyVaults: []string{"kv-prod"}})
+	c.Check(context.Background())
+	c.Check(context.Background())
+	if f.tokenCalls != 1 {
+		t.Fatalf("want one token request for two runs, got %d", f.tokenCalls)
+	}
+}

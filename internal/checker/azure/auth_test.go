@@ -73,15 +73,22 @@ func TestManagedIdentity_Arc(t *testing.T) {
 	os.WriteFile(big, []byte(strings.Repeat("a", 5000)), 0o600)
 	wrongExt := filepath.Join(dir, "passwd")
 	os.WriteFile(wrongExt, []byte("x"), 0o600)
+	link := filepath.Join(dir, "link.key")
+	os.Symlink(outside, link)
 	for name, realm := range map[string]string{
 		"outside dir": outside,
 		"dot-dot":     dir + "/../" + filepath.Base(filepath.Dir(outside)) + "/x.key",
 		"too big":     big,
 		"wrong ext":   wrongExt,
+		"symlink":     link,
+		"relative":    "abc.key",
 	} {
-		f.arcKeyFile, f.arcKey = realm, "not-for-you"
+		f.arcKeyFile, f.arcKey, f.arcAuthSent = realm, "not-for-you", false
 		if _, err := mustSource(t, f, Config{Auth: "managed_identity"}, ep, getenv).token(context.Background(), resVault); err == nil {
 			t.Errorf("%s: challenge file %q accepted", name, realm)
+		}
+		if f.arcAuthSent {
+			t.Errorf("%s: file content sent to the endpoint", name)
 		}
 	}
 }
@@ -132,6 +139,26 @@ func TestCertificateAssertion(t *testing.T) {
 	}
 	if strings.Contains(form.Encode(), "PRIVATE") {
 		t.Fatal("private key sent")
+	}
+}
+
+func TestCertificateAssertion_PicksCertMatchingKey(t *testing.T) {
+	f := newFake(t)
+	file := f.writeCertPEM(t)
+	right := f.certDER
+	other := newFake(t)
+	otherFile := other.writeCertPEM(t) // an unrelated certificate (e.g. a CA) placed first
+	otherPEM, _ := os.ReadFile(otherFile)
+	mine, _ := os.ReadFile(file)
+	certOnly := otherPEM[:strings.Index(string(otherPEM), "-----BEGIN PRIVATE KEY")]
+	os.WriteFile(file, append(append([]byte{}, certOnly...), mine...), 0o600)
+	cfg := Config{Auth: "certificate", TenantID: guid, ClientID: "app-1", CertificateFile: file}
+	if _, err := mustSource(t, f, cfg, testEndpoints(f), noEnv).token(context.Background(), resVault); err != nil {
+		t.Fatal(err)
+	}
+	hdr, _, _, _ := decodeJWT(t, f.lastForm.Get("client_assertion"))
+	if hdr["x5t#S256"] != x5tS256(right) {
+		t.Fatal("thumbprint of a certificate that does not match the key")
 	}
 }
 

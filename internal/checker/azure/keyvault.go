@@ -29,6 +29,9 @@ type Checker struct {
 	http   *http.Client
 	ep     endpoints
 	getenv func(string) string
+
+	srcMu sync.Mutex
+	src   tokenSource // built on first use, kept across runs (token cache)
 }
 
 // New returns an Azure checker for cfg (already validated).
@@ -36,6 +39,53 @@ func New(cfg Config) *Checker {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	return &Checker{cfg: cfg, http: &http.Client{Timeout: 15 * time.Second, Transport: tr}, ep: defaultEndpoints(), getenv: os.Getenv}
+}
+
+// noRedirects keeps a bearer token on the URL it was meant for:
+// redirects are returned as errors, never followed.
+func noRedirects(hc *http.Client) *http.Client {
+	c := *hc
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &c
+}
+
+func (c *Checker) tokenSource() (tokenSource, error) {
+	c.srcMu.Lock()
+	defer c.srcMu.Unlock()
+	if c.src == nil {
+		src, err := newTokenSource(c.cfg, noRedirects(c.http), c.ep, c.getenv)
+		if err != nil {
+			return nil, err
+		}
+		c.src = src
+	}
+	return c.src, nil
+}
+
+func port(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	return "443"
+}
+
+// sameOrigin allows a nextLink only on the first page's https host
+// (case-insensitive, default port 443 explicit or not) and path, without
+// userinfo, so the bearer token never goes anywhere else.
+func sameOrigin(first, next string) error {
+	fu, err := url.Parse(first)
+	if err != nil {
+		return err
+	}
+	nu, err := url.Parse(next)
+	if err != nil {
+		return fmt.Errorf("refused malformed nextLink")
+	}
+	if nu.Scheme != "https" || fu.Scheme != "https" || nu.User != nil || !strings.EqualFold(nu.Hostname(), fu.Hostname()) ||
+		port(nu) != port(fu) || nu.Path != fu.Path {
+		return fmt.Errorf("refused nextLink to another host or path (%s%s)", nu.Hostname(), nu.Path)
+	}
+	return nil
 }
 
 func (c *Checker) Name() string { return "azure" }
@@ -50,23 +100,23 @@ type vaultTarget struct {
 // must stay on the first page's scheme and host, so the bearer token is
 // never sent anywhere else.
 func (c *Checker) getPages(ctx context.Context, first, token string) ([]json.RawMessage, error) {
-	fu, err := url.Parse(first)
-	if err != nil {
-		return nil, err
-	}
+	hc := noRedirects(c.http)
 	var all []json.RawMessage
 	next := first
-	for page := 0; next != "" && page < 1000; page++ {
-		nu, err := url.Parse(next)
-		if err != nil || nu.Scheme != fu.Scheme || nu.Host != fu.Host {
-			return all, fmt.Errorf("refused nextLink to another host (%s)", nu.Host)
+	for page := 0; next != ""; page++ {
+		if page == 1000 {
+			return all, fmt.Errorf("more than 1000 pages; stopped")
 		}
+		if err := sameOrigin(first, next); err != nil {
+			return all, err
+		}
+		nu, _ := url.Parse(next)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, next, nil)
 		if err != nil {
 			return all, err
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := c.http.Do(req)
+		resp, err := hc.Do(req)
 		if err != nil {
 			return all, err
 		}
@@ -167,7 +217,7 @@ func (c *Checker) checkVault(ctx context.Context, token string, v vaultTarget) (
 // the error while the others still count; an authentication failure for
 // Key Vault fails the run.
 func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
-	src, err := newTokenSource(c.cfg, c.http, c.ep, c.getenv)
+	src, err := c.tokenSource()
 	if err != nil {
 		return nil, err
 	}
