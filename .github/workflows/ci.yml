@@ -39,3 +39,15 @@ jobs:
         with:
           go-version-file: go.mod
       - run: scripts/ci/distro-smoke.sh
+
+  vault:
+    # Runs the Vault checker against a real Vault (dev mode, TLS) with a
+    # PKI mount and an AppRole limited to the README's policy.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: scripts/ci/vault-smoke.sh

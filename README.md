@@ -378,6 +378,45 @@ chmod 600 agent.json          # it holds the agent token
 | `interval_seconds` | Seconds between checks; the first check runs at startup | Segundos entre verificações; a primeira corre no arranque |
 | `tls_targets` | Hosts to check: `host`, `port`, and `start_tls: "smtp"` for mail servers | Servidores a verificar: `host`, `port`, e `start_tls: "smtp"` para servidores de email |
 
+### 🔒 HashiCorp Vault (PKI)
+
+The agent can also check a Vault: certificates issued by PKI mounts and the mounts' CAs. It only reads public certificate data, never secret values.
+O agente também pode verificar um Vault: certificados emitidos pelos mounts PKI e as respetivas CAs. Só lê dados públicos dos certificados, nunca valores de segredos.
+
+Add to `agent.json` / Acrescenta ao `agent.json`:
+
+```json
+"vault": {
+  "address": "https://vault.example.com:8200",
+  "ca_file": "/etc/expiry-radar/vault-ca.pem",
+  "namespace": "",
+  "auth": { "approle": { "role_id": "<role id>", "secret_id_file": "/etc/expiry-radar/vault-secret-id" } },
+  "pki_mounts": ["pki", "pki_int"]
+}
+```
+
+Least-privilege policy and AppRole / Policy de privilégio mínimo e AppRole (repeat the four paths for each mount / repete os quatro caminhos para cada mount):
+
+```bash
+vault policy write expiry-radar - <<'HCL'
+path "pki/certs"    { capabilities = ["list"] }
+path "pki/cert/*"   { capabilities = ["read"] }
+path "pki/issuers"  { capabilities = ["list"] }
+path "pki/issuer/*" { capabilities = ["read"] }
+HCL
+vault auth enable approle
+vault write auth/approle/role/expiry-radar token_policies=expiry-radar token_ttl=5m
+vault read -field=role_id auth/approle/role/expiry-radar/role-id
+vault write -f -field=secret_id auth/approle/role/expiry-radar/secret-id > vault-secret-id && chmod 600 vault-secret-id
+```
+
+| | EN | PT |
+|---|---|---|
+| 🔑 Auth | AppRole (logs in every run and revokes the token afterwards) or `"token_file"` | AppRole (faz login a cada verificação e revoga o token no fim) ou `"token_file"` |
+| 🔁 Renewed certificates | Vault keeps old certificates listed until `tidy`; only the latest per name is reported | O Vault mantém certificados antigos até ao `tidy`; só o mais recente por nome é reportado |
+| 🚫 Skipped | Revoked certificates and ones expired more than 30 days ago | Certificados revogados e expirados há mais de 30 dias |
+| 🏢 Enterprise | Set `namespace` for Vault Enterprise / HCP namespaces | Define `namespace` para namespaces do Vault Enterprise / HCP |
+
 ## ⚠️ Known limitations / Limitações conhecidas
 
 | EN | PT |

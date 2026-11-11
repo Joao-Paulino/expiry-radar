@@ -20,6 +20,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/agent"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
 	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 )
 
@@ -35,7 +36,9 @@ type Config struct {
 	AgentID         string              `json:"agent_id"`
 	QueuePath       string              `json:"queue_path"`
 	TLSTargets      []tlschecker.Target `json:"tls_targets"`
-	IntervalSeconds int                 `json:"interval_seconds"`
+	// Vault, if set, also checks a HashiCorp Vault (see README).
+	Vault           *vault.Config `json:"vault"`
+	IntervalSeconds int           `json:"interval_seconds"`
 }
 
 // loadConfig reads and decodes the JSON config file at path.
@@ -72,6 +75,11 @@ func (c Config) Validate() error {
 	if c.QueuePath == "" {
 		return fmt.Errorf("agent: queue_path is required")
 	}
+	if c.Vault != nil {
+		if err := c.Vault.Validate(); err != nil {
+			return err
+		}
+	}
 	if c.IntervalSeconds <= 0 {
 		return fmt.Errorf("agent: interval_seconds must be a positive number of seconds")
 	}
@@ -105,6 +113,16 @@ func trustCAFile(p *agent.Pusher, path string) error {
 	return nil
 }
 
+// checkers returns the checkers this agent runs: TLS always, Vault when
+// configured.
+func checkers(cfg Config) []checker.Checker {
+	cs := []checker.Checker{tlschecker.New(cfg.TLSTargets)}
+	if cfg.Vault != nil {
+		cs = append(cs, vault.New(*cfg.Vault))
+	}
+	return cs
+}
+
 // run validates cfg, runs one check immediately, then repeats every
 // IntervalSeconds until ctx is cancelled.
 func run(ctx context.Context, cfg Config) error {
@@ -119,10 +137,9 @@ func run(ctx context.Context, cfg Config) error {
 		}
 	}
 
-	tlsChecker := tlschecker.New(cfg.TLSTargets)
 	runner := agent.NewRunner(
 		cfg.AgentID,
-		[]checker.Checker{tlsChecker},
+		checkers(cfg),
 		pusher,
 		agent.NewQueue(cfg.QueuePath),
 	)

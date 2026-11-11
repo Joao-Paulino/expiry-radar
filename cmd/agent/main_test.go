@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"encoding/pem"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -152,4 +155,33 @@ func writeCAForTest(t *testing.T, dir string, srv *httptest.Server) string {
 		t.Fatal(err)
 	}
 	return caFile
+}
+
+// TestCheckers_IncludesVaultWhenConfigured proves the vault section
+// turns on the Vault checker, and an invalid one stops the agent.
+func TestCheckers_IncludesVaultWhenConfigured(t *testing.T) {
+	base := Config{CollectorURL: "https://c", Token: "t", AgentID: "a", QueuePath: "/q", IntervalSeconds: 60}
+	if names := checkerNames(checkers(base)); names != "tls-checker" {
+		t.Fatalf("without vault: %q", names)
+	}
+	withVault := base
+	withVault.Vault = &vault.Config{Address: "https://vault:8200", Auth: vault.Auth{TokenFile: "/t"}, PKIMounts: []string{"pki"}}
+	if err := withVault.Validate(); err != nil {
+		t.Fatalf("valid vault config rejected: %v", err)
+	}
+	if names := checkerNames(checkers(withVault)); names != "tls-checker,vault" {
+		t.Fatalf("with vault: %q", names)
+	}
+	withVault.Vault.Address = "http://vault:8200"
+	if withVault.Validate() == nil {
+		t.Fatal("invalid vault config accepted")
+	}
+}
+
+func checkerNames(cs []checker.Checker) string {
+	var n []string
+	for _, c := range cs {
+		n = append(n, c.Name())
+	}
+	return strings.Join(n, ",")
 }
