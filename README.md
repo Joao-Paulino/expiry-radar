@@ -202,12 +202,28 @@ chmod 600 agent.json          # it holds the agent token
 
 ## 🗺️ Roadmap
 
-- [x] TLS certificates, agent, collector, dashboard, alerts / Certificados TLS, agente, collector, painel, alertas
-- [ ] Checker health and silent agent alerts, alert deduplication / Alertas de saúde e de agentes silenciosos, deduplicação
-- [ ] Secret stores such as Vault / Cofres de segredos como o Vault
-- [ ] Cloud resources (Azure, AWS, GCP) / Recursos de cloud (Azure, AWS, GCP)
-- [ ] Virtualization certificates and licences / Certificados e licenças de virtualização
-- [ ] Docker, Helm, Terraform packaging / Empacotamento em Docker, Helm, Terraform
+Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-10-expiry-radar-design.md#4-scope-and-phasing)
+
+| | Milestone | EN | PT |
+|---|---|---|---|
+| 🟡 | **M1** | TLS certificates + core platform (agent, collector, alerts, dashboard, export) | Certificados TLS + plataforma base (agente, collector, alertas, painel, exportação) |
+| ⚪ | **M2** | HashiCorp Vault: secrets, leases, token TTLs | HashiCorp Vault: segredos, leases, TTL de tokens |
+| ⚪ | **M3** | Azure: Key Vault, App Registration credentials, managed certificates | Azure: Key Vault, credenciais de App Registrations, certificados geridos |
+| ⚪ | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
+| ⚪ | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
+| ⚪ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
+| ⚪ | Later / Depois | Software licences, SaaS subscriptions, then OT/ICS | Licenças de software, subscrições SaaS e depois OT/ICS |
+
+🟡 in progress / em curso · ⚪ planned / planeado
+
+**Still open in M1 / Ainda em aberto no M1**
+
+- [ ] Dashboard login page / Página de login no painel
+- [ ] Alert deduplication / Deduplicação de alertas
+- [ ] Alerts for failing checkers and silent agents / Alertas de verificadores em falha e agentes silenciosos
+- [ ] Agent validated on RedHat, Debian, Arch / Agente validado em RedHat, Debian, Arch
+- [ ] GitHub release with binaries per platform / Release no GitHub com binários por plataforma
+- [ ] Docker images for agent and collector / Imagens Docker do agente e do collector
 
 ## 🛡️ Security / Segurança
 
