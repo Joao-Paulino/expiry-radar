@@ -45,6 +45,11 @@ type Config struct {
 	TokenMinTTLHours int  `json:"token_min_ttl_hours"` // default 24
 	// AppRoleMounts are AppRole auth mounts whose secret IDs are checked.
 	AppRoleMounts []string `json:"approle_mounts"`
+	// LeasePrefixes are lease ID prefixes (e.g. "database/creds/") whose
+	// dynamic secret leases are checked. Listing leases needs "sudo" on
+	// sys/leases/lookup/<prefix>*.
+	LeasePrefixes    []string `json:"lease_prefixes"`
+	LeaseMinTTLHours int      `json:"lease_min_ttl_hours"` // default 24
 }
 
 const defaultExpiryKey = "expires_at"
@@ -88,11 +93,16 @@ func (c Config) Validate() error {
 	if hasAppRole && (c.Auth.AppRole.RoleID == "" || c.Auth.AppRole.SecretIDFile == "") {
 		return errors.New("vault: auth.approle needs role_id and secret_id_file")
 	}
-	if len(c.PKIMounts)+len(c.KVMounts)+len(c.AppRoleMounts) == 0 && !c.CheckTokens {
-		return errors.New("vault: set at least one of pki_mounts, kv_mounts, approle_mounts or check_tokens")
+	if len(c.PKIMounts)+len(c.KVMounts)+len(c.AppRoleMounts)+len(c.LeasePrefixes) == 0 && !c.CheckTokens {
+		return errors.New("vault: set at least one of pki_mounts, kv_mounts, approle_mounts, lease_prefixes or check_tokens")
 	}
-	if c.TokenMinTTLHours < 0 {
-		return errors.New("vault: token_min_ttl_hours must not be negative")
+	if c.TokenMinTTLHours < 0 || c.LeaseMinTTLHours < 0 {
+		return errors.New("vault: token_min_ttl_hours and lease_min_ttl_hours must not be negative")
+	}
+	for _, p := range c.LeasePrefixes {
+		if !strings.HasSuffix(p, "/") || !mountRe.MatchString(strings.TrimSuffix(p, "/")) {
+			return fmt.Errorf("vault: invalid lease prefix %q (e.g. \"database/creds/\")", p)
+		}
 	}
 	mounts := append(append(append([]string{}, c.PKIMounts...), c.KVMounts...), c.AppRoleMounts...)
 	for _, m := range mounts {
@@ -317,6 +327,13 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 		records = append(records, recs...)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("approle mount %s: %w", mount, err))
+		}
+	}
+	for _, prefix := range c.cfg.LeasePrefixes {
+		recs, err := c.checkLeases(ctx, s, "vault://"+host+"/sys/leases", prefix)
+		records = append(records, recs...)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("leases %s: %w", prefix, err))
 		}
 	}
 	return records, errors.Join(errs...)

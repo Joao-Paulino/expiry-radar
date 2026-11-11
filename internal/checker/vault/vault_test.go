@@ -34,16 +34,19 @@ func TestConfig_Validate(t *testing.T) {
 		t.Fatalf("valid config rejected: %v", err)
 	}
 	cases := map[string]func(c *Config){
-		"http address":      func(c *Config) { c.Address = "http://vault:8200" },
-		"no auth":           func(c *Config) { c.Auth = Auth{} },
-		"two auths":         func(c *Config) { c.Auth.AppRole = &AppRole{RoleID: "r", SecretIDFile: "/s"} },
-		"no mounts":         func(c *Config) { c.PKIMounts = nil },
-		"bad kv mount":      func(c *Config) { c.KVMounts = []string{"../sys"} },
-		"bad approle mount": func(c *Config) { c.AppRoleMounts = []string{"a b"} },
-		"negative min ttl":  func(c *Config) { c.CheckTokens = true; c.TokenMinTTLHours = -1 },
-		"bad expiry key":    func(c *Config) { c.KVMounts = []string{"secret"}; c.KVExpiryKey = "bad key" },
-		"bad mount":         func(c *Config) { c.PKIMounts = []string{"../sys"} },
-		"approle no secret": func(c *Config) { c.Auth = Auth{AppRole: &AppRole{RoleID: "r"}} },
+		"http address":          func(c *Config) { c.Address = "http://vault:8200" },
+		"no auth":               func(c *Config) { c.Auth = Auth{} },
+		"two auths":             func(c *Config) { c.Auth.AppRole = &AppRole{RoleID: "r", SecretIDFile: "/s"} },
+		"no mounts":             func(c *Config) { c.PKIMounts = nil },
+		"bad kv mount":          func(c *Config) { c.KVMounts = []string{"../sys"} },
+		"bad approle mount":     func(c *Config) { c.AppRoleMounts = []string{"a b"} },
+		"negative min ttl":      func(c *Config) { c.CheckTokens = true; c.TokenMinTTLHours = -1 },
+		"lease prefix no slash": func(c *Config) { c.LeasePrefixes = []string{"database/creds"} },
+		"lease prefix escapes":  func(c *Config) { c.LeasePrefixes = []string{"../sys/"} },
+		"negative lease ttl":    func(c *Config) { c.LeaseMinTTLHours = -1 },
+		"bad expiry key":        func(c *Config) { c.KVMounts = []string{"secret"}; c.KVExpiryKey = "bad key" },
+		"bad mount":             func(c *Config) { c.PKIMounts = []string{"../sys"} },
+		"approle no secret":     func(c *Config) { c.Auth = Auth{AppRole: &AppRole{RoleID: "r"}} },
 	}
 	kvOnly := Config{Address: "https://vault:8200", Auth: Auth{TokenFile: "/x"}, KVMounts: []string{"secret"}}
 	if err := kvOnly.Validate(); err != nil {
@@ -52,6 +55,7 @@ func TestConfig_Validate(t *testing.T) {
 	for _, only := range []Config{
 		{Address: "https://vault:8200", Auth: Auth{TokenFile: "/x"}, CheckTokens: true},
 		{Address: "https://vault:8200", Auth: Auth{TokenFile: "/x"}, AppRoleMounts: []string{"approle"}},
+		{Address: "https://vault:8200", Auth: Auth{TokenFile: "/x"}, LeasePrefixes: []string{"database/creds/"}},
 	} {
 		if err := only.Validate(); err != nil {
 			t.Fatalf("config %+v rejected: %v", only, err)
@@ -291,5 +295,55 @@ func TestCheck_AppRoleSecretIDs(t *testing.T) {
 	if r.Kind != "secret" || r.Name != "ci secret-id · acc12345" || !r.ExpiresAt.Equal(exp) ||
 		r.Metadata["role"] != "ci" || r.Metadata["mount"] != "approle" {
 		t.Fatalf("secret id: %+v", r)
+	}
+}
+
+func TestCheck_Leases(t *testing.T) {
+	f := newFakeVault(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	ts := func(d time.Duration) string { return now.Add(d).Format(time.RFC3339) }
+	f.leases = map[string]fakeLease{
+		// 30-day lease: reported
+		"database/creds/readonly/1a2b3c4d5e6f": {issue: ts(-24 * time.Hour), expire: ts(29 * 24 * time.Hour)},
+		// renewed 1h ago for another 3 days: granted TTL measured from the renewal
+		"database/creds/app/team/9z8y7x6w5v": {issue: ts(-60 * 24 * time.Hour), lastRenewal: ts(-time.Hour), expire: ts(71 * time.Hour)},
+		// 1-hour credential: too short, skipped
+		"database/creds/readonly/shortlived01": {issue: ts(-10 * time.Minute), expire: ts(50 * time.Minute)},
+		// outside the configured prefix: never listed
+		"aws/creds/deploy/aaaaaaaaaaaa": {issue: ts(-time.Hour), expire: ts(30 * 24 * time.Hour)},
+	}
+	cfg := appRoleConfig(t, f)
+	cfg.LeasePrefixes = []string{"database/creds/"}
+	recs, err := newChecker(t, f, cfg).Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]checker.ExpiryRecord{}
+	for _, r := range recs {
+		if err := r.Validate(); err != nil {
+			t.Fatalf("invalid record %+v: %v", r, err)
+		}
+		got[r.Name] = r
+	}
+	if len(got) != 2 {
+		t.Fatalf("want readonly and app/team leases, got %+v", recs)
+	}
+	ro := got["database/creds/readonly · 1a2b3c4d"]
+	if ro.Kind != "secret" || !ro.ExpiresAt.Equal(now.Add(29*24*time.Hour)) || ro.Metadata["role"] != "database/creds/readonly" ||
+		ro.Source != "vault://"+strings.TrimPrefix(f.srv.URL, "https://")+"/sys/leases" {
+		t.Fatalf("readonly: %+v", ro)
+	}
+	if _, ok := got["database/creds/app/team · 9z8y7x6w"]; !ok {
+		t.Fatalf("renewed nested lease missing: %+v", got)
+	}
+	for _, p := range f.paths {
+		if strings.Contains(p, "aws") {
+			t.Fatalf("listed outside the configured prefix: %q", p)
+		}
+		for _, v := range ro.Metadata {
+			if strings.Contains(v, "1a2b3c4d5e6f") {
+				t.Fatalf("full lease id exposed: %+v", ro.Metadata)
+			}
+		}
 	}
 }
