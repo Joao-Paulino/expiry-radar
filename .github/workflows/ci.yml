@@ -27,3 +27,15 @@ jobs:
           git diff --exit-code go.mod go.sum
       - run: go vet ./...
       - run: go test ./...
+
+  distros:
+    # Runs the real agent on RedHat-family (Rocky 9), Debian 12 and Arch
+    # against a real collector and a real STARTTLS SMTP server (Mailpit).
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: scripts/ci/distro-smoke.sh

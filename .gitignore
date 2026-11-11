@@ -4,3 +4,4 @@ dist/
 .claude/worktrees/
 go.work
 go.work.sum
+out/
