@@ -3,6 +3,7 @@
 # Usage: scripts/build-release.sh [version]   (default: dev)
 set -euo pipefail
 VERSION="${1:-dev}"
+VERSION="${VERSION//\//-}"   # branch names like fix/x must not become directories
 LDFLAGS="-s -w -X main.version=${VERSION}"
 rm -rf dist && mkdir -p dist
 

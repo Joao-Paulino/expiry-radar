@@ -32,6 +32,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
+          check-latest: true # always the newest patch (security fixes)
       - run: go test ./...
       - name: Build
         run: scripts/build-release.sh "${GITHUB_REF_NAME}"

@@ -61,4 +61,5 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
+          check-latest: true # always the newest patch (security fixes)
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
