@@ -117,6 +117,10 @@ go install github.com/Joao-Paulino/expiry-radar/cmd/agent@latest
 | `auth_tokens` | Tokens agents use to send results. See [🔑 Tokens](#-tokens) | Tokens que os agentes usam para enviar resultados. Ver [🔑 Tokens](#-tokens) |
 | `admin_tokens` | Tokens for the dashboard, mute and export. See [🔑 Tokens](#-tokens) | Tokens para o painel, silenciamento e exportação. Ver [🔑 Tokens](#-tokens) |
 | `alert_interval_seconds` | How often alerts are evaluated; `0` disables alerting | De quanto em quanto tempo os alertas são avaliados; `0` desliga os alertas |
+| `reminder_critical_hours` | Re-send an unchanged critical alert after this many hours (default 24, `0` = never) | Reenvia um alerta crítico inalterado ao fim destas horas (por omissão 24, `0` = nunca) |
+| `reminder_warning_hours` | Same for warnings (default `0` = never) | O mesmo para avisos (por omissão `0` = nunca) |
+| `checker_fail_threshold` | Consecutive failures before a checker alerts (default 3) | Falhas seguidas até um verificador alertar (por omissão 3) |
+| `agent_stale_hours` | Hours without a report before an agent alerts as silent (default 3) | Horas sem reportar até um agente alertar como silencioso (por omissão 3) |
 | `slack_webhook_url` / `teams_webhook_url` / `webhook_url` | Incoming webhook URLs; leave empty to disable | URLs de webhook; vazio desliga |
 | `email` | SMTP settings. See [📧 Email](#-email). Empty `smtp_host` disables email | Definições SMTP. Ver [📧 Email](#-email). `smtp_host` vazio desliga o email |
 
@@ -177,6 +181,20 @@ Substitui o nome DNS e o IP pelos que os agentes vão usar. Depois copia o
 > 💡 O collector carrega o certificado no arranque: reinicia-o depois de o renovar.
 > Junta o próprio collector aos `tls_targets` de um agente e o Expiry Radar avisa-te
 > antes de o seu próprio certificado expirar.
+
+### 🔔 Alerts / Alertas
+
+| | EN | PT |
+|---|---|---|
+| 🆕 New or changed | Sent when something becomes a problem or its severity changes | Enviado quando algo passa a ser problema ou muda de severidade |
+| ✅ Resolved | One message when it is back to OK (e.g. certificate renewed) | Uma mensagem quando volta a OK (por exemplo, certificado renovado) |
+| 🔁 Reminders | Critical alerts repeat every `reminder_critical_hours`; nothing repeats every cycle | Alertas críticos repetem a cada `reminder_critical_hours`; nada se repete em cada ciclo |
+| 🔇 Muted | Muted records send nothing; unmuting a still-failing record alerts again | Registos silenciados não enviam nada; ao tirar o silêncio, se ainda houver problema, volta a alertar |
+| 🩺 Checker failing | A checker failing `checker_fail_threshold` times in a row on an agent | Um verificador que falha `checker_fail_threshold` vezes seguidas num agente |
+| 📴 Agent silent | An agent with no report for `agent_stale_hours` | Um agente sem reportar há `agent_stale_hours` |
+
+The dashboard's **Agents** section shows every agent and checker with last seen, last success and failures.
+A secção **Agents** do painel mostra cada agente e verificador com a última vez visto, último sucesso e falhas.
 
 ### 🔑 Tokens
 
@@ -302,8 +320,6 @@ chmod 600 agent.json          # it holds the agent token
 
 | EN | PT |
 |---|---|
-| No alert yet when a checker keeps failing or an agent goes silent | Ainda não há alerta quando um verificador falha repetidamente ou um agente deixa de reportar |
-| Alerts are re-sent every cycle; mute a record to stop them | Os alertas repetem-se em cada ciclo; silencia o registo para os parar |
 | Two agents checking the same `host:port` overwrite each other; use fully qualified names | Dois agentes que verificam o mesmo `host:porta` sobrepõem-se; usa nomes totalmente qualificados |
 
 ## 🗺️ Roadmap
@@ -326,8 +342,8 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 
 - [x] Dashboard login (password + TOTP) / Login no painel (password + TOTP)
 - [ ] SSO via OIDC (Entra ID, Google) / SSO via OIDC (Entra ID, Google)
-- [ ] Alert deduplication / Deduplicação de alertas
-- [ ] Alerts for failing checkers and silent agents / Alertas de verificadores em falha e agentes silenciosos
+- [x] Alert deduplication / Deduplicação de alertas
+- [x] Alerts for failing checkers and silent agents / Alertas de verificadores em falha e agentes silenciosos
 - [ ] Agent validated on RedHat, Debian, Arch / Agente validado em RedHat, Debian, Arch
 - [ ] GitHub release with binaries per platform / Release no GitHub com binários por plataforma
 - [ ] Docker images for agent and collector / Imagens Docker do agente e do collector

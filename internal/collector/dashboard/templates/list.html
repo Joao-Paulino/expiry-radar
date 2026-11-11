@@ -34,5 +34,11 @@
 <button type="submit">Save</button>
 </form>
 <p><a href="/export.json">Export JSON</a> | <a href="/export.csv">Export CSV</a></p>
+<h2>Agents</h2>
+<table>
+<tr><th>Agent</th><th>Checker</th><th>Last seen</th><th>Last success</th><th>Consecutive failures</th><th>Last error</th></tr>
+{{range .Agents}}<tr><td>{{.Agent}}</td><td>{{.Checker}}</td><td>{{.LastSeen}}</td><td>{{.LastSuccess}}</td><td>{{.Failures}}</td><td>{{.LastError}}</td></tr>
+{{else}}<tr><td colspan="6">No agent has reported yet.</td></tr>{{end}}
+</table>
 </body>
 </html>

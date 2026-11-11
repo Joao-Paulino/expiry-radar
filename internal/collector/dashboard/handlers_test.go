@@ -18,6 +18,7 @@ import (
 type fakeStore struct {
 	current []store.StoredRecord
 	history []store.StoredRecord
+	health  []store.CheckerHealth
 }
 
 func (f *fakeStore) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error {
@@ -37,7 +38,7 @@ func (f *fakeStore) History(ctx context.Context, source, name, kind string) ([]s
 }
 
 func (f *fakeStore) CheckerHealth(ctx context.Context) ([]store.CheckerHealth, error) {
-	return nil, nil
+	return f.health, nil
 }
 
 type fakeRulesStore struct {
@@ -126,5 +127,22 @@ func TestMux_ExportCSV_ReturnsCSV(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "source,name,kind") {
 		t.Fatalf("expected CSV header, got %q", rec.Body.String())
+	}
+}
+
+// TestMux_List_ShowsAgents proves the dashboard shows each agent's
+// checkers, when they last reported and whether they are failing.
+func TestMux_List_ShowsAgents(t *testing.T) {
+	seen := time.Date(2026, 11, 11, 9, 30, 0, 0, time.UTC)
+	st := &fakeStore{health: []store.CheckerHealth{
+		{CheckerName: "tls", ReportedBy: "web-01", LastSeenAt: seen, ConsecutiveFailures: 4, LastError: "dial timeout"},
+	}}
+	rec := httptest.NewRecorder()
+	NewMux(st, &fakeRulesStore{}).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	body := rec.Body.String()
+	for _, want := range []string{"Agents", "web-01", "tls", "2026-11-11 09:30", "4", "dial timeout"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("agents section missing %q", want)
+		}
 	}
 }

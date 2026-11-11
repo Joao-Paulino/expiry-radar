@@ -31,7 +31,14 @@ type recordView struct {
 // the session viewing it (empty for bearer-token requests).
 type listView struct {
 	Records []recordView
+	Agents  []agentView
 	CSRF    string
+}
+
+// agentView is one checker on one agent, for the Agents section.
+type agentView struct {
+	Agent, Checker, LastSeen, LastSuccess, LastError string
+	Failures                                         int
 }
 
 // historyView holds the parameters and results of a history query for
@@ -71,7 +78,22 @@ func NewMux(st store.Store, rs rules.Store) *http.ServeMux {
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := templates.ExecuteTemplate(w, "list.html", listView{Records: views, CSRF: session.CSRFToken(ctx)}); err != nil {
+		health, err := st.CheckerHealth(ctx)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		var agents []agentView
+		for _, h := range health {
+			a := agentView{Agent: h.ReportedBy, Checker: h.CheckerName, Failures: h.ConsecutiveFailures, LastError: h.LastError,
+				LastSeen: h.LastSeenAt.UTC().Format("2006-01-02 15:04 UTC"), LastSuccess: "never"}
+			if !h.LastSuccessAt.IsZero() {
+				a.LastSuccess = h.LastSuccessAt.UTC().Format("2006-01-02 15:04 UTC")
+			}
+			agents = append(agents, a)
+		}
+
+		if err := templates.ExecuteTemplate(w, "list.html", listView{Records: views, Agents: agents, CSRF: session.CSRFToken(ctx)}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
