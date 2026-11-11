@@ -2,7 +2,7 @@
 # Two images from one file:
 #   docker build --target collector -t expiry-radar-collector .
 #   docker build --target agent     -t expiry-radar-agent .
-FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
 ARG TARGETOS TARGETARCH VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./

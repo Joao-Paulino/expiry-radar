@@ -27,9 +27,11 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v4
+      # Releases are built with a supported Go (security fixes in the
+      # standard library); go.mod only sets the minimum for source builds.
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.x"
       - run: go test ./...
       - name: Build
         run: scripts/build-release.sh "${GITHUB_REF_NAME}"

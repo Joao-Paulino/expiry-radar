@@ -90,7 +90,7 @@ As imagens não têm `stty`, por isso o `set-admin-password` mostra a password e
 
 ## 🚀 Quick start / Início rápido
 
-Requires Go 1.24 · Requer Go 1.24
+Requires Go 1.24 or newer (releases are built with Go 1.26) · Requer Go 1.24 ou mais recente (as releases são compiladas com Go 1.26)
 
 ```bash
 git clone https://github.com/Joao-Paulino/expiry-radar.git
