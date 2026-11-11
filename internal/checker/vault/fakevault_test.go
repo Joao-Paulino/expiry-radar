@@ -36,6 +36,13 @@ type fakeVault struct {
 	issuers   map[string]map[string]string // mount -> issuer id -> pem
 	issuerNm  map[string]map[string]string // mount -> issuer id -> name
 	failMount string
+	kv        map[string]map[string]fakeKV // mount -> secret path -> metadata
+}
+
+// fakeKV is a KV v2 secret's metadata (the fake never has values).
+type fakeKV struct {
+	custom  map[string]string
+	deleted bool // current version soft-deleted
 }
 
 func makePEM(t *testing.T, cn string, notAfter time.Time, serial int64) string {
@@ -56,7 +63,7 @@ func makePEMCA(t *testing.T, cn string, notAfter time.Time, serial int64, isCA b
 
 func newFakeVault(t *testing.T) *fakeVault {
 	t.Helper()
-	f := &fakeVault{certs: map[string][]fakeCert{}, issuers: map[string]map[string]string{}, issuerNm: map[string]map[string]string{}}
+	f := &fakeVault{certs: map[string][]fakeCert{}, issuers: map[string]map[string]string{}, issuerNm: map[string]map[string]string{}, kv: map[string]map[string]fakeKV{}}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -124,6 +131,40 @@ func (f *fakeVault) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(rest, "issuer/"):
 		id := strings.TrimPrefix(rest, "issuer/")
 		reply(w, map[string]any{"data": map[string]any{"certificate": f.issuers[mount][id], "issuer_name": f.issuerNm[mount][id]}})
+	case strings.HasPrefix(rest, "metadata/") && isList:
+		prefix := strings.TrimPrefix(rest, "metadata/")
+		seen := map[string]bool{}
+		var keys []string
+		for path := range f.kv[mount] {
+			if !strings.HasPrefix(path, prefix) {
+				continue
+			}
+			k := strings.TrimPrefix(path, prefix)
+			if i := strings.Index(k, "/"); i >= 0 {
+				k = k[:i+1]
+			}
+			if !seen[k] {
+				seen[k] = true
+				keys = append(keys, k)
+			}
+		}
+		if len(keys) == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		reply(w, map[string]any{"data": map[string]any{"keys": keys}})
+	case strings.HasPrefix(rest, "metadata/"):
+		s, ok := f.kv[mount][strings.TrimPrefix(rest, "metadata/")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		del := ""
+		if s.deleted {
+			del = time.Now().Format(time.RFC3339)
+		}
+		reply(w, map[string]any{"data": map[string]any{"current_version": 3, "custom_metadata": s.custom,
+			"versions": map[string]any{"3": map[string]any{"deletion_time": del, "destroyed": false}}}})
 	default:
 		http.NotFound(w, r)
 	}

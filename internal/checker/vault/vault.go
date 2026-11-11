@@ -1,6 +1,8 @@
-// Package vault checks HashiCorp Vault for things that expire. Step 1:
-// certificates issued by PKI mounts and the mounts' CA issuers. It uses
-// the HTTP API directly and only reads public certificate data.
+// Package vault checks HashiCorp Vault for things that expire:
+// certificates issued by PKI mounts and the mounts' CA issuers, and KV v2
+// secrets whose custom metadata holds an expiry date. It uses the HTTP
+// API directly and only reads public certificate data and KV metadata,
+// never secret values.
 package vault
 
 import (
@@ -13,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
+	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 )
 
 // Config is the agent's "vault" section.
@@ -31,6 +35,19 @@ type Config struct {
 	Namespace string   `json:"namespace"`
 	Auth      Auth     `json:"auth"`
 	PKIMounts []string `json:"pki_mounts"`
+	// KVMounts are KV v2 mounts whose secrets may carry an expiry date
+	// in their custom metadata, under KVExpiryKey (default "expires_at").
+	KVMounts    []string `json:"kv_mounts"`
+	KVExpiryKey string   `json:"kv_expiry_key"`
+}
+
+const defaultExpiryKey = "expires_at"
+
+func (c Config) expiryKey() string {
+	if c.KVExpiryKey == "" {
+		return defaultExpiryKey
+	}
+	return c.KVExpiryKey
 }
 
 // Auth selects exactly one way to authenticate.
@@ -47,7 +64,10 @@ type AppRole struct {
 	Mount        string `json:"mount"` // default "approle"
 }
 
-var mountRe = regexp.MustCompile(`^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$`)
+var (
+	mountRe = regexp.MustCompile(`^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$`)
+	keyRe   = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+)
 
 // Validate reports a configuration that cannot work.
 func (c Config) Validate() error {
@@ -62,13 +82,16 @@ func (c Config) Validate() error {
 	if hasAppRole && (c.Auth.AppRole.RoleID == "" || c.Auth.AppRole.SecretIDFile == "") {
 		return errors.New("vault: auth.approle needs role_id and secret_id_file")
 	}
-	if len(c.PKIMounts) == 0 {
-		return errors.New("vault: pki_mounts must list at least one PKI mount")
+	if len(c.PKIMounts)+len(c.KVMounts) == 0 {
+		return errors.New("vault: set at least one of pki_mounts or kv_mounts")
 	}
-	for _, m := range c.PKIMounts {
+	for _, m := range append(append([]string{}, c.PKIMounts...), c.KVMounts...) {
 		if !mountRe.MatchString(m) {
 			return fmt.Errorf("vault: invalid mount path %q", m)
 		}
+	}
+	if !keyRe.MatchString(c.expiryKey()) {
+		return fmt.Errorf("vault: invalid kv_expiry_key %q", c.KVExpiryKey)
 	}
 	return nil
 }
@@ -78,7 +101,8 @@ const (
 	expiredHorizon = 30 * 24 * time.Hour // older expired certificates are history, not alerts
 )
 
-// Checker reports PKI certificates and CA issuers from Vault.
+// Checker reports PKI certificates, CA issuers and expiring KV v2
+// secrets from Vault.
 type Checker struct {
 	cfg        Config
 	httpClient *http.Client // tests override
@@ -160,12 +184,30 @@ func (s *session) call(ctx context.Context, method, path string, body any, out a
 			Errors []string `json:"errors"`
 		}
 		json.Unmarshal(data, &e)
-		return fmt.Errorf("%s %s: HTTP %d %s", method, "/v1/"+path, resp.StatusCode, strings.Join(e.Errors, "; "))
+		return &apiError{fmt.Sprintf("%s %s", method, "/v1/"+path), resp.StatusCode, e.Errors}
 	}
 	if out != nil && len(data) > 0 {
 		return json.Unmarshal(data, out)
 	}
 	return nil
+}
+
+// apiError is a non-2xx answer from Vault.
+type apiError struct {
+	request string
+	status  int
+	errors  []string
+}
+
+func (e *apiError) Error() string {
+	return fmt.Sprintf("%s: HTTP %d %s", e.request, e.status, strings.Join(e.errors, "; "))
+}
+
+// isEmptyList reports Vault's answer to a LIST of a path with no
+// entries: 404 with no error messages.
+func isEmptyList(err error) bool {
+	var e *apiError
+	return errors.As(err, &e) && e.status == http.StatusNotFound && len(e.errors) == 0
 }
 
 func (s *session) list(ctx context.Context, path string) ([]string, error) {
@@ -246,7 +288,112 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 			errs = append(errs, fmt.Errorf("mount %s: %w", mount, err))
 		}
 	}
+	for _, mount := range c.cfg.KVMounts {
+		recs, err := c.checkKV(ctx, s, "vault://"+host+"/"+mount, mount)
+		records = append(records, recs...)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("kv mount %s: %w", mount, err))
+		}
+	}
 	return records, errors.Join(errs...)
+}
+
+// escapePath escapes each segment of a KV path for the URL.
+func escapePath(p string) string {
+	parts := strings.Split(p, "/")
+	for i, s := range parts {
+		parts[i] = url.PathEscape(s)
+	}
+	return strings.Join(parts, "/")
+}
+
+// parseExpiry accepts a date (2027-03-31, midnight UTC) or RFC 3339.
+func parseExpiry(v string) (time.Time, error) {
+	v = strings.TrimSpace(v)
+	if t, err := time.Parse(time.DateOnly, v); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, v)
+}
+
+// checkKV walks a KV v2 mount's metadata tree and reports the secrets
+// whose custom metadata holds an expiry date. It reads metadata only:
+// the data/ endpoints (secret values) are never called.
+func (c *Checker) checkKV(ctx context.Context, s *session, source, mount string) ([]checker.ExpiryRecord, error) {
+	var paths []string
+	folders := []string{""}
+	for len(folders) > 0 {
+		dir := folders[0]
+		folders = folders[1:]
+		keys, err := s.list(ctx, mount+"/metadata/"+escapePath(dir))
+		if err != nil {
+			if isEmptyList(err) {
+				continue
+			}
+			return nil, err
+		}
+		for _, k := range keys {
+			if strings.HasSuffix(k, "/") {
+				folders = append(folders, dir+k)
+			} else {
+				paths = append(paths, dir+k)
+			}
+		}
+	}
+
+	key := c.cfg.expiryKey()
+	var (
+		records  []checker.ExpiryRecord
+		firstErr error
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+	)
+	sem := make(chan struct{}, maxParallel)
+	for _, p := range paths {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(p string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			var r struct {
+				Data struct {
+					CurrentVersion int               `json:"current_version"`
+					CustomMetadata map[string]string `json:"custom_metadata"`
+					Versions       map[string]struct {
+						DeletionTime string `json:"deletion_time"`
+						Destroyed    bool   `json:"destroyed"`
+					} `json:"versions"`
+				} `json:"data"`
+			}
+			err := s.call(ctx, http.MethodGet, mount+"/metadata/"+escapePath(p), nil, &r)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("secret %s: %w", p, err)
+				}
+				return
+			}
+			raw, ok := r.Data.CustomMetadata[key]
+			if !ok {
+				return
+			}
+			version := fmt.Sprint(r.Data.CurrentVersion)
+			if v, ok := r.Data.Versions[version]; ok && (v.DeletionTime != "" || v.Destroyed) {
+				return // current version deleted: nothing in use to renew
+			}
+			exp, err := parseExpiry(raw)
+			if err != nil {
+				log.Printf("vault: %s/%s: %s %q is not a date (use 2027-03-31 or RFC 3339); skipped",
+					mount, logging.Sanitize(p), key, logging.Sanitize(raw))
+				return
+			}
+			records = append(records, checker.ExpiryRecord{Source: source, Name: p, Kind: "secret", ExpiresAt: exp,
+				Metadata: map[string]string{"mount": mount, "version": version}})
+		}(p)
+	}
+	wg.Wait()
+	return records, firstErr
 }
 
 func (c *Checker) checkMount(ctx context.Context, s *session, source, mount string) ([]checker.ExpiryRecord, error) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts a real Vault (dev mode, TLS), creates a PKI mount with a renewed
 # and a revoked certificate plus an AppRole limited to the policy from
-# the README, then runs the Vault checker against it.
+# the README, a KV v2 secret with an expiry date, then runs the Vault checker against it.
 set -euo pipefail
 W="$PWD/out-vault"; rm -rf "$W"; mkdir -p "$W"; chmod 777 "$W"
 docker run -d --name vault --network host --cap-add IPC_LOCK -v "$W:/certs" hashicorp/vault:1.17 \
@@ -19,12 +19,21 @@ v write pki/issue/web common_name=api.example.com ttl=240h >/dev/null   # renewa
 serial=$(v write -field=serial_number pki/issue/web common_name=old.example.com ttl=48h)
 v write pki/revoke serial_number="$serial" >/dev/null
 
+# KV v2 (dev mode mounts it at secret/): one secret with an expiry date
+# in its metadata, one without, one in a nested folder.
+v kv put secret/apps/stripe api_key=sk_test_never_read >/dev/null
+v kv metadata put -custom-metadata=expires_at=2027-03-31 secret/apps/stripe >/dev/null
+v kv put secret/apps/team/db password=never_read >/dev/null
+v kv metadata put -custom-metadata=expires_at=2027-01-15T10:00:00Z secret/apps/team/db >/dev/null
+v kv put secret/no-expiry value=x >/dev/null
+
 docker exec -i -e VAULT_ADDR=https://127.0.0.1:8200 -e VAULT_CACERT=/certs/vault-ca.pem -e VAULT_TOKEN=root vault \
   vault policy write expiry-radar - <<'HCL' >/dev/null
 path "pki/certs"    { capabilities = ["list"] }
 path "pki/cert/*"   { capabilities = ["read"] }
 path "pki/issuers"  { capabilities = ["list"] }
 path "pki/issuer/*" { capabilities = ["read"] }
+path "secret/metadata/*" { capabilities = ["list", "read"] }
 HCL
 v auth enable approle >/dev/null
 v write auth/approle/role/expiry-radar token_policies=expiry-radar token_ttl=5m secret_id_ttl=10m >/dev/null

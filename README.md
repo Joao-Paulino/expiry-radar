@@ -378,10 +378,10 @@ chmod 600 agent.json          # it holds the agent token
 | `interval_seconds` | Seconds between checks; the first check runs at startup | Segundos entre verificações; a primeira corre no arranque |
 | `tls_targets` | Hosts to check: `host`, `port`, and `start_tls: "smtp"` for mail servers | Servidores a verificar: `host`, `port`, e `start_tls: "smtp"` para servidores de email |
 
-### 🔒 HashiCorp Vault (PKI)
+### 🔒 HashiCorp Vault (PKI, KV v2)
 
-The agent can also check a Vault: certificates issued by PKI mounts and the mounts' CAs. It only reads public certificate data, never secret values.
-O agente também pode verificar um Vault: certificados emitidos pelos mounts PKI e as respetivas CAs. Só lê dados públicos dos certificados, nunca valores de segredos.
+The agent can also check a Vault: certificates issued by PKI mounts and the mounts' CAs, and KV v2 secrets with an expiry date in their metadata (e.g. a third-party API key). It only reads public certificate data and KV metadata, never secret values.
+O agente também pode verificar um Vault: certificados emitidos pelos mounts PKI e as respetivas CAs, e segredos KV v2 com data de validade nos metadados (ex.: uma API key de terceiros). Só lê dados públicos dos certificados e metadados do KV, nunca valores de segredos.
 
 Add to `agent.json` / Acrescenta ao `agent.json`:
 
@@ -391,11 +391,21 @@ Add to `agent.json` / Acrescenta ao `agent.json`:
   "ca_file": "/etc/expiry-radar/vault-ca.pem",
   "namespace": "",
   "auth": { "approle": { "role_id": "<role id>", "secret_id_file": "/etc/expiry-radar/vault-secret-id" } },
-  "pki_mounts": ["pki", "pki_int"]
+  "pki_mounts": ["pki", "pki_int"],
+  "kv_mounts": ["secret"],
+  "kv_expiry_key": "expires_at"
 }
 ```
 
-Least-privilege policy and AppRole / Policy de privilégio mínimo e AppRole (repeat the four paths for each mount / repete os quatro caminhos para cada mount):
+Set at least one of `pki_mounts` / `kv_mounts` · Define pelo menos um de `pki_mounts` / `kv_mounts`. `kv_expiry_key` is optional (default `expires_at`) · é opcional (por omissão `expires_at`).
+
+Mark a KV secret with its expiry date / Marca um segredo KV com a data de validade (`2027-03-31` or RFC 3339 `2027-03-31T00:00:00Z`):
+
+```bash
+vault kv metadata put -custom-metadata=expires_at=2027-03-31 secret/apps/stripe/api-key
+```
+
+Least-privilege policy and AppRole / Policy de privilégio mínimo e AppRole (repeat the paths for each mount / repete os caminhos para cada mount). KV: metadata only, no access to `secret/data/*` · KV: só metadados, sem acesso a `secret/data/*`:
 
 ```bash
 vault policy write expiry-radar - <<'HCL'
@@ -403,6 +413,7 @@ path "pki/certs"    { capabilities = ["list"] }
 path "pki/cert/*"   { capabilities = ["read"] }
 path "pki/issuers"  { capabilities = ["list"] }
 path "pki/issuer/*" { capabilities = ["read"] }
+path "secret/metadata/*" { capabilities = ["list", "read"] }
 HCL
 vault auth enable approle
 vault write auth/approle/role/expiry-radar token_policies=expiry-radar token_ttl=5m
@@ -415,6 +426,7 @@ vault write -f -field=secret_id auth/approle/role/expiry-radar/secret-id > vault
 | 🔑 Auth | AppRole (logs in every run and revokes the token afterwards) or `"token_file"` | AppRole (faz login a cada verificação e revoga o token no fim) ou `"token_file"` |
 | 🔁 Renewed certificates | Vault keeps old certificates listed until `tidy`; only the latest per name is reported | O Vault mantém certificados antigos até ao `tidy`; só o mais recente por nome é reportado |
 | 🚫 Skipped | Revoked certificates and ones expired more than 30 days ago | Certificados revogados e expirados há mais de 30 dias |
+| 🗝️ KV secrets | Only secrets with the expiry key; deleted current versions and invalid dates are skipped (invalid dates are logged). KV v2 only | Só segredos com a chave de validade; versões atuais apagadas e datas inválidas são ignoradas (as inválidas ficam no log). Só KV v2 |
 | 🏢 Enterprise | Set `namespace` for Vault Enterprise / HCP namespaces | Define `namespace` para namespaces do Vault Enterprise / HCP |
 
 ## ⚠️ Known limitations / Limitações conhecidas
