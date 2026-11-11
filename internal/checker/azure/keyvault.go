@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,27 @@ func (c *Checker) tokenSource() (tokenSource, error) {
 		c.src = src
 	}
 	return c.src, nil
+}
+
+// doWithRetry retries a throttled (429) or unavailable (503) answer up
+// to twice, honouring Retry-After (at most 30 s).
+func doWithRetry(ctx context.Context, hc *http.Client, req *http.Request) (*http.Response, error) {
+	for attempt := 0; ; attempt++ {
+		resp, err := hc.Do(req)
+		if err != nil || attempt == 2 || (resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable) {
+			return resp, err
+		}
+		wait := 5 * time.Second
+		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s >= 0 {
+			wait = min(time.Duration(s)*time.Second, 30*time.Second)
+		}
+		resp.Body.Close()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+	}
 }
 
 func port(u *url.URL) string {
@@ -116,7 +138,7 @@ func (c *Checker) getPages(ctx context.Context, first, token string) ([]json.Raw
 			return all, err
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := hc.Do(req)
+		resp, err := doWithRetry(ctx, hc, req)
 		if err != nil {
 			return all, err
 		}
@@ -125,14 +147,18 @@ func (c *Checker) getPages(ctx context.Context, first, token string) ([]json.Raw
 			return all, err
 		}
 		var r struct {
-			Value    []json.RawMessage `json:"value"`
-			NextLink string            `json:"nextLink"`
+			Value     []json.RawMessage `json:"value"`
+			NextLink  string            `json:"nextLink"`
+			ODataNext string            `json:"@odata.nextLink"` // Microsoft Graph
 		}
 		if err := json.Unmarshal(data, &r); err != nil {
 			return all, fmt.Errorf("GET %s: %w", nu.Path, err)
 		}
 		all = append(all, r.Value...)
 		next = r.NextLink
+		if next == "" {
+			next = r.ODataNext
+		}
 	}
 	return all, nil
 }
@@ -212,15 +238,34 @@ func (c *Checker) checkVault(ctx context.Context, token string, v vaultTarget) (
 	return records, errors.Join(errs...)
 }
 
-// Check authenticates, resolves the vault list (configured + discovered)
-// and checks every vault. A failing vault or subscription is reported in
-// the error while the others still count; an authentication failure for
-// Key Vault fails the run.
+// Check authenticates and runs the configured parts (Graph credentials,
+// Key Vaults). A failing part does not hide the others.
 func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 	src, err := c.tokenSource()
 	if err != nil {
 		return nil, err
 	}
+	var records []checker.ExpiryRecord
+	var errs []error
+	if c.cfg.AppRegistrations || c.cfg.ServicePrincipals {
+		recs, err := c.checkGraph(ctx, src)
+		records = append(records, recs...)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(c.cfg.KeyVaults)+len(c.cfg.Subscriptions) == 0 {
+		return records, errors.Join(errs...)
+	}
+	recs, err := c.checkKeyVaults(ctx, src)
+	return append(records, recs...), errors.Join(append(errs, err)...)
+}
+
+// checkKeyVaults resolves the vault list (configured + discovered) and
+// checks every vault. A failing vault or subscription is reported in
+// the error while the others still count; an authentication failure for
+// Key Vault fails this part.
+func (c *Checker) checkKeyVaults(ctx context.Context, src tokenSource) ([]checker.ExpiryRecord, error) {
 	kvToken, err := src.token(ctx, resVault)
 	if err != nil {
 		return nil, err

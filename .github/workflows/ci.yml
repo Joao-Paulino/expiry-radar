@@ -79,6 +79,7 @@ jobs:
           AZURE_TEST_TENANT_ID: ${{ vars.AZURE_TEST_TENANT_ID }}
           AZURE_TEST_CLIENT_ID: ${{ vars.AZURE_TEST_CLIENT_ID }}
           AZURE_TEST_VAULT: ${{ vars.AZURE_TEST_VAULT }}
+          AZURE_TEST_GRAPH: ${{ vars.AZURE_TEST_GRAPH }}
           AZURE_TEST_TOKEN_FILE: ${{ runner.temp }}/azure-token
 
   vulns:

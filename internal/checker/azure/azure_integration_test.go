@@ -5,6 +5,7 @@ package azure
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,7 +20,7 @@ func TestIntegration_AzureKeyVault(t *testing.T) {
 		t.Skip("AZURE_TEST_VAULT not set")
 	}
 	cfg := Config{Auth: "workload_identity", TenantID: os.Getenv("AZURE_TEST_TENANT_ID"), ClientID: os.Getenv("AZURE_TEST_CLIENT_ID"),
-		TokenFile: os.Getenv("AZURE_TEST_TOKEN_FILE"), KeyVaults: []string{vault}}
+		TokenFile: os.Getenv("AZURE_TEST_TOKEN_FILE"), KeyVaults: []string{vault}, AppRegistrations: os.Getenv("AZURE_TEST_GRAPH") != ""}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +29,11 @@ func TestIntegration_AzureKeyVault(t *testing.T) {
 		t.Fatalf("check: %v", err)
 	}
 	seen := map[string]bool{}
+	apps := 0
 	for _, r := range recs {
+		if r.Metadata["object_type"] == "applications" && strings.HasPrefix(r.Name, "expiry-radar-ci-target · er-test") {
+			apps++
+		}
 		t.Logf("%s %s %s expires %s", r.Kind, r.Name, r.Source, r.ExpiresAt.Format(time.RFC3339))
 		seen[r.Kind+"|"+r.Name] = true
 	}
@@ -36,6 +41,9 @@ func TestIntegration_AzureKeyVault(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("missing %s", want)
 		}
+	}
+	if cfg.AppRegistrations && apps == 0 {
+		t.Error("secret er-test of app expiry-radar-ci-target not reported (see scripts/azure-ci-setup.sh)")
 	}
 	if seen["secret|er-test-cert"] || seen["key|er-test-cert"] {
 		t.Error("managed secret/key behind the certificate reported")
