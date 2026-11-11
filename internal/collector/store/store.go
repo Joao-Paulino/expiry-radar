@@ -17,12 +17,14 @@ type StoredRecord struct {
 	CheckedAt  time.Time `json:"checked_at"`
 }
 
-// CheckerHealth is the last known success/failure state of one checker.
+// CheckerHealth is the last known state of one checker on one agent.
 type CheckerHealth struct {
-	CheckerName   string
-	LastSuccessAt time.Time
-	LastError     string
-	ReportedBy    string
+	CheckerName         string
+	ReportedBy          string    // agent ID
+	LastSeenAt          time.Time // last report of this checker by this agent
+	LastSuccessAt       time.Time // zero if it never succeeded
+	ConsecutiveFailures int
+	LastError           string
 }
 
 // Store is the Collector's persistence interface.
@@ -74,19 +76,22 @@ func (s *SQLite) SaveRecords(ctx context.Context, agentID string, records []chec
 }
 
 func (s *SQLite) RecordCheckerHealth(ctx context.Context, checkerName, reportedBy string, checkErr error) error {
+	now := time.Now().Unix()
 	if checkErr == nil {
 		_, err := s.db.ExecContext(ctx, `
-			INSERT INTO checker_health (checker_name, last_success_at, last_error, reported_by)
-			VALUES (?, ?, '', ?)
-			ON CONFLICT(checker_name) DO UPDATE SET last_success_at = excluded.last_success_at, reported_by = excluded.reported_by
-		`, checkerName, time.Now().UTC(), reportedBy)
+			INSERT INTO agent_checker_health (agent_id, checker_name, last_seen_at, last_success_at)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(agent_id, checker_name) DO UPDATE SET last_seen_at = excluded.last_seen_at,
+				last_success_at = excluded.last_success_at, consecutive_failures = 0, last_error = ''
+		`, reportedBy, checkerName, now, now)
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO checker_health (checker_name, last_error, reported_by)
-		VALUES (?, ?, ?)
-		ON CONFLICT(checker_name) DO UPDATE SET last_error = excluded.last_error, reported_by = excluded.reported_by
-	`, checkerName, checkErr.Error(), reportedBy)
+		INSERT INTO agent_checker_health (agent_id, checker_name, last_seen_at, consecutive_failures, last_error)
+		VALUES (?, ?, ?, 1, ?)
+		ON CONFLICT(agent_id, checker_name) DO UPDATE SET last_seen_at = excluded.last_seen_at,
+			consecutive_failures = consecutive_failures + 1, last_error = excluded.last_error
+	`, reportedBy, checkerName, now, checkErr.Error())
 	return err
 }
 
@@ -141,7 +146,8 @@ func scanStoredRecords(rows *sql.Rows) ([]StoredRecord, error) {
 }
 
 func (s *SQLite) CheckerHealth(ctx context.Context) ([]CheckerHealth, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT checker_name, last_success_at, last_error, reported_by FROM checker_health`)
+	rows, err := s.db.QueryContext(ctx, `SELECT checker_name, agent_id, last_seen_at, last_success_at, consecutive_failures, last_error
+		FROM agent_checker_health ORDER BY agent_id, checker_name`)
 	if err != nil {
 		return nil, err
 	}
@@ -150,12 +156,13 @@ func (s *SQLite) CheckerHealth(ctx context.Context) ([]CheckerHealth, error) {
 	var results []CheckerHealth
 	for rows.Next() {
 		var h CheckerHealth
-		var lastSuccessAt sql.NullTime
-		if err := rows.Scan(&h.CheckerName, &lastSuccessAt, &h.LastError, &h.ReportedBy); err != nil {
+		var seen, success int64
+		if err := rows.Scan(&h.CheckerName, &h.ReportedBy, &seen, &success, &h.ConsecutiveFailures, &h.LastError); err != nil {
 			return nil, err
 		}
-		if lastSuccessAt.Valid {
-			h.LastSuccessAt = lastSuccessAt.Time
+		h.LastSeenAt = time.Unix(seen, 0).UTC()
+		if success > 0 {
+			h.LastSuccessAt = time.Unix(success, 0).UTC()
 		}
 		results = append(results, h)
 	}

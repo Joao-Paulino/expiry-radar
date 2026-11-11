@@ -125,3 +125,49 @@ func TestSQLite_RecordCheckerHealth_SuccessAndFailure(t *testing.T) {
 		t.Fatal("expected LastSuccessAt to be preserved from the earlier successful call")
 	}
 }
+
+// TestSQLite_CheckerHealthIsPerAgent proves one agent's success never
+// hides another agent's failure, and that consecutive failures are
+// counted per agent and reset by a success.
+func TestSQLite_CheckerHealthIsPerAgent(t *testing.T) {
+	ctx := context.Background()
+	st := newHealthTestStore(t)
+	boom := errors.New("dial tcp: timeout")
+	st.RecordCheckerHealth(ctx, "tls", "agent-a", boom)
+	st.RecordCheckerHealth(ctx, "tls", "agent-a", boom)
+	st.RecordCheckerHealth(ctx, "tls", "agent-b", nil)
+
+	hs, err := st.CheckerHealth(ctx)
+	if err != nil || len(hs) != 2 {
+		t.Fatalf("got %+v, %v; want 2 entries", hs, err)
+	}
+	byAgent := map[string]CheckerHealth{}
+	for _, h := range hs {
+		byAgent[h.ReportedBy] = h
+	}
+	a, b := byAgent["agent-a"], byAgent["agent-b"]
+	if a.ConsecutiveFailures != 2 || a.LastError != boom.Error() || !a.LastSuccessAt.IsZero() || a.LastSeenAt.IsZero() {
+		t.Fatalf("agent-a: %+v", a)
+	}
+	if b.ConsecutiveFailures != 0 || b.LastSuccessAt.IsZero() || b.LastSeenAt.IsZero() {
+		t.Fatalf("agent-b: %+v", b)
+	}
+
+	st.RecordCheckerHealth(ctx, "tls", "agent-a", nil)
+	hs, _ = st.CheckerHealth(ctx)
+	for _, h := range hs {
+		if h.ReportedBy == "agent-a" && (h.ConsecutiveFailures != 0 || h.LastError != "" || h.LastSuccessAt.IsZero()) {
+			t.Fatalf("agent-a not reset by success: %+v", h)
+		}
+	}
+}
+
+func newHealthTestStore(t *testing.T) *SQLite {
+	t.Helper()
+	database, err := db.Open(filepath.Join(t.TempDir(), "radar.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	return NewSQLite(database)
+}

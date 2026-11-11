@@ -38,6 +38,25 @@ CREATE TABLE IF NOT EXISTS rules (
     PRIMARY KEY (source, name, kind)
 );
 
+-- Per agent and checker; replaces checker_health (kept only so old
+-- databases still open).
+CREATE TABLE IF NOT EXISTS agent_checker_health (
+    agent_id TEXT NOT NULL,
+    checker_name TEXT NOT NULL,
+    last_seen_at INTEGER NOT NULL,           -- unix seconds
+    last_success_at INTEGER NOT NULL DEFAULT 0,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (agent_id, checker_name)
+);
+
+-- Last alert sent per alert key, for deduplication.
+CREATE TABLE IF NOT EXISTS alert_state (
+    alert_key TEXT PRIMARY KEY,
+    severity TEXT NOT NULL,
+    last_sent_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS admin_account (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     password_hash TEXT NOT NULL DEFAULT '',
