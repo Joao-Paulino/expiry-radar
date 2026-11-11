@@ -44,14 +44,19 @@ type Config struct {
 	// time.Duration, and a bare JSON number would otherwise be
 	// nanoseconds, turning "3600" into a 3.6µs tight loop rather than
 	// an hour. EffectiveAlertInterval reconciles the two.
-	AlertInterval        time.Duration         `json:"-"`
-	AlertIntervalSeconds int                   `json:"alert_interval_seconds"`
-	WebhookURL           string                `json:"webhook_url"`
-	SlackWebhookURL      string                `json:"slack_webhook_url"`
-	TeamsWebhookURL      string                `json:"teams_webhook_url"`
-	Email                notifiers.EmailConfig `json:"email"`
-	TLSCertFile          string                `json:"tls_cert_file"`
-	TLSKeyFile           string                `json:"tls_key_file"`
+	AlertInterval        time.Duration `json:"-"`
+	AlertIntervalSeconds int           `json:"alert_interval_seconds"`
+	// Alert noise and health settings (see README); nil/0 = default.
+	ReminderCriticalHours *int                  `json:"reminder_critical_hours"` // default 24, 0 = never
+	ReminderWarningHours  *int                  `json:"reminder_warning_hours"`  // default 0 = never
+	CheckerFailThreshold  int                   `json:"checker_fail_threshold"`  // default 3
+	AgentStaleHours       int                   `json:"agent_stale_hours"`       // default 3
+	WebhookURL            string                `json:"webhook_url"`
+	SlackWebhookURL       string                `json:"slack_webhook_url"`
+	TeamsWebhookURL       string                `json:"teams_webhook_url"`
+	Email                 notifiers.EmailConfig `json:"email"`
+	TLSCertFile           string                `json:"tls_cert_file"`
+	TLSKeyFile            string                `json:"tls_key_file"`
 
 	// Ready, if non-nil, receives the actual bound address once the
 	// listener starts, letting tests use ListenAddr "host:0".
@@ -74,6 +79,30 @@ func (c Config) EffectiveAlertInterval() time.Duration {
 // token would match a request carrying no Authorization header at all;
 // 32 characters is the hex encoding of 16 random bytes.
 const MinTokenLength = 32
+
+func hoursOr(p *int, def int) time.Duration {
+	if p == nil {
+		return time.Duration(def) * time.Hour
+	}
+	return time.Duration(*p) * time.Hour
+}
+
+func (c Config) reminderCritical() time.Duration { return hoursOr(c.ReminderCriticalHours, 24) }
+func (c Config) reminderWarning() time.Duration  { return hoursOr(c.ReminderWarningHours, 0) }
+
+func (c Config) checkerFailThreshold() int {
+	if c.CheckerFailThreshold > 0 {
+		return c.CheckerFailThreshold
+	}
+	return 3
+}
+
+func (c Config) agentStaleAfter() time.Duration {
+	if c.AgentStaleHours > 0 {
+		return time.Duration(c.AgentStaleHours) * time.Hour
+	}
+	return 3 * time.Hour
+}
 
 // Validate reports an error describing the first missing required
 // field, so a misconfigured Collector fails fast and loudly instead
@@ -135,26 +164,47 @@ func buildNotifiers(cfg Config) []notifiers.Notifier {
 	return ns
 }
 
-func runAlertLoop(engine *alert.Engine, ns []notifiers.Notifier, interval time.Duration, done <-chan struct{}) {
+// deliver runs one alert cycle: evaluate everything, then send only
+// what StateStore says is new, changed, resolved or due a reminder.
+// Muted subjects send nothing and are forgotten, so unmuting a
+// still-failing record alerts again.
+func deliver(ctx context.Context, engine *alert.Engine, state *alert.StateStore, ns []notifiers.Notifier, now time.Time) {
+	notifications, err := engine.Evaluate(ctx, now)
+	if err != nil {
+		log.Printf("collector: alert evaluate error: %s", logging.Sanitize(err.Error()))
+		return
+	}
+	for _, n := range notifications {
+		key := n.Key()
+		if n.Muted {
+			if err := state.Clear(ctx, key); err != nil {
+				log.Printf("collector: alert state error: %s", logging.Sanitize(err.Error()))
+			}
+			continue
+		}
+		send, resolved, err := state.Decide(ctx, key, n.Severity, now)
+		if err != nil {
+			log.Printf("collector: alert state error: %s", logging.Sanitize(err.Error()))
+			continue
+		}
+		if !send {
+			continue
+		}
+		n.Resolved = resolved
+		for _, sendErr := range notifiers.SendAll(ctx, ns, n) {
+			log.Printf("collector: notify error: %s", logging.Sanitize(sendErr.Error()))
+		}
+	}
+}
+
+func runAlertLoop(engine *alert.Engine, state *alert.StateStore, ns []notifiers.Notifier, interval time.Duration, done <-chan struct{}) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			notifications, err := engine.Evaluate(context.Background(), time.Now())
-			if err != nil {
-				log.Printf("collector: alert evaluate error: %s", logging.Sanitize(err.Error()))
-				continue
-			}
-			for _, n := range notifications {
-				if n.Muted || n.Severity == alert.SeverityOK {
-					continue
-				}
-				for _, sendErr := range notifiers.SendAll(context.Background(), ns, n) {
-					log.Printf("collector: notify error: %s", logging.Sanitize(sendErr.Error()))
-				}
-			}
+			deliver(context.Background(), engine, state, ns, time.Now())
 		case <-done:
 			return
 		}
@@ -233,13 +283,15 @@ func Run(cfg Config) error {
 	mux.Handle("POST /ingest", auth.Middleware(cfg.AuthTokens, ingest.Handler(st)))
 
 	if interval := cfg.EffectiveAlertInterval(); interval > 0 {
-		engine := &alert.Engine{Store: st, Rules: rs, Thresholds: alert.DefaultThresholds()}
+		engine := &alert.Engine{Store: st, Rules: rs, Thresholds: alert.DefaultThresholds(),
+			FailThreshold: cfg.checkerFailThreshold(), StaleAfter: cfg.agentStaleAfter()}
+		state := &alert.StateStore{DB: database, ReminderCritical: cfg.reminderCritical(), ReminderWarning: cfg.reminderWarning()}
 		ns := buildNotifiers(cfg)
 		done := cfg.Done
 		if done == nil {
 			done = make(chan struct{})
 		}
-		go runAlertLoop(engine, ns, interval, done)
+		go runAlertLoop(engine, state, ns, interval, done)
 	}
 
 	cleanupDone := cfg.Done
