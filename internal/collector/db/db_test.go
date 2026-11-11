@@ -3,6 +3,7 @@ package db
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -26,7 +27,11 @@ func TestOpen_CreatesSchema(t *testing.T) {
 // TestOpen_PathWithSpecialCharacters proves a db_path containing URL
 // metacharacters opens exactly that file, not a truncated path.
 func TestOpen_PathWithSpecialCharacters(t *testing.T) {
-	for _, name := range []string{"hash#dir", "question?dir", "pct%20dir", "space dir"} {
+	names := []string{"hash#dir", "pct%20dir", "space dir"}
+	if runtime.GOOS != "windows" { // '?' is not a valid Windows file name character
+		names = append(names, "question?dir")
+	}
+	for _, name := range names {
 		dir := filepath.Join(t.TempDir(), name)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
