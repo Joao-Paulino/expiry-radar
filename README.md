@@ -454,6 +454,80 @@ path "sys/leases/lookup/database/creds/*" { capabilities = ["list", "sudo"] }
 path "sys/leases/lookup"                  { capabilities = ["update"] }
 ```
 
+### 🔷 Azure Key Vault
+
+The agent can also check Azure Key Vaults: certificates, secrets and keys with an expiry date. It only calls list endpoints, which return attributes, never values. No Azure SDK: plain REST, so no extra dependencies.
+O agente também pode verificar Azure Key Vaults: certificados, segredos e chaves com data de validade. Só chama endpoints de listagem, que devolvem atributos, nunca valores. Sem SDK do Azure: REST direto, sem dependências extra.
+
+```json
+"azure": {
+  "tenant_id": "<tenant id>",
+  "client_id": "<client id>",
+  "auth": "managed_identity",
+  "certificate_file": "/etc/expiry-radar/azure-sp.pem",
+  "token_file": "",
+  "key_vaults": ["kv-prod-weu", "kv-shared"],
+  "subscriptions": ["<subscription id>"]
+}
+```
+
+| | EN | PT |
+|---|---|---|
+| 🔑 `managed_identity` | VM, VMSS, AKS node, App Service, Container Apps or Azure Arc server; detected from the environment. `client_id` only for a user-assigned identity | VM, VMSS, nó AKS, App Service, Container Apps ou servidor Azure Arc; detetado pelo ambiente. `client_id` só para identidade user-assigned |
+| 📜 `certificate` | Service principal with a certificate: `certificate_file` = PEM with the certificate (a chain is fine; the one matching the key is used) and its unencrypted RSA key (`chmod 600`). The key never leaves the agent | Service principal com certificado: `certificate_file` = PEM com o certificado (pode ter a cadeia; é usado o que corresponde à chave) e a chave RSA sem password (`chmod 600`). A chave nunca sai do agente |
+| 🔗 `workload_identity` | Federated token (AKS workload identity, GitHub Actions, other clouds). `token_file`, `tenant_id`, `client_id` default to `AZURE_FEDERATED_TOKEN_FILE`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` | Token federado (workload identity do AKS, GitHub Actions, outras clouds). `token_file`, `tenant_id`, `client_id` usam por omissão `AZURE_FEDERATED_TOKEN_FILE`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` |
+| 🖥️ Azure Arc | The agent's user must be in the `himds` group (Linux) or Administrators / *Hybrid agent extension applications* (Windows), and `IDENTITY_ENDPOINT` + `IMDS_ENDPOINT` must be in the service environment (e.g. systemd `Environment=`); without them the agent uses 169.254.169.254, which outside Azure is another cloud's metadata service | O utilizador do agente tem de estar no grupo `himds` (Linux) ou Administrators / *Hybrid agent extension applications* (Windows), e `IDENTITY_ENDPOINT` + `IMDS_ENDPOINT` têm de estar no ambiente do serviço (ex.: `Environment=` do systemd); sem elas o agente usa 169.254.169.254, que fora do Azure é o serviço de metadados de outra cloud |
+| 🗂️ Vaults | `key_vaults` (least privilege) and/or `subscriptions` (discovers every vault in any region; adds `location`, `resource_group`, `subscription` to the records) | `key_vaults` (privilégio mínimo) e/ou `subscriptions` (descobre todos os vaults, em qualquer região; acrescenta `location`, `resource_group`, `subscription` aos registos) |
+| 🚫 Skipped | Items without an expiry date, disabled items, and the secret and key Key Vault creates behind each certificate | Itens sem data de validade, itens desativados e o segredo e a chave que o Key Vault cria por trás de cada certificado |
+| 🌐 Networks | One agent covers every region. A vault with private endpoint / firewall must be reachable (VNet + `privatelink.vaultcore.azure.net` DNS, or an allowed IP); otherwise that vault reports `403 ForbiddenByFirewall` or a DNS error and the others still count. Isolated networks: one agent per VNet/hub | Um agente cobre todas as regiões. Um vault com private endpoint / firewall tem de estar acessível (VNet + DNS `privatelink.vaultcore.azure.net`, ou IP permitido); senão esse vault dá `403 ForbiddenByFirewall` ou erro de DNS e os outros continuam. Redes isoladas: um agente por VNet/hub |
+
+Permissions / Permissões (`<principal>` = the identity's object id / object id da identidade):
+
+```bash
+# RBAC vaults: Key Vault Reader (metadata only, no values) on each vault
+az role assignment create --assignee-object-id <principal> --assignee-principal-type ServicePrincipal --role "Key Vault Reader" \
+  --scope "$(az keyvault show -n kv-prod-weu --query id -o tsv)"
+# Vaults with access policies: list only (list never returns values)
+az keyvault set-policy -n kv-prod-weu --object-id <principal> \
+  --certificate-permissions list --secret-permissions list --key-permissions list
+# Discovery (subscriptions): Reader on the subscription
+az role assignment create --assignee-object-id <principal> --assignee-principal-type ServicePrincipal --role Reader --scope /subscriptions/<subscription id>
+```
+
+Set-up per auth / Configuração por autenticação:
+
+```bash
+# certificate: creates the app + service principal and a PEM with cert and key
+az ad sp create-for-rbac --name expiry-radar --create-cert   # "fileWithCertAndPrivateKey" -> certificate_file
+# workload_identity on AKS: federate a user-assigned identity with the agent's service account
+az identity federated-credential create --name expiry-radar --identity-name expiry-radar -g <rg> \
+  --issuer "$(az aks show -n <aks> -g <rg> --query oidcIssuerProfile.issuerUrl -o tsv)" \
+  --subject system:serviceaccount:<namespace>:expiry-radar
+```
+
+<details><summary>CI against a real Key Vault (optional) / CI contra um Key Vault real (opcional)</summary>
+
+GitHub Actions is the workload identity, no secret stored. The `azure` CI job runs only when these repository variables exist.
+O GitHub Actions é a workload identity, sem segredos guardados. O job `azure` do CI só corre quando estas variáveis existem no repositório.
+
+```bash
+APP=$(az ad app create --display-name expiry-radar-ci --query appId -o tsv)
+az ad sp create --id "$APP"
+for s in ref:refs/heads/main pull_request; do
+  az ad app federated-credential create --id "$APP" --parameters "{\"name\":\"gh-${s//[:\/]/-}\",\"issuer\":\"https://token.actions.githubusercontent.com\",\"subject\":\"repo:Joao-Paulino/expiry-radar:$s\",\"audiences\":[\"api://AzureADTokenExchange\"]}"
+done
+az keyvault create -n <test vault> -g <rg> -l westeurope --enable-rbac-authorization true
+az role assignment create --assignee "$APP" --role "Key Vault Reader" --scope "$(az keyvault show -n <test vault> --query id -o tsv)"
+# test items (you need Key Vault Administrator on the vault for this)
+az keyvault certificate create --vault-name <test vault> -n er-test-cert -p "$(az keyvault certificate get-default-policy)"
+az keyvault secret set --vault-name <test vault> -n er-test-secret --value dummy --expires 2027-12-31T00:00:00Z
+az keyvault key create --vault-name <test vault> -n er-test-key --expires 2027-12-31T00:00:00Z
+gh variable set AZURE_TEST_TENANT_ID -b "$(az account show --query tenantId -o tsv)"
+gh variable set AZURE_TEST_CLIENT_ID -b "$APP"
+gh variable set AZURE_TEST_VAULT -b <test vault>
+```
+</details>
+
 ## ⚠️ Known limitations / Limitações conhecidas
 
 | EN | PT |
@@ -468,7 +542,7 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 |---|---|---|---|
 | ✅ | **M1** | TLS certificates + core platform (agent, collector, alerts, dashboard, export) | Certificados TLS + plataforma base (agente, collector, alertas, painel, exportação) |
 | ✅ | **M2** | HashiCorp Vault: secrets, leases, token TTLs | HashiCorp Vault: segredos, leases, TTL de tokens |
-| ⚪ | **M3** | Azure: Key Vault, App Registration credentials, managed certificates | Azure: Key Vault, credenciais de App Registrations, certificados geridos |
+| 🟡 | **M3** | Azure: Key Vault, App Registration credentials, managed certificates | Azure: Key Vault, credenciais de App Registrations, certificados geridos |
 | ⚪ | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
 | ⚪ | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
 | ⚪ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |

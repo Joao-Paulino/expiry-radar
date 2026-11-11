@@ -52,6 +52,35 @@ jobs:
           go-version-file: go.mod
       - run: scripts/ci/vault-smoke.sh
 
+  azure:
+    # Runs the Azure checker against a real Key Vault. GitHub Actions is
+    # the workload identity (federated credential, no stored secret).
+    # Skipped unless the repository variables are set (see README).
+    if: vars.AZURE_TEST_CLIENT_ID != '' && vars.AZURE_TEST_TENANT_ID != '' && vars.AZURE_TEST_VAULT != ''
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # Compile first: the GitHub OIDC token is short-lived.
+      - run: go test -c -tags integration -o "${RUNNER_TEMP}/azure.test" ./internal/checker/azure/
+      - name: GitHub OIDC token for Entra ID
+        run: |
+          curl -sSf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" \
+            | jq -er .value > "${RUNNER_TEMP}/azure-token"
+      - run: '"${RUNNER_TEMP}/azure.test" -test.count=1 -test.run TestIntegration_Azure -test.v'
+        env:
+          AZURE_TEST_TENANT_ID: ${{ vars.AZURE_TEST_TENANT_ID }}
+          AZURE_TEST_CLIENT_ID: ${{ vars.AZURE_TEST_CLIENT_ID }}
+          AZURE_TEST_VAULT: ${{ vars.AZURE_TEST_VAULT }}
+          AZURE_TEST_TOKEN_FILE: ${{ runner.temp }}/azure-token
+
   vulns:
     # Fails when the code calls a known-vulnerable function, in a
     # dependency or in the standard library of the Go used for releases.

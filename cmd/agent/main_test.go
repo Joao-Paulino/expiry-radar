@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/pem"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"net/http"
 	"net/http/httptest"
@@ -175,6 +176,23 @@ func TestCheckers_IncludesVaultWhenConfigured(t *testing.T) {
 	withVault.Vault.Address = "http://vault:8200"
 	if withVault.Validate() == nil {
 		t.Fatal("invalid vault config accepted")
+	}
+}
+
+// TestCheckers_IncludesAzureWhenConfigured proves the azure section
+// turns on the Azure checker, and an invalid one stops the agent.
+func TestCheckers_IncludesAzureWhenConfigured(t *testing.T) {
+	cfg := Config{CollectorURL: "https://c", Token: "t", AgentID: "a", QueuePath: "/q", IntervalSeconds: 60,
+		Azure: &azure.Config{Auth: "managed_identity", KeyVaults: []string{"kv-prod-weu"}}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid azure config rejected: %v", err)
+	}
+	if names := checkerNames(checkers(cfg)); names != "tls-checker,azure" {
+		t.Fatalf("with azure: %q", names)
+	}
+	cfg.Azure.Auth = "password"
+	if cfg.Validate() == nil {
+		t.Fatal("invalid azure config accepted")
 	}
 }
 
