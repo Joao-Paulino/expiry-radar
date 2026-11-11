@@ -42,6 +42,11 @@ type Store interface {
 	// newer check, rather than appearing to be the most recent one
 	// just because it was inserted most recently.
 	SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error
+	// SaveResult persists one checker's run. complete means the run
+	// had no error: then every item of that agent+checker it did not
+	// report is gone and stops being current. A failing run may be
+	// partial, so absence in it proves nothing.
+	SaveResult(ctx context.Context, agentID, checkerName string, records []checker.ExpiryRecord, checkedAt time.Time, complete bool) error
 	RecordCheckerHealth(ctx context.Context, checkerName, reportedBy string, checkErr error) error
 	ListCurrent(ctx context.Context) ([]StoredRecord, error)
 	History(ctx context.Context, source, name, kind string) ([]StoredRecord, error)
@@ -65,6 +70,15 @@ func NewSQLite(database *sql.DB) *SQLite {
 }
 
 func (s *SQLite) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error {
+	return s.SaveResult(ctx, agentID, "", records, checkedAt, false)
+}
+
+func (s *SQLite) SaveResult(ctx context.Context, agentID, checkerName string, records []checker.ExpiryRecord, checkedAt time.Time, complete bool) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	// Stored as unix nanoseconds (an integer) rather than as text:
 	// comparing RFC3339Nano strings lexically is only correct if every
 	// value has the same number of fractional digits, and the driver
@@ -76,15 +90,24 @@ func (s *SQLite) SaveRecords(ctx context.Context, agentID string, records []chec
 		if err != nil {
 			return err
 		}
-		_, err = s.db.ExecContext(ctx, `
-			INSERT INTO expiry_records (source, name, kind, expires_at, metadata_json, reported_by, checked_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, r.Source, r.Name, r.Kind, r.ExpiresAt.UTC(), string(metadataJSON), agentID, checkedAtNanos)
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO expiry_records (source, name, kind, expires_at, metadata_json, reported_by, checked_at, checker_name)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, r.Source, r.Name, r.Kind, r.ExpiresAt.UTC(), string(metadataJSON), agentID, checkedAtNanos, checkerName)
 		if err != nil {
 			return err
 		}
 	}
-	return nil
+	if complete && checkerName != "" {
+		// MAX: a late retried batch must not move the clock back.
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO checker_runs (agent_id, checker_name, last_complete_at) VALUES (?, ?, ?)
+			ON CONFLICT(agent_id, checker_name) DO UPDATE SET last_complete_at = MAX(last_complete_at, excluded.last_complete_at)
+		`, agentID, checkerName, checkedAtNanos); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *SQLite) RecordCheckerHealth(ctx context.Context, checkerName, reportedBy string, checkErr error) error {
@@ -107,6 +130,12 @@ func (s *SQLite) RecordCheckerHealth(ctx context.Context, checkerName, reportedB
 	return err
 }
 
+// ListCurrent returns the newest row per (source, name, kind), unless
+// the item is gone: a later complete run of the same agent and checker
+// did not report it. Rows from before checker names were stored (”)
+// are gone once the agent has a later complete run of any checker; a
+// forgotten agent's items (checker '*') are gone as of when it was
+// forgotten.
 func (s *SQLite) ListCurrent(ctx context.Context) ([]StoredRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT source, name, kind, expires_at, metadata_json, reported_by, checked_at
@@ -114,6 +143,12 @@ func (s *SQLite) ListCurrent(ctx context.Context) ([]StoredRecord, error) {
 		WHERE checked_at = (
 			SELECT MAX(checked_at) FROM expiry_records
 			WHERE source = e.source AND name = e.name AND kind = e.kind
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM checker_runs r
+			WHERE r.agent_id = e.reported_by
+			  AND (r.checker_name = e.checker_name OR e.checker_name = '' OR r.checker_name = '*')
+			  AND r.last_complete_at > e.checked_at
 		)
 	`)
 	if err != nil {
@@ -218,6 +253,10 @@ func (s *SQLite) ForgetAgent(ctx context.Context, agentID string) error {
 	}{
 		{`DELETE FROM agents WHERE agent_id = ?`, []any{agentID}},
 		{`DELETE FROM agent_checker_health WHERE agent_id = ?`, []any{agentID}},
+		// Its items are gone as of now (see ListCurrent: checker '*').
+		{`INSERT INTO checker_runs (agent_id, checker_name, last_complete_at) VALUES (?, '*', ?)
+			ON CONFLICT(agent_id, checker_name) DO UPDATE SET last_complete_at = excluded.last_complete_at`,
+			[]any{agentID, time.Now().UTC().UnixNano()}},
 		{`DELETE FROM alert_state WHERE alert_key = ? OR substr(alert_key, 1, ?) = ?`,
 			[]any{"agent|" + agentID, len("checker|" + agentID + "|"), "checker|" + agentID + "|"}},
 	} {

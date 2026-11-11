@@ -220,6 +220,7 @@ Substitui o nome DNS e o IP pelos que os agentes vão usar. Depois copia o
 | 🩺 Checker failing | A checker failing `checker_fail_threshold` times in a row on an agent | Um verificador que falha `checker_fail_threshold` vezes seguidas num agente |
 | 📴 Agent silent | An agent with no report for `agent_stale_hours` | Um agente sem reportar há `agent_stale_hours` |
 | 🗑️ Retired agent | **Forget** on the dashboard removes it and stops its alerts; it comes back if it reports again | **Esquecer** no painel remove-o e para os alertas; volta se reportar de novo |
+| 👻 Gone items | An item missing from a later error-free run of the same agent and checker (deleted, renamed, rotated away) leaves the dashboard and its open alert gets one "resolved" notification. A run with errors may be partial, so it never hides anything | Um item que falta numa execução posterior sem erros do mesmo agente e checker (apagado, renomeado, rodado) sai do painel e o alerta aberto recebe uma notificação de "resolvido". Uma execução com erros pode ser parcial, por isso nunca esconde nada |
 | 📮 Delivery | An alert is only marked as sent when at least one channel delivered it; otherwise it is retried next cycle | Um alerta só fica marcado como enviado quando pelo menos um canal o entregou; senão é tentado no ciclo seguinte |
 
 The dashboard's **Agents** section shows every agent and checker with last seen, last success and failures.
