@@ -522,8 +522,8 @@ az identity federated-credential create --name expiry-radar --identity-name expi
 
 <details><summary>CI against a real Key Vault (optional) / CI contra um Key Vault real (opcional)</summary>
 
-GitHub Actions is the workload identity, no secret stored. The `azure` CI job runs only when these repository variables exist.
-O GitHub Actions é a workload identity, sem segredos guardados. O job `azure` do CI só corre quando estas variáveis existem no repositório.
+GitHub Actions is the workload identity, no secret stored. The `azure` CI job runs only when these repository variables exist. One command does it all: `scripts/azure-ci-setup.sh <resource-group> <location> <vault-name>` (e.g. in Azure Cloud Shell); the steps it runs:
+O GitHub Actions é a workload identity, sem segredos guardados. O job `azure` do CI só corre quando estas variáveis existem no repositório. Um só comando faz tudo: `scripts/azure-ci-setup.sh <resource-group> <location> <nome-do-vault>` (ex.: no Azure Cloud Shell); os passos que executa:
 
 ```bash
 APP=$(az ad app create --display-name expiry-radar-ci --query appId -o tsv)
