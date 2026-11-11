@@ -4,6 +4,7 @@
 
 ### Know what expires before it breaks production · Saiba o que expira antes de parar a produção
 
+![CI](https://github.com/Joao-Paulino/expiry-radar/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)
 ![Status](https://img.shields.io/badge/status-milestone%201-orange)
 ![Platforms](https://img.shields.io/badge/agent-Windows%20%7C%20Linux%20amd64%20%7C%20arm64-blue)
@@ -70,6 +71,13 @@ cd expiry-radar
 go test ./...
 go build -o collector ./cmd/collector
 ./scripts/build-agent.sh   # dist/agent-{windows-amd64.exe,linux-amd64,linux-arm64}
+```
+
+Or install directly / Ou instala diretamente:
+
+```bash
+go install github.com/Joao-Paulino/expiry-radar/cmd/collector@latest
+go install github.com/Joao-Paulino/expiry-radar/cmd/agent@latest
 ```
 
 ### 🖥️ Collector
@@ -191,7 +199,6 @@ chmod 600 agent.json          # it holds the agent token
 | No alert yet when a checker keeps failing or an agent goes silent | Ainda não há alerta quando um verificador falha repetidamente ou um agente deixa de reportar |
 | Alerts are re-sent every cycle; mute a record to stop them | Os alertas repetem-se em cada ciclo; silencia o registo para os parar |
 | Two agents checking the same `host:port` overwrite each other; use fully qualified names | Dois agentes que verificam o mesmo `host:porta` sobrepõem-se; usa nomes totalmente qualificados |
-| `go install ...@latest` is not supported yet; build from source | `go install ...@latest` ainda não é suportado; compila a partir do código |
 
 ## 🗺️ Roadmap
 
