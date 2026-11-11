@@ -33,6 +33,8 @@ func TestIntegration_RealVaultPKI(t *testing.T) {
 			}
 		case r.Name == "old.example.com":
 			old++
+		case r.Kind == "certificate" && r.Name == "Smoke Root CA":
+			t.Errorf("CA certificate reported twice (as an issued certificate)")
 		case r.Kind == "ca_certificate" && r.Name == "smoke-root":
 			ca++
 		}

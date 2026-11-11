@@ -57,8 +57,9 @@ func TestCheck_PKILatestPerNameAndIssuers(t *testing.T) {
 		{serial: "01", pem: makePEM(t, "api.example.com", now.Add(10*24*time.Hour), 1)}, // old, renewed
 		{serial: "02", pem: makePEM(t, "api.example.com", now.Add(80*24*time.Hour), 2)}, // current
 		{serial: "03", pem: makePEM(t, "revoked.example.com", now.Add(5*24*time.Hour), 3), revoked: true},
-		{serial: "04", pem: makePEM(t, "gone.example.com", now.Add(-40*24*time.Hour), 4)}, // expired long ago
-		{serial: "05", pem: makePEM(t, "late.example.com", now.Add(-2*24*time.Hour), 5)},  // just expired: report
+		{serial: "04", pem: makePEM(t, "gone.example.com", now.Add(-40*24*time.Hour), 4)},         // expired long ago
+		{serial: "05", pem: makePEM(t, "late.example.com", now.Add(-2*24*time.Hour), 5)},          // just expired: report
+		{serial: "09", pem: makePEMCA(t, "Example Root CA", now.Add(3650*24*time.Hour), 9, true)}, // Vault lists its CA here too
 	}
 	f.issuers["pki"] = map[string]string{"iss-1": makePEM(t, "Example Root CA", now.Add(3650*24*time.Hour), 9)}
 	f.issuerNm["pki"] = map[string]string{"iss-1": "root-2026"}

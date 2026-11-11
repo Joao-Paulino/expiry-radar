@@ -289,7 +289,9 @@ func (c *Checker) checkMount(ctx context.Context, s *session, source, mount stri
 				}
 				return
 			}
-			if r.Data.RevocationTime > 0 || now.Sub(cert.NotAfter) > expiredHorizon {
+			// CA certificates are listed here too; they are reported once,
+			// as issuers, below.
+			if r.Data.RevocationTime > 0 || cert.IsCA || now.Sub(cert.NotAfter) > expiredHorizon {
 				return
 			}
 			name := cert.Subject.CommonName

@@ -39,10 +39,14 @@ type fakeVault struct {
 }
 
 func makePEM(t *testing.T, cn string, notAfter time.Time, serial int64) string {
+	return makePEMCA(t, cn, notAfter, serial, false)
+}
+
+func makePEMCA(t *testing.T, cn string, notAfter time.Time, serial int64, isCA bool) string {
 	t.Helper()
 	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	tmpl := &x509.Certificate{SerialNumber: big.NewInt(serial), Subject: pkix.Name{CommonName: cn},
-		NotBefore: notAfter.Add(-90 * 24 * time.Hour), NotAfter: notAfter}
+		NotBefore: notAfter.Add(-90 * 24 * time.Hour), NotAfter: notAfter, IsCA: isCA, BasicConstraintsValid: isCA}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &k.PublicKey, k)
 	if err != nil {
 		t.Fatal(err)
