@@ -466,17 +466,17 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 
 | | Milestone | EN | PT |
 |---|---|---|---|
-| 🟡 | **M1** | TLS certificates + core platform (agent, collector, alerts, dashboard, export) | Certificados TLS + plataforma base (agente, collector, alertas, painel, exportação) |
-| ⚪ | **M2** | HashiCorp Vault: secrets, leases, token TTLs | HashiCorp Vault: segredos, leases, TTL de tokens |
+| ✅ | **M1** | TLS certificates + core platform (agent, collector, alerts, dashboard, export) | Certificados TLS + plataforma base (agente, collector, alertas, painel, exportação) |
+| ✅ | **M2** | HashiCorp Vault: secrets, leases, token TTLs | HashiCorp Vault: segredos, leases, TTL de tokens |
 | ⚪ | **M3** | Azure: Key Vault, App Registration credentials, managed certificates | Azure: Key Vault, credenciais de App Registrations, certificados geridos |
 | ⚪ | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
 | ⚪ | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
 | ⚪ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
 | ⚪ | Later / Depois | Software licences, SaaS subscriptions, then OT/ICS | Licenças de software, subscrições SaaS e depois OT/ICS |
 
-🟡 in progress / em curso · ⚪ planned / planeado
+✅ done / concluído · 🟡 in progress / em curso · ⚪ planned / planeado
 
-**Still open in M1 / Ainda em aberto no M1**
+**Done in M1 / Concluído no M1**
 
 - [x] Dashboard login (password + TOTP) / Login no painel (password + TOTP)
 - [x] SSO via OIDC (Entra ID, Google) / SSO via OIDC (Entra ID, Google)
@@ -485,6 +485,14 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 - [x] Agent validated on Rocky Linux 9 (RedHat family), Debian 12, Arch in CI / Agente validado em Rocky Linux 9 (família RedHat), Debian 12, Arch no CI
 - [x] GitHub release with binaries per platform / Release no GitHub com binários por plataforma
 - [x] Docker images for agent and collector / Imagens Docker do agente e do collector
+
+**Done in M2 / Concluído no M2**
+
+- [x] Vault PKI certificates and CA issuers / Certificados PKI e CAs do Vault
+- [x] KV v2 secrets with an expiry date in metadata / Segredos KV v2 com data de validade nos metadados
+- [x] AppRole secret IDs and (opt-in) tokens / Secret IDs de AppRole e tokens (opcional)
+- [x] Dynamic secret leases (opt-in) / Leases de segredos dinâmicos (opcional)
+- [x] Release gate: no binary or image ships with a known vulnerability / Bloqueio no release: nenhum binário ou imagem sai com vulnerabilidades conhecidas
 
 ## 🛡️ Security / Segurança
 
