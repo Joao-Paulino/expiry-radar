@@ -34,10 +34,20 @@ path "pki/cert/*"   { capabilities = ["read"] }
 path "pki/issuers"  { capabilities = ["list"] }
 path "pki/issuer/*" { capabilities = ["read"] }
 path "secret/metadata/*" { capabilities = ["list", "read"] }
+path "auth/token/accessors"       { capabilities = ["list", "sudo"] }
+path "auth/token/lookup-accessor" { capabilities = ["update"] }
+path "auth/approle/role"                             { capabilities = ["list"] }
+path "auth/approle/role/+/secret-id"                 { capabilities = ["list"] }
+path "auth/approle/role/+/secret-id-accessor/lookup" { capabilities = ["update"] }
 HCL
 v auth enable approle >/dev/null
 v write auth/approle/role/expiry-radar token_policies=expiry-radar token_ttl=5m secret_id_ttl=10m >/dev/null
 ROLE_ID=$(v read -field=role_id auth/approle/role/expiry-radar/role-id)
+
+# A long-lived token and a CI role whose secret ID expires in 30 days.
+v token create -display-name=ci-long -ttl=720h -policy=default >/dev/null
+v write auth/approle/role/ci token_policies=default secret_id_ttl=720h >/dev/null
+v write -f auth/approle/role/ci/secret-id >/dev/null
 v write -f -field=secret_id auth/approle/role/expiry-radar/secret-id > "$W/secret-id"
 
 VAULT_TEST_ADDR=https://127.0.0.1:8200 VAULT_TEST_CA="$W/vault-ca.pem" VAULT_TEST_ROLE_ID="$ROLE_ID" \

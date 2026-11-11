@@ -36,7 +36,22 @@ type fakeVault struct {
 	issuers   map[string]map[string]string // mount -> issuer id -> pem
 	issuerNm  map[string]map[string]string // mount -> issuer id -> name
 	failMount string
-	kv        map[string]map[string]fakeKV // mount -> secret path -> metadata
+	kv        map[string]map[string]fakeKV                  // mount -> secret path -> metadata
+	tokenDB   map[string]fakeToken                          // accessor -> token metadata
+	selfAcc   string                                        // accessor of the agent's own token
+	secretIDs map[string]map[string]map[string]fakeSecretID // approle mount -> role -> accessor -> secret ID
+}
+
+type fakeToken struct {
+	display     string
+	creationTTL int    // seconds
+	expire      string // RFC 3339, "" = never
+	policies    []string
+}
+
+type fakeSecretID struct {
+	ttl        int
+	expiration string // RFC 3339; "0001-01-01T00:00:00Z" = never
 }
 
 // fakeKV is a KV v2 secret's metadata (the fake never has values).
@@ -63,7 +78,7 @@ func makePEMCA(t *testing.T, cn string, notAfter time.Time, serial int64, isCA b
 
 func newFakeVault(t *testing.T) *fakeVault {
 	t.Helper()
-	f := &fakeVault{certs: map[string][]fakeCert{}, issuers: map[string]map[string]string{}, issuerNm: map[string]map[string]string{}, kv: map[string]map[string]fakeKV{}}
+	f := &fakeVault{certs: map[string][]fakeCert{}, issuers: map[string]map[string]string{}, issuerNm: map[string]map[string]string{}, kv: map[string]map[string]fakeKV{}, tokenDB: map[string]fakeToken{}, secretIDs: map[string]map[string]map[string]fakeSecretID{}}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -96,6 +111,68 @@ func (f *fakeVault) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if tok := r.Header.Get("X-Vault-Token"); tok != "approle-token" && tok != "file-token" {
 		http.Error(w, `{"errors":["permission denied"]}`, 403)
+		return
+	}
+	switch {
+	case p == "auth/token/lookup-self":
+		reply(w, map[string]any{"data": map[string]any{"accessor": f.selfAcc}})
+		return
+	case p == "auth/token/accessors" && isList:
+		var keys []string
+		for a := range f.tokenDB {
+			keys = append(keys, a)
+		}
+		reply(w, map[string]any{"data": map[string]any{"keys": keys}})
+		return
+	case p == "auth/token/lookup-accessor" && r.Method == http.MethodPost:
+		var b map[string]string
+		json.NewDecoder(r.Body).Decode(&b)
+		tk, ok := f.tokenDB[b["accessor"]]
+		if !ok {
+			http.Error(w, `{"errors":["invalid accessor"]}`, 400)
+			return
+		}
+		var exp any
+		if tk.expire != "" {
+			exp = tk.expire
+		}
+		reply(w, map[string]any{"data": map[string]any{"accessor": b["accessor"], "id": "", "display_name": tk.display,
+			"creation_ttl": tk.creationTTL, "expire_time": exp, "policies": tk.policies, "renewable": true}})
+		return
+	}
+	if am, rest, ok := strings.Cut(strings.TrimPrefix(p, "auth/"), "/role"); ok && strings.HasPrefix(p, "auth/") && f.secretIDs[am] != nil {
+		roles := f.secretIDs[am]
+		parts := strings.Split(strings.TrimPrefix(rest, "/"), "/")
+		switch {
+		case rest == "" && isList:
+			var keys []string
+			for role := range roles {
+				keys = append(keys, role)
+			}
+			reply(w, map[string]any{"data": map[string]any{"keys": keys}})
+		case len(parts) == 2 && parts[1] == "secret-id" && isList:
+			var keys []string
+			for a := range roles[parts[0]] {
+				keys = append(keys, a)
+			}
+			if len(keys) == 0 {
+				http.NotFound(w, r)
+				return
+			}
+			reply(w, map[string]any{"data": map[string]any{"keys": keys}})
+		case len(parts) == 3 && parts[1] == "secret-id-accessor" && parts[2] == "lookup" && r.Method == http.MethodPost:
+			var b map[string]string
+			json.NewDecoder(r.Body).Decode(&b)
+			sid, ok := roles[parts[0]][b["secret_id_accessor"]]
+			if !ok {
+				http.Error(w, `{"errors":["failed to find accessor entry"]}`, 404)
+				return
+			}
+			reply(w, map[string]any{"data": map[string]any{"secret_id_accessor": b["secret_id_accessor"],
+				"secret_id_ttl": sid.ttl, "expiration_time": sid.expiration}})
+		default:
+			http.NotFound(w, r)
+		}
 		return
 	}
 	mount, rest, _ := strings.Cut(p, "/")

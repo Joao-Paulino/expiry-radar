@@ -378,10 +378,10 @@ chmod 600 agent.json          # it holds the agent token
 | `interval_seconds` | Seconds between checks; the first check runs at startup | Segundos entre verificações; a primeira corre no arranque |
 | `tls_targets` | Hosts to check: `host`, `port`, and `start_tls: "smtp"` for mail servers | Servidores a verificar: `host`, `port`, e `start_tls: "smtp"` para servidores de email |
 
-### 🔒 HashiCorp Vault (PKI, KV v2)
+### 🔒 HashiCorp Vault (PKI, KV v2, tokens, AppRole)
 
-The agent can also check a Vault: certificates issued by PKI mounts and the mounts' CAs, and KV v2 secrets with an expiry date in their metadata (e.g. a third-party API key). It only reads public certificate data and KV metadata, never secret values.
-O agente também pode verificar um Vault: certificados emitidos pelos mounts PKI e as respetivas CAs, e segredos KV v2 com data de validade nos metadados (ex.: uma API key de terceiros). Só lê dados públicos dos certificados e metadados do KV, nunca valores de segredos.
+The agent can also check a Vault: certificates issued by PKI mounts and the mounts' CAs, KV v2 secrets with an expiry date in their metadata (e.g. a third-party API key), AppRole secret IDs and, optionally, tokens. It only reads certificate data, metadata and accessor lookups, never secret values, tokens or secret IDs.
+O agente também pode verificar um Vault: certificados emitidos pelos mounts PKI e as respetivas CAs, segredos KV v2 com data de validade nos metadados (ex.: uma API key de terceiros), secret IDs de AppRole e, opcionalmente, tokens. Só lê dados de certificados, metadados e consultas por accessor, nunca valores de segredos, tokens ou secret IDs.
 
 Add to `agent.json` / Acrescenta ao `agent.json`:
 
@@ -393,11 +393,14 @@ Add to `agent.json` / Acrescenta ao `agent.json`:
   "auth": { "approle": { "role_id": "<role id>", "secret_id_file": "/etc/expiry-radar/vault-secret-id" } },
   "pki_mounts": ["pki", "pki_int"],
   "kv_mounts": ["secret"],
-  "kv_expiry_key": "expires_at"
+  "kv_expiry_key": "expires_at",
+  "approle_mounts": ["approle"],
+  "check_tokens": false,
+  "token_min_ttl_hours": 24
 }
 ```
 
-Set at least one of `pki_mounts` / `kv_mounts` · Define pelo menos um de `pki_mounts` / `kv_mounts`. `kv_expiry_key` is optional (default `expires_at`) · é opcional (por omissão `expires_at`).
+Set at least one of `pki_mounts` / `kv_mounts` / `approle_mounts` / `check_tokens` · Define pelo menos um de `pki_mounts` / `kv_mounts` / `approle_mounts` / `check_tokens`. `kv_expiry_key` is optional (default `expires_at`) · é opcional (por omissão `expires_at`).
 
 Mark a KV secret with its expiry date / Marca um segredo KV com a data de validade (`2027-03-31` or RFC 3339 `2027-03-31T00:00:00Z`):
 
@@ -414,6 +417,9 @@ path "pki/cert/*"   { capabilities = ["read"] }
 path "pki/issuers"  { capabilities = ["list"] }
 path "pki/issuer/*" { capabilities = ["read"] }
 path "secret/metadata/*" { capabilities = ["list", "read"] }
+path "auth/approle/role"                             { capabilities = ["list"] }
+path "auth/approle/role/+/secret-id"                 { capabilities = ["list"] }
+path "auth/approle/role/+/secret-id-accessor/lookup" { capabilities = ["update"] }
 HCL
 vault auth enable approle
 vault write auth/approle/role/expiry-radar token_policies=expiry-radar token_ttl=5m
@@ -426,8 +432,17 @@ vault write -f -field=secret_id auth/approle/role/expiry-radar/secret-id > vault
 | 🔑 Auth | AppRole (logs in every run and revokes the token afterwards) or `"token_file"` | AppRole (faz login a cada verificação e revoga o token no fim) ou `"token_file"` |
 | 🔁 Renewed certificates | Vault keeps old certificates listed until `tidy`; only the latest per name is reported | O Vault mantém certificados antigos até ao `tidy`; só o mais recente por nome é reportado |
 | 🚫 Skipped | Revoked certificates and ones expired more than 30 days ago | Certificados revogados e expirados há mais de 30 dias |
+| 🎫 Tokens (`check_tokens`) | Off by default. Listing token accessors is root-protected in Vault and needs `sudo` (add the two paths below). With it, a compromised agent could map every token and its policies (not read or revoke them). Skips tokens without expiry, the agent's own and those created with a TTL below `token_min_ttl_hours` | Desligado por omissão. Listar accessors de tokens é protegido no Vault e exige `sudo` (acrescenta os dois caminhos abaixo). Com isso, um agente comprometido conseguiria mapear todos os tokens e as políticas (não lê-los nem revogá-los). Ignora tokens sem expiração, o do próprio agente e os criados com TTL abaixo de `token_min_ttl_hours` |
+| 🔐 AppRole secret IDs | Secret IDs with a TTL; names show only the first 8 characters of the accessor | Secret IDs com TTL; os nomes mostram só os 8 primeiros caracteres do accessor |
 | 🗝️ KV secrets | Only secrets with the expiry key; deleted current versions and invalid dates are skipped (invalid dates are logged). KV v2 only | Só segredos com a chave de validade; versões atuais apagadas e datas inválidas são ignoradas (as inválidas ficam no log). Só KV v2 |
 | 🏢 Enterprise | Set `namespace` for Vault Enterprise / HCP namespaces | Define `namespace` para namespaces do Vault Enterprise / HCP |
+
+Policy for `check_tokens` / Policy para `check_tokens` (⚠️ `sudo`):
+
+```hcl
+path "auth/token/accessors"       { capabilities = ["list", "sudo"] }
+path "auth/token/lookup-accessor" { capabilities = ["update"] }
+```
 
 ## ⚠️ Known limitations / Limitações conhecidas
 

@@ -39,6 +39,8 @@ func TestConfig_Validate(t *testing.T) {
 		"two auths":         func(c *Config) { c.Auth.AppRole = &AppRole{RoleID: "r", SecretIDFile: "/s"} },
 		"no mounts":         func(c *Config) { c.PKIMounts = nil },
 		"bad kv mount":      func(c *Config) { c.KVMounts = []string{"../sys"} },
+		"bad approle mount": func(c *Config) { c.AppRoleMounts = []string{"a b"} },
+		"negative min ttl":  func(c *Config) { c.CheckTokens = true; c.TokenMinTTLHours = -1 },
 		"bad expiry key":    func(c *Config) { c.KVMounts = []string{"secret"}; c.KVExpiryKey = "bad key" },
 		"bad mount":         func(c *Config) { c.PKIMounts = []string{"../sys"} },
 		"approle no secret": func(c *Config) { c.Auth = Auth{AppRole: &AppRole{RoleID: "r"}} },
@@ -46,6 +48,14 @@ func TestConfig_Validate(t *testing.T) {
 	kvOnly := Config{Address: "https://vault:8200", Auth: Auth{TokenFile: "/x"}, KVMounts: []string{"secret"}}
 	if err := kvOnly.Validate(); err != nil {
 		t.Fatalf("KV-only config rejected: %v", err)
+	}
+	for _, only := range []Config{
+		{Address: "https://vault:8200", Auth: Auth{TokenFile: "/x"}, CheckTokens: true},
+		{Address: "https://vault:8200", Auth: Auth{TokenFile: "/x"}, AppRoleMounts: []string{"approle"}},
+	} {
+		if err := only.Validate(); err != nil {
+			t.Fatalf("config %+v rejected: %v", only, err)
+		}
 	}
 	for name, mutate := range cases {
 		c := ok
@@ -218,5 +228,68 @@ func TestCheck_EmptyKVMountIsNotAnError(t *testing.T) {
 	cfg.KVMounts = []string{"empty"}
 	if recs, err := newChecker(t, f, cfg).Check(context.Background()); err != nil || len(recs) != 0 {
 		t.Fatalf("got %+v, %v", recs, err)
+	}
+}
+
+func TestCheck_Tokens(t *testing.T) {
+	f := newFakeVault(t)
+	exp := time.Now().Add(20 * 24 * time.Hour).UTC().Truncate(time.Second)
+	f.selfAcc = "self-acc-0000"
+	f.tokenDB = map[string]fakeToken{
+		"abcdefgh12345678": {display: "approle-ci", creationTTL: 30 * 24 * 3600, expire: exp.Format(time.RFC3339), policies: []string{"ci"}},
+		"short0000000":     {display: "approle", creationTTL: 300, expire: time.Now().Add(5 * time.Minute).Format(time.RFC3339)},
+		"root00000000":     {display: "root", creationTTL: 0},
+		"self-acc-0000":    {display: "approle", creationTTL: 30 * 24 * 3600, expire: exp.Format(time.RFC3339)},
+	}
+	cfg := appRoleConfig(t, f)
+	cfg.CheckTokens = true
+	recs, err := newChecker(t, f, cfg).Check(context.Background())
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("want only the long-lived token, got %+v, %v", recs, err)
+	}
+	r := recs[0]
+	if r.Kind != "token" || r.Name != "approle-ci · abcdefgh" || !r.ExpiresAt.Equal(exp) || r.Metadata["policies"] != "ci" {
+		t.Fatalf("token: %+v", r)
+	}
+	for _, v := range r.Metadata {
+		if strings.Contains(v, "abcdefgh12345678") {
+			t.Fatalf("full accessor exposed: %+v", r.Metadata)
+		}
+	}
+}
+
+func TestCheck_TokensOffByDefault(t *testing.T) {
+	f := newFakeVault(t)
+	f.tokenDB = map[string]fakeToken{"abcdefgh1234": {display: "x", creationTTL: 30 * 24 * 3600, expire: time.Now().Add(time.Hour).Format(time.RFC3339)}}
+	f.secretIDs["approle"] = map[string]map[string]fakeSecretID{}
+	cfg := appRoleConfig(t, f)
+	cfg.AppRoleMounts = []string{"approle"}
+	if _, err := newChecker(t, f, cfg).Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range f.paths {
+		if strings.Contains(p, "auth/token/accessors") || strings.Contains(p, "lookup-accessor") {
+			t.Fatalf("tokens listed without check_tokens: %q", p)
+		}
+	}
+}
+
+func TestCheck_AppRoleSecretIDs(t *testing.T) {
+	f := newFakeVault(t)
+	exp := time.Now().Add(10 * 24 * time.Hour).UTC().Truncate(time.Second)
+	f.secretIDs["approle"] = map[string]map[string]fakeSecretID{
+		"ci":     {"acc1234567890": {ttl: 30 * 24 * 3600, expiration: exp.Format(time.RFC3339)}, "forever00000": {ttl: 0, expiration: "0001-01-01T00:00:00Z"}},
+		"no-ids": {},
+	}
+	cfg := appRoleConfig(t, f)
+	cfg.AppRoleMounts = []string{"approle"}
+	recs, err := newChecker(t, f, cfg).Check(context.Background())
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("got %+v, %v", recs, err)
+	}
+	r := recs[0]
+	if r.Kind != "secret" || r.Name != "ci secret-id · acc12345" || !r.ExpiresAt.Equal(exp) ||
+		r.Metadata["role"] != "ci" || r.Metadata["mount"] != "approle" {
+		t.Fatalf("secret id: %+v", r)
 	}
 }
