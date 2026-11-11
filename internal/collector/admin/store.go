@@ -6,10 +6,13 @@ import (
 	"time"
 )
 
-const (
-	maxFailedAttempts = 5
-	lockoutDuration   = 15 * time.Minute
-)
+// MaxFailedAttempts is the account-wide backstop: after this many
+// failed logins in a row, from any address, the account locks for
+// lockoutDuration. The per-address throttle in the dashboard (5 per 15
+// minutes) is what a single attacker hits first.
+const MaxFailedAttempts = 20
+
+const lockoutDuration = 15 * time.Minute
 
 // Account is the single Administrator account's stored state.
 type Account struct {
@@ -76,25 +79,32 @@ func (s *Store) SetTOTP(ctx context.Context, secret string, recoveryHashes []str
 	return tx.Commit()
 }
 
-// RecordFailure atomically increments the failure counter and, on the
-// 5th consecutive failure, locks the account for 15 minutes. It
-// reports whether the account is locked after this failure.
-func (s *Store) RecordFailure(ctx context.Context, now time.Time) (bool, error) {
+// ReserveAttempt atomically counts one login attempt and reports
+// whether it may be evaluated. It refuses (false) while the account is
+// locked; the attempt that reaches MaxFailedAttempts is still allowed
+// and starts the lockout. Counting and the lock decision happen in one
+// statement, so concurrent attempts can never exceed the limit. An
+// expired lock restarts the count, so one typo after a lockout does not
+// lock the account again. A successful login resets the count
+// (RecordSuccess).
+func (s *Store) ReserveAttempt(ctx context.Context, now time.Time) (bool, error) {
+	n := now.Unix()
 	var failed int
-	var lockedUntil int64
 	err := s.DB.QueryRowContext(ctx, `UPDATE admin_account
-		SET failed_attempts = failed_attempts + 1,
-			locked_until = CASE WHEN failed_attempts + 1 >= ? THEN ? ELSE locked_until END
-		WHERE id = 1
-		RETURNING failed_attempts, locked_until`,
-		maxFailedAttempts, now.Add(lockoutDuration).Unix()).Scan(&failed, &lockedUntil)
+		SET failed_attempts = CASE WHEN locked_until > 0 AND locked_until <= ? THEN 1 ELSE failed_attempts + 1 END,
+			locked_until = CASE
+				WHEN (CASE WHEN locked_until > 0 AND locked_until <= ? THEN 1 ELSE failed_attempts + 1 END) >= ? THEN ?
+				ELSE 0 END
+		WHERE id = 1 AND locked_until <= ?
+		RETURNING failed_attempts`,
+		n, n, MaxFailedAttempts, now.Add(lockoutDuration).Unix(), n).Scan(&failed)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return lockedUntil > now.Unix(), nil
+	return true, nil
 }
 
 // RecordSuccess clears the failure counter and lockout and stores the

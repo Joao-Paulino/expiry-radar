@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,11 @@ var (
 	// ErrNotConfigured means the password or TOTP has not been set up.
 	ErrNotConfigured = errors.New("admin: administrator login not configured")
 )
+
+// hashSlots bounds how many PBKDF2 computations run at once, so the
+// public /login endpoint cannot be used to exhaust the CPU and starve
+// ingest and alerting. Extra requests wait their turn.
+var hashSlots = make(chan struct{}, max(1, runtime.NumCPU()/2))
 
 // verifyPassword is a variable so tests can count calls (timing checks).
 var verifyPassword = VerifyPassword
@@ -56,7 +62,13 @@ func (a *Authenticator) Login(ctx context.Context, password, code string) error 
 	}
 	// Always pay for the hash first, so timing reveals nothing about
 	// configuration or lock state.
+	select {
+	case hashSlots <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	passwordOK, err := verifyPassword(hash, password)
+	<-hashSlots
 	if err != nil {
 		return err
 	}
@@ -65,11 +77,16 @@ func (a *Authenticator) Login(ctx context.Context, password, code string) error 
 		return ErrNotConfigured
 	}
 	now := a.Now()
-	if acc.LockedUntil.After(now) {
+	// Count the attempt and check the lock in one atomic step.
+	allowed, err := a.Store.ReserveAttempt(ctx, now)
+	if err != nil {
+		return err
+	}
+	if !allowed {
 		return ErrLocked
 	}
 	if !passwordOK {
-		return a.fail(ctx, now)
+		return ErrInvalidCredentials
 	}
 
 	code = strings.TrimSpace(code)
@@ -79,7 +96,7 @@ func (a *Authenticator) Login(ctx context.Context, password, code string) error 
 			return err
 		}
 		if !claimed {
-			return a.fail(ctx, now)
+			return ErrInvalidCredentials
 		}
 		return a.Store.RecordSuccess(ctx, step)
 	}
@@ -89,18 +106,7 @@ func (a *Authenticator) Login(ctx context.Context, password, code string) error 
 		return err
 	}
 	if !used {
-		return a.fail(ctx, now)
+		return ErrInvalidCredentials
 	}
 	return a.Store.RecordSuccess(ctx, 0)
-}
-
-func (a *Authenticator) fail(ctx context.Context, now time.Time) error {
-	locked, err := a.Store.RecordFailure(ctx, now)
-	if err != nil {
-		return err
-	}
-	if locked {
-		return ErrLocked
-	}
-	return ErrInvalidCredentials
 }

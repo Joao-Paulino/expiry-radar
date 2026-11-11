@@ -3,12 +3,26 @@ package dashboard
 import (
 	"errors"
 	"log"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 )
+
+// PerAddressLimit is how many failed logins one client address may make
+// per 15 minutes before its attempts are refused without being checked.
+const PerAddressLimit = 5
+
+func clientAddress(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
 
 type loginView struct {
 	Error string
@@ -31,17 +45,29 @@ func LoginHandlers(auth *admin.Authenticator, sessions *session.Store) (get, pos
 		}
 	}
 
+	throttle := admin.NewThrottle(PerAddressLimit, 15*time.Minute)
+
 	get = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { render(w, "") })
 
 	post = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		addr := clientAddress(r)
+		if throttle.Blocked(addr, time.Now()) {
+			log.Printf("dashboard: login throttled (from %s)", logging.Sanitize(addr))
+			render(w, genericLoginError)
+			return
+		}
 		if err := r.ParseForm(); err != nil {
 			render(w, genericLoginError)
 			return
 		}
 		err := auth.Login(ctx, r.PostFormValue("password"), r.PostFormValue("code"))
+		if errors.Is(err, admin.ErrInvalidCredentials) || errors.Is(err, admin.ErrLocked) {
+			throttle.Fail(addr, time.Now())
+		}
 		switch {
 		case err == nil:
+			throttle.Reset(addr)
 		case errors.Is(err, admin.ErrLocked):
 			log.Printf("dashboard: account locked (from %s)", logging.Sanitize(r.RemoteAddr))
 			render(w, genericLoginError)

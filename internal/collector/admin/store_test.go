@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,22 +53,22 @@ func TestStore_SetPasswordAndTOTP(t *testing.T) {
 	}
 }
 
-func TestStore_RecordFailureLocksAfterFive(t *testing.T) {
+func TestStore_ReserveAttemptLocksAtThreshold(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
 	st.SetPassword(ctx, "h")
 	now := time.Unix(1_700_000_000, 0)
-	for i := 1; i <= 4; i++ {
-		if locked, err := st.RecordFailure(ctx, now); err != nil || locked {
-			t.Fatalf("failure %d: locked=%v err=%v", i, locked, err)
+	for i := 1; i <= MaxFailedAttempts; i++ {
+		ok, err := st.ReserveAttempt(ctx, now)
+		if err != nil || !ok {
+			t.Fatalf("attempt %d: ok=%v err=%v", i, ok, err)
 		}
 	}
-	locked, err := st.RecordFailure(ctx, now)
-	if err != nil || !locked {
-		t.Fatalf("5th failure: locked=%v err=%v", locked, err)
+	if ok, _ := st.ReserveAttempt(ctx, now); ok {
+		t.Fatal("attempt beyond the threshold was reserved")
 	}
 	acc, _, _ := st.Get(ctx)
-	if !acc.LockedUntil.Equal(now.Add(15*time.Minute)) || acc.FailedAttempts != 5 {
+	if !acc.LockedUntil.Equal(now.Add(15*time.Minute)) || acc.FailedAttempts != MaxFailedAttempts {
 		t.Fatalf("got %+v", acc)
 	}
 	if err := st.RecordSuccess(ctx, 42); err != nil {
@@ -76,6 +77,24 @@ func TestStore_RecordFailureLocksAfterFive(t *testing.T) {
 	acc, _, _ = st.Get(ctx)
 	if acc.FailedAttempts != 0 || !acc.LockedUntil.IsZero() || acc.TOTPLastStep != 42 {
 		t.Fatalf("after success: %+v", acc)
+	}
+}
+
+func TestStore_ReserveAttemptResetsAfterLockExpires(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	st.SetPassword(ctx, "h")
+	now := time.Unix(1_700_000_000, 0)
+	for i := 0; i < MaxFailedAttempts; i++ {
+		st.ReserveAttempt(ctx, now)
+	}
+	later := now.Add(15*time.Minute + time.Second)
+	if ok, _ := st.ReserveAttempt(ctx, later); !ok {
+		t.Fatal("attempt refused after the lock expired")
+	}
+	acc, _, _ := st.Get(ctx)
+	if acc.FailedAttempts != 1 || !acc.LockedUntil.IsZero() {
+		t.Fatalf("counter not reset after expiry: %+v", acc)
 	}
 }
 
@@ -115,23 +134,28 @@ func TestStore_SetTOTPReplacesRecoveryCodesAndResetsStep(t *testing.T) {
 	}
 }
 
-func TestStore_RecordFailure_ConcurrentIsAtomic(t *testing.T) {
+func TestStore_ReserveAttempt_ConcurrentNeverExceedsThreshold(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
 	st.SetPassword(ctx, "h")
+	var reserved atomic.Int32
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
+	now := time.Now()
+	for i := 0; i < 60; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := st.RecordFailure(ctx, time.Now()); err != nil {
+			ok, err := st.ReserveAttempt(ctx, now)
+			if err != nil {
 				t.Error(err)
+			}
+			if ok {
+				reserved.Add(1)
 			}
 		}()
 	}
 	wg.Wait()
-	acc, _, _ := st.Get(ctx)
-	if acc.FailedAttempts != 20 {
-		t.Fatalf("want 20 failures recorded, got %d", acc.FailedAttempts)
+	if reserved.Load() != MaxFailedAttempts {
+		t.Fatalf("reserved %d attempts, want exactly %d", reserved.Load(), MaxFailedAttempts)
 	}
 }

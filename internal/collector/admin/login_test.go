@@ -134,7 +134,7 @@ func TestLogin_ConcurrentSameCodeOnlyOneWins(t *testing.T) {
 func TestLogin_LockoutAndExpiry(t *testing.T) {
 	f := newLoginFixture(t)
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := 0; i < MaxFailedAttempts; i++ {
 		f.auth.Login(ctx, "wrong password!!", "000000")
 	}
 	if err := f.auth.Login(ctx, testPassword, f.code(t)); !errors.Is(err, ErrLocked) {
@@ -149,7 +149,7 @@ func TestLogin_LockoutAndExpiry(t *testing.T) {
 func TestLogin_LockedStillHashesPassword(t *testing.T) {
 	f := newLoginFixture(t)
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := 0; i < MaxFailedAttempts; i++ {
 		f.auth.Login(ctx, "wrong password!!", "000000")
 	}
 	var calls atomic.Int32
@@ -171,5 +171,79 @@ func TestLogin_NotConfiguredStillHashesPassword(t *testing.T) {
 	a.Login(context.Background(), testPassword, "123456")
 	if calls.Load() != 1 {
 		t.Fatalf("password hash computed %d times for an unconfigured account, want 1", calls.Load())
+	}
+}
+
+// TestLogin_ParallelGuessesBoundedByThreshold proves the lock is
+// enforced by the same atomic statement that counts the attempt: no
+// matter how many guesses arrive at once, at most MaxFailedAttempts are
+// evaluated, and correct credentials afterwards are refused.
+func TestLogin_ParallelGuessesBoundedByThreshold(t *testing.T) {
+	f := newLoginFixture(t)
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	for i := 0; i < 3*MaxFailedAttempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f.auth.Login(ctx, "wrong password!!", "000000")
+		}()
+	}
+	wg.Wait()
+	// Every evaluated guess is counted in the database; a guess refused
+	// as locked is not. So the counter is exactly how many guesses ran.
+	acc, _, _ := f.store.Get(ctx)
+	if acc.FailedAttempts > MaxFailedAttempts {
+		t.Fatalf("%d guesses evaluated, want at most %d", acc.FailedAttempts, MaxFailedAttempts)
+	}
+	if err := f.auth.Login(ctx, testPassword, f.code(t)); !errors.Is(err, ErrLocked) {
+		t.Fatalf("correct credentials after the burst: got %v, want ErrLocked", err)
+	}
+}
+
+// TestLogin_ExpiredLockDoesNotRelockOnOneTypo proves one mistake after
+// a lockout expires does not immediately lock the account again.
+func TestLogin_ExpiredLockDoesNotRelockOnOneTypo(t *testing.T) {
+	f := newLoginFixture(t)
+	ctx := context.Background()
+	for i := 0; i < MaxFailedAttempts; i++ {
+		f.auth.Login(ctx, "wrong password!!", "000000")
+	}
+	f.now = f.now.Add(15*time.Minute + time.Second)
+	if err := f.auth.Login(ctx, "wrong password!!", "000000"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("typo after expiry: got %v", err)
+	}
+	if err := f.auth.Login(ctx, testPassword, f.code(t)); err != nil {
+		t.Fatalf("correct login after one typo: got %v", err)
+	}
+}
+
+// TestLogin_HashConcurrencyIsBounded proves unauthenticated login
+// requests cannot run unlimited PBKDF2 computations at once.
+func TestLogin_HashConcurrencyIsBounded(t *testing.T) {
+	f := newLoginFixture(t)
+	var inFlight, peak atomic.Int32
+	orig := verifyPassword
+	verifyPassword = func(encoded, pw string) (bool, error) {
+		n := inFlight.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		inFlight.Add(-1)
+		return false, nil
+	}
+	defer func() { verifyPassword = orig }()
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); f.auth.Login(context.Background(), "x", "000000") }()
+	}
+	wg.Wait()
+	if int(peak.Load()) > cap(hashSlots) {
+		t.Fatalf("%d password hashes ran at once, limit is %d", peak.Load(), cap(hashSlots))
 	}
 }

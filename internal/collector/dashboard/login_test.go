@@ -149,3 +149,29 @@ func TestListPage_IncludesCSRFFieldForSessions(t *testing.T) {
 		t.Fatal("logout form missing")
 	}
 }
+
+// TestLoginPost_PerAddressThrottle proves one address that keeps
+// failing is refused without touching the account, while another
+// address can still sign in (so an attacker cannot lock the admin out).
+func TestLoginPost_PerAddressThrottle(t *testing.T) {
+	e := newLoginEnv(t, true)
+	attempt := func(addr, password, code string) *httptest.ResponseRecorder {
+		form := url.Values{"password": {password}, "code": {code}}
+		req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = addr
+		rec := httptest.NewRecorder()
+		e.post.ServeHTTP(rec, req)
+		return rec
+	}
+	for i := 0; i < PerAddressLimit; i++ {
+		attempt("203.0.113.9:4000", "wrong password!!", "000000")
+	}
+	code, _ := admin.TOTPCode(e.secret, time.Now().Unix()/30)
+	if rec := attempt("203.0.113.9:4001", loginPassword, code); sessionCookie(rec) != nil {
+		t.Fatal("throttled address could still sign in")
+	}
+	if rec := attempt("198.51.100.7:5000", loginPassword, code); sessionCookie(rec) == nil {
+		t.Fatalf("other address could not sign in: %s", rec.Body.String())
+	}
+}

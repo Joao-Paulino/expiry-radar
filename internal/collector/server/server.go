@@ -161,6 +161,18 @@ func runAlertLoop(engine *alert.Engine, ns []notifiers.Notifier, interval time.D
 	}
 }
 
+// NewHTTPServer returns the Collector's HTTP server with timeouts, so
+// slow or idle clients cannot hold connections open indefinitely.
+func NewHTTPServer(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+}
+
 // Run wires up storage, ingest, alerting, and the dashboard, then
 // serves them over HTTPS until an error occurs or cfg.Done is closed.
 func Run(cfg Config) error {
@@ -209,7 +221,7 @@ func Run(cfg Config) error {
 		cfg.Ready <- listener.Addr().String()
 	}
 
-	srv := &http.Server{Handler: mux}
+	srv := NewHTTPServer(mux)
 
 	if cfg.Done != nil {
 		go func() {

@@ -199,3 +199,12 @@ func TestRun_BrowserWithoutSessionRedirectsToLogin(t *testing.T) {
 		t.Fatalf("login page: got %d", resp.StatusCode)
 	}
 }
+
+// TestNewHTTPServer_HasTimeouts proves slow clients cannot hold
+// connections open forever (slowloris), now that /login is public.
+func TestNewHTTPServer_HasTimeouts(t *testing.T) {
+	srv := server.NewHTTPServer(http.NewServeMux())
+	if srv.ReadHeaderTimeout <= 0 || srv.ReadTimeout <= 0 || srv.WriteTimeout <= 0 || srv.IdleTimeout <= 0 {
+		t.Fatalf("missing timeouts: %+v", srv)
+	}
+}
