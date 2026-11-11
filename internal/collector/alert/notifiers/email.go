@@ -65,6 +65,22 @@ func sanitizeHeaderValue(s string) string {
 	return s
 }
 
+// subjectFor returns a header-safe subject line for n.
+func subjectFor(n alert.Notification) string {
+	prefix := "Expiry Radar alert: "
+	if n.Resolved {
+		prefix = "Expiry Radar resolved: "
+	}
+	subject := n.Record.Name
+	switch n.Type {
+	case alert.TypeCheckerFailed:
+		subject = "checker " + n.Checker + " on " + n.Agent
+	case alert.TypeAgentSilent:
+		subject = "agent " + n.Agent
+	}
+	return sanitizeHeaderValue(prefix + subject)
+}
+
 func (e *Email) Send(ctx context.Context, n alert.Notification) error {
 	if err := e.cfg.Validate(); err != nil {
 		return err
@@ -125,8 +141,8 @@ func (e *Email) Send(ctx context.Context, n alert.Notification) error {
 		return err
 	}
 	body := fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: Expiry Radar alert: %s\r\nDate: %s\r\n\r\n%s\r\n",
-		e.cfg.From, e.cfg.To, sanitizeHeaderValue(n.Record.Name), time.Now().UTC().Format(time.RFC1123Z), messageFor(n),
+		"From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\n\r\n%s\r\n",
+		e.cfg.From, e.cfg.To, subjectFor(n), time.Now().UTC().Format(time.RFC1123Z), messageFor(n),
 	)
 	if _, err := w.Write([]byte(body)); err != nil {
 		return err

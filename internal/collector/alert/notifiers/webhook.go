@@ -23,15 +23,29 @@ func NewWebhook(url string) *Webhook {
 }
 
 type webhookPayload struct {
+	Type      string    `json:"type"`
+	Resolved  bool      `json:"resolved"`
 	Severity  string    `json:"severity"`
-	Source    string    `json:"source"`
-	Name      string    `json:"name"`
-	Kind      string    `json:"kind"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Source    string    `json:"source,omitempty"`
+	Name      string    `json:"name,omitempty"`
+	Kind      string    `json:"kind,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitzero"`
+	Agent     string    `json:"agent,omitempty"`
+	Checker   string    `json:"checker,omitempty"`
+	Detail    string    `json:"detail,omitempty"`
 }
 
 func payloadFor(n alert.Notification) webhookPayload {
+	t := n.Type
+	if t == "" {
+		t = alert.TypeExpiry
+	}
 	return webhookPayload{
+		Type:      string(t),
+		Resolved:  n.Resolved,
+		Agent:     n.Agent,
+		Checker:   n.Checker,
+		Detail:    n.Detail,
 		Severity:  string(n.Severity),
 		Source:    n.Record.Source,
 		Name:      n.Record.Name,
