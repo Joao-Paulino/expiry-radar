@@ -1,0 +1,59 @@
+name: Vulnerability audit
+
+# Weekly (and on demand): scan the binaries of the latest release and of
+# the published latest images. New CVEs appear after a release ships;
+# a finding opens an issue so a patch release follows.
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+      - name: Scan latest release and images
+        id: scan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          tag=$(gh release view --json tagName -q .tagName)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          mkdir -p bins
+          gh release download "$tag" -p 'expiry-radar-*' -D bins
+          for img in collector agent; do
+            for arch in amd64 arm64; do
+              ref=ghcr.io/joao-paulino/expiry-radar-$img:latest
+              docker pull -q --platform linux/$arch "$ref" >/dev/null
+              id=$(docker create --platform linux/$arch "$ref")
+              docker cp "$id:/usr/local/bin/$img" "bins/image-$img-linux-$arch"
+              docker rm "$id" >/dev/null
+            done
+          done
+          scripts/vulncheck-binaries.sh bins/* > report.txt 2>&1
+          rc=$?
+          cat report.txt
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+      - name: Open an issue on findings
+        if: steps.scan.outputs.rc != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Vulnerabilities in published ${{ steps.scan.outputs.tag }} artifacts"
+          if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number -q '.[].number')" ]; then
+            { echo "The weekly audit found known vulnerabilities (or could not scan) in published binaries/images. A patch release is needed."; echo; echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"; echo; echo '```'; tail -c 60000 report.txt; echo '```'; } > body.md
+            gh issue create --title "$title" --label security --body-file body.md \
+              || gh issue create --title "$title" --body-file body.md
+          fi
+          exit 1

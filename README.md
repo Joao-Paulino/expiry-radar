@@ -5,7 +5,7 @@
 ### Know what expires before it breaks production · Saiba o que expira antes de parar a produção
 
 ![CI](https://github.com/Joao-Paulino/expiry-radar/actions/workflows/ci.yml/badge.svg)
-![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 ![Status](https://img.shields.io/badge/status-milestone%201-orange)
 ![Platforms](https://img.shields.io/badge/agent-Windows%20%7C%20Linux%20amd64%20%7C%20arm64-blue)
 ![Lang](https://img.shields.io/badge/lang-PT%20%7C%20EN-green)
@@ -90,7 +90,7 @@ As imagens não têm `stty`, por isso o `set-admin-password` mostra a password e
 
 ## 🚀 Quick start / Início rápido
 
-Requires Go 1.24 or newer (releases are built with Go 1.26) · Requer Go 1.24 ou mais recente (as releases são compiladas com Go 1.26)
+Requires Go 1.25 or newer (releases are built with Go 1.26) · Requer Go 1.25 ou mais recente (as releases são compiladas com Go 1.26)
 
 ```bash
 git clone https://github.com/Joao-Paulino/expiry-radar.git
