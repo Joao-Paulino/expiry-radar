@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+# Release images: package the binaries already built and vulnerability-
+# scanned by the release workflow, so the image ships exactly what was
+# checked. Context: a directory with collector-linux-<arch>,
+# agent-linux-<arch> and an empty data/ directory.
+FROM gcr.io/distroless/static-debian12:nonroot AS collector
+ARG TARGETARCH
+COPY --chmod=0755 collector-linux-${TARGETARCH} /usr/local/bin/collector
+COPY --chown=65532:65532 data /data
+USER nonroot:nonroot
+EXPOSE 8443
+VOLUME ["/data"]
+ENTRYPOINT ["/usr/local/bin/collector"]
+CMD ["/etc/expiry-radar/collector.json"]
+
+FROM gcr.io/distroless/static-debian12:nonroot AS agent
+ARG TARGETARCH
+COPY --chmod=0755 agent-linux-${TARGETARCH} /usr/local/bin/agent
+COPY --chown=65532:65532 data /data
+USER nonroot:nonroot
+VOLUME ["/data"]
+ENTRYPOINT ["/usr/local/bin/agent"]
+CMD ["/etc/expiry-radar/agent.json"]

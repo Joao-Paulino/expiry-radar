@@ -4,12 +4,20 @@ name: Release
 # UI) publishes the release assets (binaries, SHA256SUMS, provenance)
 # and multi-arch images on GHCR. Running it by hand only builds, so the
 # pipeline can be checked without publishing anything.
+#
+# Gate: every binary is scanned with govulncheck before anything is
+# attested or published, and the images are built from those same
+# scanned binaries. A known vulnerability stops the release.
 on:
   push:
     tags: ["v*"]
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      go-version:
+        description: Go toolchain (build-only runs; e.g. to test the gate)
+        default: "1.26.x"
 
 # A release published in the UI fires both events; run them one at a time.
 concurrency:
@@ -22,7 +30,7 @@ jobs:
   binaries:
     runs-on: ubuntu-latest
     permissions:
-      contents: write      # create the release
+      contents: read
       id-token: write      # provenance attestation
       attestations: write
     steps:
@@ -31,25 +39,20 @@ jobs:
       # standard library); go.mod only sets the minimum for source builds.
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
+          go-version: ${{ inputs.go-version || '1.26.x' }}
           check-latest: true # always the newest patch (security fixes)
       - run: go test ./...
       - name: Build
         run: scripts/build-release.sh "${GITHUB_REF_NAME}"
+      - name: Vulnerability gate (govulncheck on every binary)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          scripts/vulncheck-binaries.sh dist/expiry-radar-*
       - uses: actions/attest-build-provenance@v2
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           subject-path: dist/expiry-radar-*
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        # Create the release, or add the assets if it was created in the UI.
-        run: |
-          gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag \
-            || gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
       - uses: actions/upload-artifact@v4
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         with:
           name: dist
           path: dist/
@@ -59,11 +62,23 @@ jobs:
     permissions:
       contents: read
       packages: write
+    needs: binaries
     strategy:
       matrix:
         target: [collector, agent]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Image context from the scanned binaries
+        run: |
+          mkdir -p ctx/data
+          for a in amd64 arm64; do
+            cp dist/expiry-radar-${{ matrix.target }}-*-linux-$a ctx/${{ matrix.target }}-linux-$a
+          done
+          ls -l ctx
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -82,10 +97,32 @@ jobs:
             type=sha
       - uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ctx
+          file: Dockerfile.release
           target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
-          build-args: VERSION=${{ github.ref_name }}
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  # Release assets go up last: only after the gate passed and the
+  # images were pushed.
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [binaries, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Create the release, or add the assets if it was created in the UI.
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag \
+            || gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
