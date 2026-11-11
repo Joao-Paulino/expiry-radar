@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -136,5 +138,23 @@ func TestSetAdminTOTP_WrongCodeStoresNothing(t *testing.T) {
 	}
 	if acc, _, _ := as.Get(context.Background()); acc.TOTPSecret != "" {
 		t.Fatal("secret stored despite wrong code")
+	}
+}
+
+// TestReadSecret_WarnsWhenEchoCannotBeHidden proves the user is told
+// when their password will be visible (e.g. no stty in a minimal image).
+func TestReadSecret_WarnsWhenEchoCannotBeHidden(t *testing.T) {
+	origTerm, origStty := isTerminal, sttyCommand
+	isTerminal = func(io.Reader) bool { return true }
+	sttyCommand = "expiry-radar-no-such-stty"
+	defer func() { isTerminal, sttyCommand = origTerm, origStty }()
+
+	var out bytes.Buffer
+	got, err := readSecret(strings.NewReader("pw\n"), bufio.NewReader(strings.NewReader("pw\n")), &out, "Password: ")
+	if err != nil || got != "pw" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if !strings.Contains(strings.ToLower(out.String()), "visible") {
+		t.Fatalf("no warning that input is visible: %q", out.String())
 	}
 }

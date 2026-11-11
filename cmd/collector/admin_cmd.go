@@ -9,8 +9,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
@@ -33,23 +35,31 @@ func loadConfig(path string) (Config, error) {
 	return cfg, nil
 }
 
-// setEcho turns terminal echo on or off when in is an interactive
-// terminal on a Unix-like system (stdlib only: no golang.org/x/term).
-func setEcho(in io.Reader, on bool) {
-	f, ok := in.(*os.File)
-	if !ok || runtime.GOOS == "windows" {
-		return
+// sttyCommand and isTerminal are variables so tests can simulate a
+// terminal without stty (stdlib only: no golang.org/x/term).
+var (
+	sttyCommand = "stty"
+	isTerminal  = func(in io.Reader) bool {
+		f, ok := in.(*os.File)
+		if !ok || runtime.GOOS == "windows" {
+			return false
+		}
+		fi, err := f.Stat()
+		return err == nil && fi.Mode()&os.ModeCharDevice != 0
 	}
-	if fi, err := f.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
-		return
-	}
+)
+
+// setEcho turns terminal echo on or off for in.
+func setEcho(in io.Reader, on bool) error {
 	arg := "-echo"
 	if on {
 		arg = "echo"
 	}
-	cmd := exec.Command("stty", arg)
-	cmd.Stdin = f
-	_ = cmd.Run()
+	cmd := exec.Command(sttyCommand, arg)
+	if f, ok := in.(*os.File); ok {
+		cmd.Stdin = f
+	}
+	return cmd.Run()
 }
 
 func readLine(r *bufio.Reader) (string, error) {
@@ -61,9 +71,34 @@ func readLine(r *bufio.Reader) (string, error) {
 }
 
 func readSecret(in io.Reader, r *bufio.Reader, out io.Writer, prompt string) (string, error) {
+	if !isTerminal(in) {
+		fmt.Fprint(out, prompt)
+		return readLine(r)
+	}
+	if err := setEcho(in, false); err != nil {
+		fmt.Fprintln(out, "Warning: could not hide input (stty unavailable); what you type will be visible.")
+	} else {
+		// Restore echo if the user presses Ctrl-C at the prompt.
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+		done := make(chan struct{})
+		go func() {
+			select {
+			case <-sigs:
+				setEcho(in, true)
+				fmt.Fprintln(out)
+				os.Exit(130)
+			case <-done:
+			}
+		}()
+		defer func() {
+			signal.Stop(sigs)
+			close(done)
+			setEcho(in, true)
+			fmt.Fprintln(out)
+		}()
+	}
 	fmt.Fprint(out, prompt)
-	setEcho(in, false)
-	defer func() { setEcho(in, true); fmt.Fprintln(out) }()
 	return readLine(r)
 }
 
