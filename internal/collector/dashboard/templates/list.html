@@ -36,9 +36,15 @@
 <p><a href="/export.json">Export JSON</a> | <a href="/export.csv">Export CSV</a></p>
 <h2>Agents</h2>
 <table>
+<tr><th>Agent</th><th>Last report</th><th></th></tr>
+{{$csrf := .CSRF}}{{range .Agents}}<tr><td>{{.Agent}}</td><td>{{.LastSeen}}</td><td><form method="post" action="/agents/forget">{{if $csrf}}<input type="hidden" name="csrf_token" value="{{$csrf}}">{{end}}<input type="hidden" name="agent_id" value="{{.Agent}}"><button type="submit" title="Remove a decommissioned agent and stop its alerts">Forget / Esquecer</button></form></td></tr>
+{{else}}<tr><td colspan="3">No agent has reported yet.</td></tr>{{end}}
+</table>
+<h3>Checkers</h3>
+<table>
 <tr><th>Agent</th><th>Checker</th><th>Last seen</th><th>Last success</th><th>Consecutive failures</th><th>Last error</th></tr>
-{{range .Agents}}<tr><td>{{.Agent}}</td><td>{{.Checker}}</td><td>{{.LastSeen}}</td><td>{{.LastSuccess}}</td><td>{{.Failures}}</td><td>{{.LastError}}</td></tr>
-{{else}}<tr><td colspan="6">No agent has reported yet.</td></tr>{{end}}
+{{range .Checkers}}<tr><td>{{.Agent}}</td><td>{{.Checker}}</td><td>{{.LastSeen}}</td><td>{{.LastSuccess}}</td><td>{{.Failures}}</td><td>{{.LastError}}</td></tr>
+{{end}}
 </table>
 </body>
 </html>

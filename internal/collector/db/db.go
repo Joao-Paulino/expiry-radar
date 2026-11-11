@@ -50,6 +50,12 @@ CREATE TABLE IF NOT EXISTS agent_checker_health (
     PRIMARY KEY (agent_id, checker_name)
 );
 
+-- Every agent that pushed a batch, even with no checker results.
+CREATE TABLE IF NOT EXISTS agents (
+    agent_id TEXT PRIMARY KEY,
+    last_seen_at INTEGER NOT NULL -- unix seconds, collector clock
+);
+
 -- Last alert sent per alert key, for deduplication.
 CREATE TABLE IF NOT EXISTS alert_state (
     alert_key TEXT PRIMARY KEY,

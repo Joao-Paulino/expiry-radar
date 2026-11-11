@@ -15,8 +15,11 @@ import (
 )
 
 type fakeStore struct {
-	saved  []checker.ExpiryRecord
-	health []struct {
+	agents    []store.AgentSeen
+	forgotten []string
+	touched   []string
+	saved     []checker.ExpiryRecord
+	health    []struct {
 		name, reportedBy string
 		err              error
 	}
@@ -101,5 +104,29 @@ func TestHandler_MalformedJSON_Returns400(t *testing.T) {
 	h(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("got %d, want 400", rec.Code)
+	}
+}
+
+func (f *fakeStore) TouchAgent(ctx context.Context, agentID string) error {
+	f.touched = append(f.touched, agentID)
+	return nil
+}
+func (f *fakeStore) Agents(ctx context.Context) ([]store.AgentSeen, error) {
+	return f.agents, nil
+}
+func (f *fakeStore) ForgetAgent(ctx context.Context, agentID string) error {
+	f.forgotten = append(f.forgotten, agentID)
+	return nil
+}
+
+// TestHandler_EmptyBatchStillMarksAgentSeen proves an agent with no
+// checker results is still known to be alive.
+func TestHandler_EmptyBatchStillMarksAgentSeen(t *testing.T) {
+	st := &fakeStore{}
+	body := strings.NewReader(`{"agent_id":"web-09","results":[]}`)
+	rec := httptest.NewRecorder()
+	Handler(st).ServeHTTP(rec, httptest.NewRequest("POST", "/ingest", body))
+	if rec.Code != 204 || len(st.touched) != 1 || st.touched[0] != "web-09" {
+		t.Fatalf("code=%d touched=%v", rec.Code, st.touched)
 	}
 }

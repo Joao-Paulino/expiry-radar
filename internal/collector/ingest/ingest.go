@@ -25,6 +25,14 @@ func Handler(st store.Store) http.HandlerFunc {
 			return
 		}
 
+		if batch.AgentID != "" {
+			if err := st.TouchAgent(ctx, batch.AgentID); err != nil {
+				log.Printf("ingest: TouchAgent error: %s", logging.Sanitize(err.Error()))
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+		}
+
 		for _, result := range batch.Results {
 			if len(result.Records) > 0 {
 				checkedAt := result.CheckedAt

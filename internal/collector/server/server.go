@@ -191,8 +191,16 @@ func deliver(ctx context.Context, engine *alert.Engine, state *alert.StateStore,
 			continue
 		}
 		n.Resolved = resolved
-		for _, sendErr := range notifiers.SendAll(ctx, ns, n) {
+		errs := notifiers.SendAll(ctx, ns, n)
+		for _, sendErr := range errs {
 			log.Printf("collector: notify error: %s", logging.Sanitize(sendErr.Error()))
+		}
+		// Remember it only if at least one channel delivered it (or none
+		// is configured); otherwise retry next cycle.
+		if len(ns) == 0 || len(errs) < len(ns) {
+			if err := state.Commit(ctx, key, n.Severity, now); err != nil {
+				log.Printf("collector: alert state error: %s", logging.Sanitize(err.Error()))
+			}
 		}
 	}
 }

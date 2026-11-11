@@ -11,8 +11,10 @@ import (
 )
 
 type fakeStore struct {
-	current []store.StoredRecord
-	health  []store.CheckerHealth
+	agents    []store.AgentSeen
+	forgotten []string
+	current   []store.StoredRecord
+	health    []store.CheckerHealth
 }
 
 func (f *fakeStore) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error {
@@ -95,7 +97,10 @@ func healthOnly(ns []Notification) map[string]Notification {
 // into notifications at the configured boundaries, per agent.
 func TestEngine_Evaluate_CheckerFailedAndAgentSilent(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
-	st := &fakeStore{health: []store.CheckerHealth{
+	st := &fakeStore{agents: []store.AgentSeen{
+		{AgentID: "web-01", LastSeenAt: now.Add(-time.Hour)}, {AgentID: "web-02", LastSeenAt: now.Add(-time.Hour)},
+		{AgentID: "web-03", LastSeenAt: now.Add(-3*time.Hour - time.Minute)}, {AgentID: "web-04", LastSeenAt: now.Add(-3 * time.Hour)},
+	}, health: []store.CheckerHealth{
 		{CheckerName: "tls", ReportedBy: "web-01", LastSeenAt: now.Add(-time.Hour), ConsecutiveFailures: 3, LastError: "timeout"},
 		{CheckerName: "tls", ReportedBy: "web-02", LastSeenAt: now.Add(-time.Hour), ConsecutiveFailures: 2},
 		{CheckerName: "tls", ReportedBy: "web-03", LastSeenAt: now.Add(-3*time.Hour - time.Minute)},
@@ -135,5 +140,31 @@ func TestNotification_KeyForExpiry(t *testing.T) {
 	n := Notification{Type: TypeExpiry, Record: store.StoredRecord{ExpiryRecord: checker.ExpiryRecord{Source: "a:443", Name: "a", Kind: "certificate"}}}
 	if n.Key() != "expiry|a:443|a|certificate" {
 		t.Fatalf("got %q", n.Key())
+	}
+}
+
+func (f *fakeStore) TouchAgent(ctx context.Context, agentID string) error { return nil }
+func (f *fakeStore) Agents(ctx context.Context) ([]store.AgentSeen, error) {
+	return f.agents, nil
+}
+func (f *fakeStore) ForgetAgent(ctx context.Context, agentID string) error {
+	f.forgotten = append(f.forgotten, agentID)
+	return nil
+}
+
+// TestEngine_Evaluate_SilenceUsesAgentLastSeen proves an agent that
+// reports batches with no checker results is not "silent", and one
+// with no checkers that stops reporting still alerts.
+func TestEngine_Evaluate_SilenceUsesAgentLastSeen(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	st := &fakeStore{
+		agents: []store.AgentSeen{{AgentID: "empty-ok", LastSeenAt: now.Add(-time.Minute)}, {AgentID: "empty-dead", LastSeenAt: now.Add(-5 * time.Hour)}},
+		health: []store.CheckerHealth{{CheckerName: "tls", ReportedBy: "empty-ok", LastSeenAt: now.Add(-10 * time.Hour)}},
+	}
+	e := &Engine{Store: st, Rules: &fakeRulesStore{}, Thresholds: DefaultThresholds(), StaleAfter: 3 * time.Hour}
+	ns, _ := e.Evaluate(context.Background(), now)
+	h := healthOnly(ns)
+	if h["agent|empty-ok"].Severity != SeverityOK || h["agent|empty-dead"].Severity != SeverityCritical {
+		t.Fatalf("got %+v", h)
 	}
 }

@@ -157,8 +157,6 @@ func (e *Engine) Evaluate(ctx context.Context, now time.Time) ([]Notification, e
 		staleAfter = defaultStaleAfter
 	}
 
-	lastSeen := map[string]time.Time{}
-	var agents []string
 	for _, h := range health {
 		sev := SeverityOK
 		if h.ConsecutiveFailures >= failThreshold {
@@ -167,19 +165,20 @@ func (e *Engine) Evaluate(ctx context.Context, now time.Time) ([]Notification, e
 		notifications = append(notifications, Notification{
 			Type: TypeCheckerFailed, Agent: h.ReportedBy, Checker: h.CheckerName, Detail: h.LastError, Severity: sev,
 		})
-		if _, seen := lastSeen[h.ReportedBy]; !seen {
-			agents = append(agents, h.ReportedBy)
-		}
-		if h.LastSeenAt.After(lastSeen[h.ReportedBy]) {
-			lastSeen[h.ReportedBy] = h.LastSeenAt
-		}
 	}
-	for _, agent := range agents {
+
+	// Silence is judged on the last batch from each agent, so an agent
+	// that reports with no checker results still counts as alive.
+	agents, err := e.Store.Agents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range agents {
 		sev := SeverityOK
-		if now.Sub(lastSeen[agent]) > staleAfter {
+		if now.Sub(a.LastSeenAt) > staleAfter {
 			sev = SeverityCritical
 		}
-		notifications = append(notifications, Notification{Type: TypeAgentSilent, Agent: agent, Severity: sev})
+		notifications = append(notifications, Notification{Type: TypeAgentSilent, Agent: a.AgentID, Severity: sev})
 	}
 
 	return notifications, nil

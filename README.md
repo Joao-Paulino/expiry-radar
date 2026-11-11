@@ -120,7 +120,7 @@ go install github.com/Joao-Paulino/expiry-radar/cmd/agent@latest
 | `reminder_critical_hours` | Re-send an unchanged critical alert after this many hours (default 24, `0` = never) | Reenvia um alerta crítico inalterado ao fim destas horas (por omissão 24, `0` = nunca) |
 | `reminder_warning_hours` | Same for warnings (default `0` = never) | O mesmo para avisos (por omissão `0` = nunca) |
 | `checker_fail_threshold` | Consecutive failures before a checker alerts (default 3) | Falhas seguidas até um verificador alertar (por omissão 3) |
-| `agent_stale_hours` | Hours without a report before an agent alerts as silent (default 3) | Horas sem reportar até um agente alertar como silencioso (por omissão 3) |
+| `agent_stale_hours` | Hours without a report before an agent alerts as silent (default 3). Keep it about 2× the longest agent `interval_seconds` | Horas sem reportar até um agente alertar como silencioso (por omissão 3). Mantém cerca de 2× o maior `interval_seconds` dos agentes |
 | `slack_webhook_url` / `teams_webhook_url` / `webhook_url` | Incoming webhook URLs; leave empty to disable | URLs de webhook; vazio desliga |
 | `email` | SMTP settings. See [📧 Email](#-email). Empty `smtp_host` disables email | Definições SMTP. Ver [📧 Email](#-email). `smtp_host` vazio desliga o email |
 
@@ -192,6 +192,8 @@ Substitui o nome DNS e o IP pelos que os agentes vão usar. Depois copia o
 | 🔇 Muted | Muted records send nothing; unmuting a still-failing record alerts again | Registos silenciados não enviam nada; ao tirar o silêncio, se ainda houver problema, volta a alertar |
 | 🩺 Checker failing | A checker failing `checker_fail_threshold` times in a row on an agent | Um verificador que falha `checker_fail_threshold` vezes seguidas num agente |
 | 📴 Agent silent | An agent with no report for `agent_stale_hours` | Um agente sem reportar há `agent_stale_hours` |
+| 🗑️ Retired agent | **Forget** on the dashboard removes it and stops its alerts; it comes back if it reports again | **Esquecer** no painel remove-o e para os alertas; volta se reportar de novo |
+| 📮 Delivery | An alert is only marked as sent when at least one channel delivered it; otherwise it is retried next cycle | Um alerta só fica marcado como enviado quando pelo menos um canal o entregou; senão é tentado no ciclo seguinte |
 
 The dashboard's **Agents** section shows every agent and checker with last seen, last success and failures.
 A secção **Agents** do painel mostra cada agente e verificador com a última vez visto, último sucesso e falhas.

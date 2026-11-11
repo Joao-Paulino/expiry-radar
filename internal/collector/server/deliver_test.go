@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -78,5 +79,38 @@ func TestConfig_AlertDefaults(t *testing.T) {
 	c = Config{ReminderCriticalHours: &zero, ReminderWarningHours: &six, CheckerFailThreshold: 5, AgentStaleHours: 12}
 	if c.reminderCritical() != 0 || c.reminderWarning() != 6*time.Hour || c.checkerFailThreshold() != 5 || c.agentStaleAfter() != 12*time.Hour {
 		t.Fatal("explicit values ignored")
+	}
+}
+
+type failingNotifier struct{ fail bool }
+
+func (f *failingNotifier) Send(ctx context.Context, n alert.Notification) error {
+	if f.fail {
+		return errors.New("slack 503")
+	}
+	return nil
+}
+
+// TestDeliver_FailedDeliveryIsRetried proves an alert that no notifier
+// managed to deliver is tried again next cycle instead of being lost.
+func TestDeliver_FailedDeliveryIsRetried(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(filepath.Join(t.TempDir(), "radar.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	st, rs := store.NewSQLite(database), rules.NewSQLite(database)
+	now := time.Now()
+	st.SaveRecords(ctx, "web-01", []checker.ExpiryRecord{{Source: "a:443", Name: "a", Kind: "certificate", ExpiresAt: now.Add(20 * 24 * time.Hour)}}, now)
+	engine := &alert.Engine{Store: st, Rules: rs, Thresholds: alert.DefaultThresholds()}
+	state := &alert.StateStore{DB: database, ReminderCritical: 24 * time.Hour}
+
+	broken := &failingNotifier{fail: true}
+	deliver(ctx, engine, state, []notifiers.Notifier{broken}, now)
+	ok := &countingNotifier{}
+	deliver(ctx, engine, state, []notifiers.Notifier{ok}, now.Add(time.Hour))
+	if len(ok.sent) != 1 || ok.sent[0].Severity != alert.SeverityWarning {
+		t.Fatalf("warning lost after a failed delivery: %+v", ok.sent)
 	}
 }

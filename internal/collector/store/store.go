@@ -27,6 +27,12 @@ type CheckerHealth struct {
 	LastError           string
 }
 
+// AgentSeen is when an agent last pushed a batch.
+type AgentSeen struct {
+	AgentID    string
+	LastSeenAt time.Time
+}
+
 // Store is the Collector's persistence interface.
 type Store interface {
 	// SaveRecords persists records, stamped with checkedAt — the time
@@ -40,6 +46,12 @@ type Store interface {
 	ListCurrent(ctx context.Context) ([]StoredRecord, error)
 	History(ctx context.Context, source, name, kind string) ([]StoredRecord, error)
 	CheckerHealth(ctx context.Context) ([]CheckerHealth, error)
+	// TouchAgent marks agentID as seen now (every batch, even empty).
+	TouchAgent(ctx context.Context, agentID string) error
+	Agents(ctx context.Context) ([]AgentSeen, error)
+	// ForgetAgent removes a decommissioned agent's health and alert
+	// state, so it stops alerting; it reappears if it reports again.
+	ForgetAgent(ctx context.Context, agentID string) error
 }
 
 // SQLite is a SQLite-backed Store.
@@ -167,4 +179,51 @@ func (s *SQLite) CheckerHealth(ctx context.Context) ([]CheckerHealth, error) {
 		results = append(results, h)
 	}
 	return results, rows.Err()
+}
+
+func (s *SQLite) TouchAgent(ctx context.Context, agentID string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO agents (agent_id, last_seen_at) VALUES (?, ?)
+		ON CONFLICT(agent_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`, agentID, time.Now().Unix())
+	return err
+}
+
+func (s *SQLite) Agents(ctx context.Context) ([]AgentSeen, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT agent_id, last_seen_at FROM agents ORDER BY agent_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AgentSeen
+	for rows.Next() {
+		var a AgentSeen
+		var seen int64
+		if err := rows.Scan(&a.AgentID, &seen); err != nil {
+			return nil, err
+		}
+		a.LastSeenAt = time.Unix(seen, 0).UTC()
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLite) ForgetAgent(ctx context.Context, agentID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`DELETE FROM agents WHERE agent_id = ?`, []any{agentID}},
+		{`DELETE FROM agent_checker_health WHERE agent_id = ?`, []any{agentID}},
+		{`DELETE FROM alert_state WHERE alert_key = ? OR substr(alert_key, 1, ?) = ?`,
+			[]any{"agent|" + agentID, len("checker|" + agentID + "|"), "checker|" + agentID + "|"}},
+	} {
+		if _, err := tx.ExecContext(ctx, q.sql, q.args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

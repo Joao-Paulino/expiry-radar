@@ -27,6 +27,11 @@ func decide(t *testing.T, s *StateStore, key string, sev Severity, now time.Time
 	if err != nil {
 		t.Fatal(err)
 	}
+	if send {
+		if err := s.Commit(context.Background(), key, sev, now); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return decision{send, resolved}
 }
 

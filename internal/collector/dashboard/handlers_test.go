@@ -16,9 +16,11 @@ import (
 )
 
 type fakeStore struct {
-	current []store.StoredRecord
-	history []store.StoredRecord
-	health  []store.CheckerHealth
+	agents    []store.AgentSeen
+	forgotten []string
+	current   []store.StoredRecord
+	history   []store.StoredRecord
+	health    []store.CheckerHealth
 }
 
 func (f *fakeStore) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error {
@@ -134,7 +136,7 @@ func TestMux_ExportCSV_ReturnsCSV(t *testing.T) {
 // checkers, when they last reported and whether they are failing.
 func TestMux_List_ShowsAgents(t *testing.T) {
 	seen := time.Date(2026, 11, 11, 9, 30, 0, 0, time.UTC)
-	st := &fakeStore{health: []store.CheckerHealth{
+	st := &fakeStore{agents: []store.AgentSeen{{AgentID: "web-01", LastSeenAt: seen}}, health: []store.CheckerHealth{
 		{CheckerName: "tls", ReportedBy: "web-01", LastSeenAt: seen, ConsecutiveFailures: 4, LastError: "dial timeout"},
 	}}
 	rec := httptest.NewRecorder()
@@ -144,5 +146,33 @@ func TestMux_List_ShowsAgents(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("agents section missing %q", want)
 		}
+	}
+}
+
+func (f *fakeStore) TouchAgent(ctx context.Context, agentID string) error { return nil }
+func (f *fakeStore) Agents(ctx context.Context) ([]store.AgentSeen, error) {
+	return f.agents, nil
+}
+func (f *fakeStore) ForgetAgent(ctx context.Context, agentID string) error {
+	f.forgotten = append(f.forgotten, agentID)
+	return nil
+}
+
+// TestMux_ForgetAgent proves a decommissioned agent can be removed from
+// the dashboard, which stops its alerts.
+func TestMux_ForgetAgent(t *testing.T) {
+	st := &fakeStore{}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/agents/forget", strings.NewReader("agent_id=old-web"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	NewMux(st, &fakeRulesStore{}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther || len(st.forgotten) != 1 || st.forgotten[0] != "old-web" {
+		t.Fatalf("code=%d forgotten=%v", rec.Code, st.forgotten)
+	}
+	st2 := &fakeStore{agents: []store.AgentSeen{{AgentID: "web-01", LastSeenAt: time.Now()}}}
+	rec = httptest.NewRecorder()
+	NewMux(st2, &fakeRulesStore{}).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if !strings.Contains(rec.Body.String(), `action="/agents/forget"`) {
+		t.Fatal("no Forget button on the dashboard")
 	}
 }

@@ -171,3 +171,32 @@ func newHealthTestStore(t *testing.T) *SQLite {
 	t.Cleanup(func() { database.Close() })
 	return NewSQLite(database)
 }
+
+// TestSQLite_AgentsSeenAndForgotten proves every batch marks its agent
+// as seen (even with no checker results) and that forgetting an agent
+// removes its health and its alert state.
+func TestSQLite_AgentsSeenAndForgotten(t *testing.T) {
+	ctx := context.Background()
+	st := newHealthTestStore(t)
+	if err := st.TouchAgent(ctx, "web-01"); err != nil {
+		t.Fatal(err)
+	}
+	st.RecordCheckerHealth(ctx, "tls", "web-02", errors.New("x"))
+	st.TouchAgent(ctx, "web-02")
+	st.db.Exec(`INSERT INTO alert_state (alert_key, severity, last_sent_at) VALUES ('agent|web-02','critical',1), ('checker|web-02|tls','critical',1), ('agent|web-03','critical',1)`)
+
+	agents, err := st.Agents(ctx)
+	if err != nil || len(agents) != 2 || agents[0].AgentID != "web-01" || agents[0].LastSeenAt.IsZero() {
+		t.Fatalf("got %+v, %v", agents, err)
+	}
+	if err := st.ForgetAgent(ctx, "web-02"); err != nil {
+		t.Fatal(err)
+	}
+	agents, _ = st.Agents(ctx)
+	hs, _ := st.CheckerHealth(ctx)
+	var keys int
+	st.db.QueryRow(`SELECT COUNT(*) FROM alert_state`).Scan(&keys)
+	if len(agents) != 1 || len(hs) != 0 || keys != 1 {
+		t.Fatalf("after forget: agents=%+v health=%+v alert keys=%d (want 1 left: agent|web-03)", agents, hs, keys)
+	}
+}

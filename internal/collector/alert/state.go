@@ -29,34 +29,39 @@ func (s *StateStore) reminder(sev Severity) time.Duration {
 }
 
 // Decide reports whether to send a notification for key at severity
-// sev, and whether that notification is a resolution (back to OK). It
-// records what was sent.
+// sev, and whether it is a resolution (back to OK). It changes nothing:
+// call Commit once the notification was actually delivered, so a failed
+// delivery is retried on the next cycle instead of being lost.
 func (s *StateStore) Decide(ctx context.Context, key string, sev Severity, now time.Time) (send, resolved bool, err error) {
 	var prev string
 	var lastSent int64
 	err = s.DB.QueryRowContext(ctx, `SELECT severity, last_sent_at FROM alert_state WHERE alert_key = ?`, key).Scan(&prev, &lastSent)
-	found := err == nil
-	if err != nil && err != sql.ErrNoRows {
+	if err == sql.ErrNoRows {
+		return sev != SeverityOK && sev != SeverityUnknown, false, nil
+	}
+	if err != nil {
 		return false, false, err
 	}
-
-	ok := sev == SeverityOK || sev == SeverityUnknown
 	switch {
-	case !found && ok:
-		return false, false, nil
-	case found && ok:
-		_, err = s.DB.ExecContext(ctx, `DELETE FROM alert_state WHERE alert_key = ?`, key)
-		return err == nil, err == nil, err
-	case found && Severity(prev) == sev:
-		r := s.reminder(sev)
-		if r <= 0 || now.Sub(time.Unix(lastSent, 0)) < r {
-			return false, false, nil
-		}
+	case sev == SeverityOK || sev == SeverityUnknown:
+		return true, true, nil
+	case Severity(prev) != sev:
+		return true, false, nil
 	}
-	_, err = s.DB.ExecContext(ctx, `INSERT INTO alert_state (alert_key, severity, last_sent_at) VALUES (?, ?, ?)
+	r := s.reminder(sev)
+	return r > 0 && now.Sub(time.Unix(lastSent, 0)) >= r, false, nil
+}
+
+// Commit records that a notification for key at sev was delivered at
+// now; a resolution (OK) forgets the key.
+func (s *StateStore) Commit(ctx context.Context, key string, sev Severity, now time.Time) error {
+	if sev == SeverityOK || sev == SeverityUnknown {
+		return s.Clear(ctx, key)
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO alert_state (alert_key, severity, last_sent_at) VALUES (?, ?, ?)
 		ON CONFLICT(alert_key) DO UPDATE SET severity = excluded.severity, last_sent_at = excluded.last_sent_at`,
 		key, string(sev), now.Unix())
-	return err == nil, false, err
+	return err
 }
 
 // Clear forgets key, so the next non-OK evaluation alerts again (used

@@ -30,13 +30,19 @@ type recordView struct {
 // listView is the list page model: the records plus the CSRF token of
 // the session viewing it (empty for bearer-token requests).
 type listView struct {
-	Records []recordView
-	Agents  []agentView
-	CSRF    string
+	Records  []recordView
+	Agents   []agentView
+	Checkers []checkerView
+	CSRF     string
 }
 
-// agentView is one checker on one agent, for the Agents section.
+// agentView is one agent and when it last pushed a batch.
 type agentView struct {
+	Agent, LastSeen string
+}
+
+// checkerView is one checker on one agent.
+type checkerView struct {
 	Agent, Checker, LastSeen, LastSuccess, LastError string
 	Failures                                         int
 }
@@ -83,20 +89,42 @@ func NewMux(st store.Store, rs rules.Store) *http.ServeMux {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		seen, err := st.Agents(ctx)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		var agents []agentView
+		for _, a := range seen {
+			agents = append(agents, agentView{Agent: a.AgentID, LastSeen: a.LastSeenAt.UTC().Format("2006-01-02 15:04 UTC")})
+		}
+		var checkers []checkerView
 		for _, h := range health {
-			a := agentView{Agent: h.ReportedBy, Checker: h.CheckerName, Failures: h.ConsecutiveFailures, LastError: h.LastError,
+			a := checkerView{Agent: h.ReportedBy, Checker: h.CheckerName, Failures: h.ConsecutiveFailures, LastError: h.LastError,
 				LastSeen: h.LastSeenAt.UTC().Format("2006-01-02 15:04 UTC"), LastSuccess: "never"}
 			if !h.LastSuccessAt.IsZero() {
 				a.LastSuccess = h.LastSuccessAt.UTC().Format("2006-01-02 15:04 UTC")
 			}
-			agents = append(agents, a)
+			checkers = append(checkers, a)
 		}
 
-		if err := templates.ExecuteTemplate(w, "list.html", listView{Records: views, Agents: agents, CSRF: session.CSRFToken(ctx)}); err != nil {
+		if err := templates.ExecuteTemplate(w, "list.html", listView{Records: views, Agents: agents, Checkers: checkers, CSRF: session.CSRFToken(ctx)}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+	})
+
+	mux.HandleFunc("POST /agents/forget", func(w http.ResponseWriter, r *http.Request) {
+		agentID := r.PostFormValue("agent_id")
+		if agentID == "" {
+			http.Error(w, "agent_id is required", http.StatusBadRequest)
+			return
+		}
+		if err := st.ForgetAgent(r.Context(), agentID); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 
 	mux.HandleFunc("GET /history", func(w http.ResponseWriter, r *http.Request) {
