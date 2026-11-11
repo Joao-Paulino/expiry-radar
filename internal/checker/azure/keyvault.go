@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,27 @@ func (c *Checker) tokenSource() (tokenSource, error) {
 		c.src = src
 	}
 	return c.src, nil
+}
+
+// doWithRetry retries a throttled (429) or unavailable (503) answer up
+// to twice, honouring Retry-After (at most 30 s).
+func doWithRetry(ctx context.Context, hc *http.Client, req *http.Request) (*http.Response, error) {
+	for attempt := 0; ; attempt++ {
+		resp, err := hc.Do(req)
+		if err != nil || attempt == 2 || (resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable) {
+			return resp, err
+		}
+		wait := 5 * time.Second
+		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s >= 0 {
+			wait = min(time.Duration(s)*time.Second, 30*time.Second)
+		}
+		resp.Body.Close()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+	}
 }
 
 func port(u *url.URL) string {
@@ -116,7 +138,7 @@ func (c *Checker) getPages(ctx context.Context, first, token string) ([]json.Raw
 			return all, err
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := hc.Do(req)
+		resp, err := doWithRetry(ctx, hc, req)
 		if err != nil {
 			return all, err
 		}

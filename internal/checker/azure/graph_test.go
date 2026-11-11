@@ -36,13 +36,13 @@ func TestCheck_AppRegistrationCredentials(t *testing.T) {
 				t.Fatalf("secret hint stored: %+v", r.Metadata)
 			}
 		}
-		if r.Name == "Payments API · ci-secret" && (!r.ExpiresAt.Equal(soon) || r.Metadata["app_id"] != "aaaaaaaa-1111-2222-3333-444444444444" || r.Metadata["key_id"] != "k1") {
+		if r.Name == "Payments API · ci-secret · k1" && (!r.ExpiresAt.Equal(soon) || r.Metadata["app_id"] != "aaaaaaaa-1111-2222-3333-444444444444" || r.Metadata["key_id"] != "k1") {
 			t.Fatalf("secret: %+v", r)
 		}
 	}
 	src1 := "azure://graph.microsoft.com/applications/aaaaaaaa-1111-2222-3333-444444444444"
 	src2 := "azure://graph.microsoft.com/applications/bbbbbbbb-1111-2222-3333-444444444444"
-	for _, want := range []string{src1 + "|secret|Payments API · ci-secret", src1 + "|certificate|Payments API · CN=payments", src2 + "|secret|Payments API · k2abcdef"} {
+	for _, want := range []string{src1 + "|secret|Payments API · ci-secret · k1", src1 + "|certificate|Payments API · CN=payments · c1c1c1c1", src2 + "|secret|Payments API · k2abcdef"} {
 		if !got[want] {
 			t.Errorf("missing %s in %v", want, got)
 		}
@@ -89,5 +89,59 @@ func TestCheck_GraphFailureDoesNotHideKeyVault(t *testing.T) {
 	recs, err := newTestChecker(t, f, Config{KeyVaults: []string{"kv-prod"}, AppRegistrations: true}).Check(context.Background())
 	if len(recs) != 1 || err == nil || !strings.Contains(err.Error(), "applications") {
 		t.Fatalf("got %d records, err %v", len(recs), err)
+	}
+}
+
+func TestCheck_SameNameCredentialsStayDistinct(t *testing.T) {
+	f := newFake(t)
+	ts := func(d time.Duration) string { return time.Now().Add(d).UTC().Format(time.RFC3339) }
+	f.graph["applications"] = []map[string]any{{"appId": "aaaaaaaa-1111-2222-3333-444444444444", "displayName": "App",
+		"passwordCredentials": []map[string]any{
+			{"keyId": "11111111-aaaa", "displayName": "prod", "endDateTime": ts(5 * 24 * time.Hour)},
+			{"keyId": "22222222-bbbb", "displayName": "prod", "endDateTime": ts(700 * 24 * time.Hour)},
+		}}}
+	recs, err := newTestChecker(t, f, Config{AppRegistrations: true}).Check(context.Background())
+	if err != nil || len(recs) != 2 || recs[0].Name == recs[1].Name {
+		t.Fatalf("rotation pair must be two records with distinct names: %+v, %v", recs, err)
+	}
+}
+
+func TestCheck_ServicePrincipalNoise(t *testing.T) {
+	f := newFake(t)
+	end := time.Now().Add(15 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	f.graph["servicePrincipals"] = []map[string]any{
+		// SAML: the PFX password credential shares keyId/customKeyIdentifier with the certificate.
+		{"appId": "cccccccc-1111-2222-3333-444444444444", "displayName": "Salesforce", "servicePrincipalType": "Application",
+			"keyCredentials":      []map[string]any{{"keyId": "s1", "endDateTime": end, "usage": "Sign", "customKeyIdentifier": "THUMB"}},
+			"passwordCredentials": []map[string]any{{"keyId": "s1", "endDateTime": end, "customKeyIdentifier": "THUMB"}}},
+		{"appId": "dddddddd-1111-2222-3333-444444444444", "displayName": "vm-identity", "servicePrincipalType": "ManagedIdentity",
+			"keyCredentials": []map[string]any{{"keyId": "m1", "endDateTime": end, "customKeyIdentifier": "M"}}},
+		{"appId": "eeeeeeee-1111-2222-3333-444444444444", "displayName": "Microsoft Graph", "servicePrincipalType": "Application",
+			"appOwnerOrganizationId": "f8cdef31-a31e-4b4a-93e4-5f571e91255a",
+			"keyCredentials":         []map[string]any{{"keyId": "g1", "endDateTime": end, "customKeyIdentifier": "G"}}},
+	}
+	recs, err := newTestChecker(t, f, Config{ServicePrincipals: true}).Check(context.Background())
+	if err != nil || len(recs) != 1 || recs[0].Kind != "certificate" {
+		t.Fatalf("want only the SAML certificate: %+v, %v", recs, err)
+	}
+}
+
+func TestCheck_GraphBadDateIsReported(t *testing.T) {
+	f := newFake(t)
+	f.graph["applications"] = []map[string]any{{"appId": "aaaaaaaa-1111-2222-3333-444444444444", "displayName": "App",
+		"passwordCredentials": []map[string]any{{"keyId": "k1", "endDateTime": "not a date"}}}}
+	if _, err := newTestChecker(t, f, Config{AppRegistrations: true}).Check(context.Background()); err == nil || !strings.Contains(err.Error(), "endDateTime") {
+		t.Fatalf("bad date not reported: %v", err)
+	}
+}
+
+func TestCheck_GraphThrottlingRetried(t *testing.T) {
+	f := newFake(t)
+	f.throttleOnce = true
+	f.graph["applications"] = []map[string]any{{"appId": "aaaaaaaa-1111-2222-3333-444444444444", "displayName": "App",
+		"passwordCredentials": []map[string]any{{"keyId": "k1", "endDateTime": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}}}}
+	recs, err := newTestChecker(t, f, Config{AppRegistrations: true}).Check(context.Background())
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("429 not retried: %+v, %v", recs, err)
 	}
 }

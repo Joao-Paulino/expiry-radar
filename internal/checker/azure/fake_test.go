@@ -45,6 +45,7 @@ type fakeAzure struct {
 	redirect     string                      // vault collection answered with a 307 to this path
 	graph        map[string][]map[string]any // "applications"/"servicePrincipals" -> objects
 	graphTokens  []string                    // bearer tokens seen on Graph requests
+	throttleOnce bool                        // next Graph request answers 429
 }
 
 func newFake(t *testing.T) *fakeAzure {
@@ -113,8 +114,18 @@ func (f *fakeAzure) serve(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(p, "/v1.0/") {
 		f.graphTokens = append(f.graphTokens, r.Header.Get("Authorization"))
 		coll := strings.TrimPrefix(p, "/v1.0/")
-		if r.Method != http.MethodGet || !strings.Contains(r.URL.Query().Get("$select"), "Credentials") {
-			http.Error(w, "list with $select only", 400)
+		if r.Method != http.MethodGet || strings.Contains(r.URL.Query().Get("$select"), "keyCredentials") {
+			http.Error(w, "list only; keyCredentials in $select returns whole certificates", 400)
+			return
+		}
+		if t := r.URL.Query().Get("$top"); t != "100" {
+			http.Error(w, "page size above the maximum: "+t, 400)
+			return
+		}
+		if f.throttleOnce {
+			f.throttleOnce = false
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}
 		items := f.graph[coll]

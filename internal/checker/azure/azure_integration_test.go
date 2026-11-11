@@ -5,6 +5,7 @@ package azure
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -30,7 +31,7 @@ func TestIntegration_AzureKeyVault(t *testing.T) {
 	seen := map[string]bool{}
 	apps := 0
 	for _, r := range recs {
-		if r.Metadata["object_type"] == "applications" {
+		if r.Metadata["object_type"] == "applications" && strings.HasPrefix(r.Name, "expiry-radar-ci-target · er-test") {
 			apps++
 		}
 		t.Logf("%s %s %s expires %s", r.Kind, r.Name, r.Source, r.ExpiresAt.Format(time.RFC3339))
@@ -42,7 +43,7 @@ func TestIntegration_AzureKeyVault(t *testing.T) {
 		}
 	}
 	if cfg.AppRegistrations && apps == 0 {
-		t.Error("no App Registration credentials reported (the CI app has a federated credential only; add a test secret or certificate)")
+		t.Error("secret er-test of app expiry-radar-ci-target not reported (see scripts/azure-ci-setup.sh)")
 	}
 	if seen["secret|er-test-cert"] || seen["key|er-test-cert"] {
 		t.Error("managed secret/key behind the certificate reported")

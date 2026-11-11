@@ -155,11 +155,17 @@ func (a *authenticator) tokenURL() string {
 	return strings.TrimRight(a.ep.login, "/") + "/" + url.PathEscape(a.cfg.TenantID) + "/oauth2/v2.0/token"
 }
 
-// readBody reads at most 1 MiB and reports a non-2xx answer with the
-// server's error description (never the request).
+const maxBody = 32 << 20
+
+// readBody reads at most 32 MiB (a larger answer is an error, not a
+// truncated parse) and reports a non-2xx answer with the server's error
+// description (never the request).
 func readBody(resp *http.Response, what string) ([]byte, error) {
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
+	if len(data) > maxBody {
+		return nil, fmt.Errorf("%s: response larger than %d MiB", what, maxBody>>20)
+	}
 	if resp.StatusCode/100 != 2 {
 		var e struct {
 			Error       json.RawMessage `json:"error"`
