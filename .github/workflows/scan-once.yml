@@ -1,0 +1,49 @@
+# One-off diagnostic: scan every published binary and image.
+name: scan-once
+on:
+  push:
+    branches: [fix/release-gate]
+    paths: [".github/workflows/scan-once.yml"]
+permissions:
+  contents: read
+  packages: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+      - name: Source scan, verbose (name every finding)
+        run: govulncheck -show verbose ./... 2>&1 | grep -E "Vulnerability #|GO-20|Found in|Fixed in|Module:|^    [a-z]" | head -60 || true
+      - name: Released binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for tag in v0.1.0 v0.1.1 v0.2.0 v0.2.1; do
+            mkdir -p "rel/$tag"; gh release download "$tag" -D "rel/$tag" -p 'expiry-radar-*' >/dev/null 2>&1 || true
+            for f in rel/$tag/expiry-radar-*; do
+              gv=$(go version "$f" | awk '{print $2}')
+              out=$(govulncheck -mode=binary "$f" 2>&1); rc=$?
+              ids=$(echo "$out" | grep -oE "GO-20[0-9]{2}-[0-9]+" | sort -u | tr '\n' ' ')
+              echo "BIN $tag $(basename $f) go=$gv rc=$rc vulns=[$ids]"
+            done
+          done
+      - name: Published images (amd64)
+        run: |
+          for img in collector agent; do
+            for t in latest 0.2.1 0.2.0 0.1.1 0.1.0; do
+              ref=ghcr.io/joao-paulino/expiry-radar-$img:$t
+              docker pull -q --platform linux/amd64 "$ref" >/dev/null 2>&1 || { echo "IMG $ref missing"; continue; }
+              id=$(docker create --platform linux/amd64 "$ref"); docker cp "$id:/usr/local/bin/$img" "./$img-$t" >/dev/null; docker rm "$id" >/dev/null
+              gv=$(go version "./$img-$t" | awk '{print $2}')
+              out=$(govulncheck -mode=binary "./$img-$t" 2>&1); rc=$?
+              ids=$(echo "$out" | grep -oE "GO-20[0-9]{2}-[0-9]+" | sort -u | tr '\n' ' ')
+              echo "IMG $ref go=$gv rc=$rc vulns=[$ids]"
+            done
+          done
+      - name: How binary mode reports on a stripped file
+        run: f=$(ls rel/v0.2.1/expiry-radar-collector-*-linux-amd64); govulncheck -mode=binary -show verbose "$f" 2>&1 | tail -25; echo "exit=$?"
