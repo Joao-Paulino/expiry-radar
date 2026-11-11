@@ -317,7 +317,7 @@ ligação estar encriptada. O certificado do servidor é verificado, com TLS 1.2
 
 ```json
 {
-  "collector_url": "https://collector.example.com:8443/ingest",
+  "collector_url": "https://collector.example.com:8443",
   "collector_ca_file": "/etc/expiry-radar/collector-ca.pem",
   "token": "<one of the collector's auth_tokens>",
   "agent_id": "web-01",
@@ -337,7 +337,7 @@ chmod 600 agent.json          # it holds the agent token
 
 | Field / Campo | EN | PT |
 |---|---|---|
-| `collector_url` | Collector ingest URL; must start with `https://` | URL de ingestão do collector; tem de começar por `https://` |
+| `collector_url` | Collector address, e.g. `https://collector:8443` (`/ingest` is added automatically); must use `https://` | Endereço do collector, por exemplo `https://collector:8443` (o `/ingest` é acrescentado automaticamente); tem de usar `https://` |
 | `collector_ca_file` | Collector CA certificate, PEM; only for internal CA or self-signed (options B and C above) | Certificado da CA do collector, em PEM; só para CA interna ou autoassinado (opções B e C acima) |
 | `token` | One of the collector's `auth_tokens` | Um dos `auth_tokens` do collector |
 | `agent_id` | Name of this agent, shown on the dashboard | Nome deste agente, mostrado no painel |

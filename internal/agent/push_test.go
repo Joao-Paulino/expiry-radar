@@ -43,3 +43,25 @@ func TestPusher_Push_NonSuccessStatusIsError(t *testing.T) {
 		t.Fatal("expected an error for a 401 response")
 	}
 }
+
+// TestPusher_AcceptsBaseOrIngestURL proves collector_url works whether
+// it is the collector's base URL or the full /ingest URL (as the README
+// documents), with or without a trailing slash.
+func TestPusher_AcceptsBaseOrIngestURL(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	for _, u := range []string{srv.URL, srv.URL + "/", srv.URL + "/ingest", srv.URL + "/ingest/"} {
+		if err := NewPusher(u, "t").Push(context.Background(), checker.Batch{AgentID: "a"}); err != nil {
+			t.Errorf("%s: %v", u, err)
+		}
+	}
+	for i, p := range paths {
+		if p != "/ingest" {
+			t.Errorf("request %d went to %q, want /ingest", i, p)
+		}
+	}
+}

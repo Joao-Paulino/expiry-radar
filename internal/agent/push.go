@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/auth"
@@ -24,8 +25,12 @@ type Pusher struct {
 
 // NewPusher returns a Pusher for the given Collector URL and bearer token.
 func NewPusher(collectorURL, token string) *Pusher {
+	// Accept the collector's base URL or its full /ingest URL, with or
+	// without a trailing slash; Push always posts to <base>/ingest.
+	base := strings.TrimRight(collectorURL, "/")
+	base = strings.TrimSuffix(base, "/ingest")
 	return &Pusher{
-		collectorURL: collectorURL,
+		collectorURL: base,
 		token:        token,
 		client:       &http.Client{Timeout: 15 * time.Second},
 	}

@@ -42,8 +42,10 @@ JSON
   docker run --rm --network host -v "$W:/w:ro" "$image" sh -c \
     "cat /etc/os-release | head -2 && /w/agent version && (timeout 20 /w/agent /w/$id.json; true)"
   sleep 1
-  got=$(export_json | jq --arg id "$id" '[.[] | select(.reported_by == $id and (.metadata.verify_error // "") == "")] | length')
-  echo "   valid records from $id: $got (want 2: HTTPS + SMTP STARTTLS)"
+  # The targets use a self-signed certificate, so each record carries a
+  # verify_error; what matters is that both were read and delivered.
+  got=$(export_json | jq --arg id "$id" '[.[] | select(.reported_by == $id and .expires_at != null)] | length')
+  echo "   records from $id: $got (want 2: HTTPS + SMTP STARTTLS)"
   [ "$got" -ge 2 ] || fail=1
 done
 
