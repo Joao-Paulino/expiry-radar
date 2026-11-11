@@ -4,8 +4,6 @@ package db
 
 import (
 	"database/sql"
-	"net/url"
-	"path/filepath"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
@@ -63,23 +61,14 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
 );
 `
 
-// fileURI turns a filesystem path into an escaped SQLite file: URI, so
-// characters such as '#', '?' or '%' in the path are taken literally.
-// busy_timeout makes concurrent writers (ingest, login attempts) wait
-// for the write lock instead of failing with SQLITE_BUSY.
-func fileURI(path string) string {
-	p := filepath.ToSlash(path)
-	if filepath.VolumeName(path) != "" { // Windows: C:/x -> /C:/x
-		p = "/" + p
-	}
-	u := url.URL{Scheme: "file", OmitHost: true, Path: p, RawQuery: "_pragma=busy_timeout(10000)"}
-	return u.String()
-}
-
 // Open opens (creating if absent) a SQLite database at path and runs
 // all schema migrations.
 func Open(path string) (*sql.DB, error) {
-	database, err := sql.Open("sqlite3", fileURI(path))
+	// A plain path (not a "file:" URI) is taken literally, so '#', '?'
+	// and '%' are safe and Windows drive letters work; for plain paths
+	// the ncruces driver also sets a one-minute busy timeout, so
+	// concurrent writers wait for the lock instead of failing.
+	database, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, err
 	}
