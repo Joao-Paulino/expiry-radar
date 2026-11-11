@@ -19,7 +19,7 @@ jobs:
           go mod tidy
           git diff go.mod
           go build ./... && go test ./...
-          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -scan module ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -scan module
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
