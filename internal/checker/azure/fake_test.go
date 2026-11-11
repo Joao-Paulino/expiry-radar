@@ -43,11 +43,13 @@ type fakeAzure struct {
 	subs         map[string][]map[string]any // subscription -> ARM resources
 	arcAuthSent  bool                        // an Authorization header reached the Arc endpoint
 	redirect     string                      // vault collection answered with a 307 to this path
+	graph        map[string][]map[string]any // "applications"/"servicePrincipals" -> objects
+	graphTokens  []string                    // bearer tokens seen on Graph requests
 }
 
 func newFake(t *testing.T) *fakeAzure {
 	t.Helper()
-	f := &fakeAzure{vaults: map[string]map[string][]map[string]any{}, subs: map[string][]map[string]any{}}
+	f := &fakeAzure{vaults: map[string]map[string][]map[string]any{}, subs: map[string][]map[string]any{}, graph: map[string][]map[string]any{}}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -106,6 +108,25 @@ func (f *fakeAzure) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 		http.Error(w, "no token", 401)
+		return
+	}
+	if strings.HasPrefix(p, "/v1.0/") {
+		f.graphTokens = append(f.graphTokens, r.Header.Get("Authorization"))
+		coll := strings.TrimPrefix(p, "/v1.0/")
+		if r.Method != http.MethodGet || !strings.Contains(r.URL.Query().Get("$select"), "Credentials") {
+			http.Error(w, "list with $select only", 400)
+			return
+		}
+		items := f.graph[coll]
+		if r.URL.Query().Get("$skiptoken") == "2" {
+			reply(w, map[string]any{"value": items[1:]})
+			return
+		}
+		out := map[string]any{"value": items[:min(1, len(items))]}
+		if len(items) > 1 {
+			out["@odata.nextLink"] = f.srv.URL + p + "?" + r.URL.RawQuery + "&$skiptoken=2"
+		}
+		reply(w, out)
 		return
 	}
 	if strings.HasPrefix(p, "/subscriptions/") {

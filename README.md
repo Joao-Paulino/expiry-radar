@@ -454,10 +454,10 @@ path "sys/leases/lookup/database/creds/*" { capabilities = ["list", "sudo"] }
 path "sys/leases/lookup"                  { capabilities = ["update"] }
 ```
 
-### 🔷 Azure Key Vault
+### 🔷 Azure (Key Vault, App Registrations, Enterprise Apps)
 
-The agent can also check Azure Key Vaults: certificates, secrets and keys with an expiry date. It only calls list endpoints, which return attributes, never values. No Azure SDK: plain REST, so no extra dependencies.
-O agente também pode verificar Azure Key Vaults: certificados, segredos e chaves com data de validade. Só chama endpoints de listagem, que devolvem atributos, nunca valores. Sem SDK do Azure: REST direto, sem dependências extra.
+The agent can also check Azure Key Vaults (certificates, secrets and keys with an expiry date) and, via Microsoft Graph, the client secrets and certificates of App Registrations and the SAML signing certificates of Enterprise Apps. It only calls list endpoints, which return attributes, never values. No Azure SDK: plain REST, so no extra dependencies.
+O agente também pode verificar Azure Key Vaults (certificados, segredos e chaves com data de validade) e, via Microsoft Graph, os client secrets e certificados das App Registrations e os certificados de assinatura SAML das Enterprise Apps. Só chama endpoints de listagem, que devolvem atributos, nunca valores. Sem SDK do Azure: REST direto, sem dependências extra.
 
 ```json
 "azure": {
@@ -467,7 +467,9 @@ O agente também pode verificar Azure Key Vaults: certificados, segredos e chave
   "certificate_file": "/etc/expiry-radar/azure-sp.pem",
   "token_file": "",
   "key_vaults": ["kv-prod-weu", "kv-shared"],
-  "subscriptions": ["<subscription id>"]
+  "subscriptions": ["<subscription id>"],
+  "app_registrations": true,
+  "service_principals": true
 }
 ```
 
@@ -478,6 +480,7 @@ O agente também pode verificar Azure Key Vaults: certificados, segredos e chave
 | 🔗 `workload_identity` | Federated token (AKS workload identity, GitHub Actions, other clouds). `token_file`, `tenant_id`, `client_id` default to `AZURE_FEDERATED_TOKEN_FILE`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` | Token federado (workload identity do AKS, GitHub Actions, outras clouds). `token_file`, `tenant_id`, `client_id` usam por omissão `AZURE_FEDERATED_TOKEN_FILE`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` |
 | 🖥️ Azure Arc | The agent's user must be in the `himds` group (Linux) or Administrators / *Hybrid agent extension applications* (Windows), and `IDENTITY_ENDPOINT` + `IMDS_ENDPOINT` must be in the service environment (e.g. systemd `Environment=`); without them the agent uses 169.254.169.254, which outside Azure is another cloud's metadata service | O utilizador do agente tem de estar no grupo `himds` (Linux) ou Administrators / *Hybrid agent extension applications* (Windows), e `IDENTITY_ENDPOINT` + `IMDS_ENDPOINT` têm de estar no ambiente do serviço (ex.: `Environment=` do systemd); sem elas o agente usa 169.254.169.254, que fora do Azure é o serviço de metadados de outra cloud |
 | 🗂️ Vaults | `key_vaults` (least privilege) and/or `subscriptions` (discovers every vault in any region; adds `location`, `resource_group`, `subscription` to the records) | `key_vaults` (privilégio mínimo) e/ou `subscriptions` (descobre todos os vaults, em qualquer região; acrescenta `location`, `resource_group`, `subscription` aos registos) |
+| 🪪 `app_registrations` / `service_principals` | Client secrets (kind `secret`) and certificates (kind `certificate`) of every App Registration; SAML signing and other certificates of Enterprise Apps (listed once, not per usage). Needs Graph `Application.Read.All` (application permission, admin consent; reads metadata of every app, nothing narrower exists). Secret values are never returned by Graph and the hint is not stored. Credentials expired more than 30 days ago are skipped | Client secrets (kind `secret`) e certificados (kind `certificate`) de todas as App Registrations; certificados SAML e outros das Enterprise Apps (uma vez, não por utilização). Exige `Application.Read.All` no Graph (permissão de aplicação, admin consent; lê metadados de todas as apps, não existe nada mais restrito). O Graph nunca devolve valores de secrets e o hint não é guardado. Credenciais expiradas há mais de 30 dias são ignoradas |
 | 🚫 Skipped | Items without an expiry date, disabled items, and the secret and key Key Vault creates behind each certificate | Itens sem data de validade, itens desativados e o segredo e a chave que o Key Vault cria por trás de cada certificado |
 | 🌐 Networks | One agent covers every region. A vault with private endpoint / firewall must be reachable (VNet + `privatelink.vaultcore.azure.net` DNS, or an allowed IP); otherwise that vault reports `403 ForbiddenByFirewall` or a DNS error and the others still count. Isolated networks: one agent per VNet/hub | Um agente cobre todas as regiões. Um vault com private endpoint / firewall tem de estar acessível (VNet + DNS `privatelink.vaultcore.azure.net`, ou IP permitido); senão esse vault dá `403 ForbiddenByFirewall` ou erro de DNS e os outros continuam. Redes isoladas: um agente por VNet/hub |
 
@@ -492,6 +495,18 @@ az keyvault set-policy -n kv-prod-weu --object-id <principal> \
   --certificate-permissions list --secret-permissions list --key-permissions list
 # Discovery (subscriptions): Reader on the subscription
 az role assignment create --assignee-object-id <principal> --assignee-principal-type ServicePrincipal --role Reader --scope /subscriptions/<subscription id>
+```
+
+Graph permission / Permissão no Graph (`app_registrations`, `service_principals`):
+
+```bash
+GRAPH=00000003-0000-0000-c000-000000000000; ROLE=9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30   # Application.Read.All
+# service principal (certificate / workload identity)
+az ad app permission add --id <app id> --api $GRAPH --api-permissions $ROLE=Role
+az ad app permission admin-consent --id <app id>
+# managed identity (no portal button): assign the Graph app role
+az rest --method POST --uri "https://graph.microsoft.com/v1.0/servicePrincipals/<identity object id>/appRoleAssignments" \
+  --body "{\"principalId\":\"<identity object id>\",\"resourceId\":\"$(az ad sp show --id $GRAPH --query id -o tsv)\",\"appRoleId\":\"$ROLE\"}"
 ```
 
 Set-up per auth / Configuração por autenticação:
@@ -525,6 +540,8 @@ az keyvault key create --vault-name <test vault> -n er-test-key --expires 2027-1
 gh variable set AZURE_TEST_TENANT_ID -b "$(az account show --query tenantId -o tsv)"
 gh variable set AZURE_TEST_CLIENT_ID -b "$APP"
 gh variable set AZURE_TEST_VAULT -b <test vault>
+# optional: also test App Registrations (grant Application.Read.All to the CI app as above)
+gh variable set AZURE_TEST_GRAPH -b 1
 ```
 </details>
 

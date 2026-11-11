@@ -1,7 +1,9 @@
-// Package azure checks Microsoft Azure for things that expire. Step 1:
-// Key Vault certificates, secrets and keys with an expiry date. It uses
-// the Entra ID, ARM and Key Vault REST APIs directly (no Azure SDK) and
-// only calls list endpoints, which return attributes, never values.
+// Package azure checks Microsoft Azure for things that expire: Key Vault
+// certificates, secrets and keys, and the client secrets and
+// certificates of app registrations and enterprise apps. It uses the
+// Entra ID, ARM, Key Vault and Microsoft Graph REST APIs directly (no
+// Azure SDK) and only calls list endpoints, which return attributes,
+// never values.
 package azure
 
 import (
@@ -20,6 +22,11 @@ type Config struct {
 	TokenFile       string   `json:"token_file"`
 	KeyVaults       []string `json:"key_vaults"`
 	Subscriptions   []string `json:"subscriptions"`
+	// AppRegistrations / ServicePrincipals check client secrets and
+	// certificates of every app (and SAML signing certificates of
+	// enterprise apps) via Microsoft Graph; need Application.Read.All.
+	AppRegistrations  bool `json:"app_registrations"`
+	ServicePrincipals bool `json:"service_principals"`
 }
 
 var (
@@ -61,8 +68,8 @@ func (c *Config) Validate() error {
 	if c.TenantID != "" && !tenantRe.MatchString(c.TenantID) {
 		return fmt.Errorf("azure: invalid tenant_id %q", c.TenantID)
 	}
-	if len(c.KeyVaults)+len(c.Subscriptions) == 0 {
-		return errors.New("azure: set at least one of key_vaults or subscriptions")
+	if len(c.KeyVaults)+len(c.Subscriptions) == 0 && !c.AppRegistrations && !c.ServicePrincipals {
+		return errors.New("azure: set at least one of key_vaults, subscriptions, app_registrations or service_principals")
 	}
 	for _, v := range c.KeyVaults {
 		if !vaultNameRe.MatchString(v) {

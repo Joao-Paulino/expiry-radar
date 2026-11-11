@@ -16,7 +16,7 @@ import (
 )
 
 func testEndpoints(f *fakeAzure) endpoints {
-	return endpoints{login: f.srv.URL, imds: f.srv.URL + "/imds", arm: f.srv.URL,
+	return endpoints{login: f.srv.URL, imds: f.srv.URL + "/imds", arm: f.srv.URL, graph: f.srv.URL,
 		vault: func(n string) string { return f.srv.URL + "/kv/" + n }, arcDir: "/nonexistent"}
 }
 

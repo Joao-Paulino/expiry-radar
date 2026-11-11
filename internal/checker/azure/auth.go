@@ -28,6 +28,7 @@ import (
 const (
 	resVault       = "https://vault.azure.net"
 	resARM         = "https://management.azure.com"
+	resGraph       = "https://graph.microsoft.com"
 	refreshMargin  = 5 * time.Minute
 	assertionLife  = 10 * time.Minute
 	maxArcKeyBytes = 4096
@@ -39,6 +40,7 @@ type endpoints struct {
 	login  string                   // Entra ID authority
 	imds   string                   // IMDS token URL
 	arm    string                   // Azure Resource Manager
+	graph  string                   // Microsoft Graph
 	vault  func(name string) string // Key Vault data plane base URL
 	arcDir string                   // directory Arc challenge key files must live in
 }
@@ -52,6 +54,7 @@ func defaultEndpoints() endpoints {
 		login:  "https://login.microsoftonline.com",
 		imds:   "http://169.254.169.254/metadata/identity/oauth2/token",
 		arm:    "https://management.azure.com",
+		graph:  "https://graph.microsoft.com",
 		vault:  func(n string) string { return "https://" + n + ".vault.azure.net" },
 		arcDir: arcDir,
 	}

@@ -17,6 +17,10 @@ func TestConfig_Validate(t *testing.T) {
 			t.Errorf("%s rejected: %v", a, err)
 		}
 	}
+	graphOnly := Config{Auth: "managed_identity", AppRegistrations: true}
+	if err := graphOnly.Validate(); err != nil {
+		t.Errorf("app_registrations only rejected: %v", err)
+	}
 	mi := Config{Auth: "managed_identity", Subscriptions: []string{guid}}
 	if err := mi.Validate(); err != nil {
 		t.Errorf("managed identity without tenant/client rejected: %v", err)

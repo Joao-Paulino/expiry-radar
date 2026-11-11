@@ -125,14 +125,18 @@ func (c *Checker) getPages(ctx context.Context, first, token string) ([]json.Raw
 			return all, err
 		}
 		var r struct {
-			Value    []json.RawMessage `json:"value"`
-			NextLink string            `json:"nextLink"`
+			Value     []json.RawMessage `json:"value"`
+			NextLink  string            `json:"nextLink"`
+			ODataNext string            `json:"@odata.nextLink"` // Microsoft Graph
 		}
 		if err := json.Unmarshal(data, &r); err != nil {
 			return all, fmt.Errorf("GET %s: %w", nu.Path, err)
 		}
 		all = append(all, r.Value...)
 		next = r.NextLink
+		if next == "" {
+			next = r.ODataNext
+		}
 	}
 	return all, nil
 }
@@ -212,15 +216,34 @@ func (c *Checker) checkVault(ctx context.Context, token string, v vaultTarget) (
 	return records, errors.Join(errs...)
 }
 
-// Check authenticates, resolves the vault list (configured + discovered)
-// and checks every vault. A failing vault or subscription is reported in
-// the error while the others still count; an authentication failure for
-// Key Vault fails the run.
+// Check authenticates and runs the configured parts (Graph credentials,
+// Key Vaults). A failing part does not hide the others.
 func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 	src, err := c.tokenSource()
 	if err != nil {
 		return nil, err
 	}
+	var records []checker.ExpiryRecord
+	var errs []error
+	if c.cfg.AppRegistrations || c.cfg.ServicePrincipals {
+		recs, err := c.checkGraph(ctx, src)
+		records = append(records, recs...)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(c.cfg.KeyVaults)+len(c.cfg.Subscriptions) == 0 {
+		return records, errors.Join(errs...)
+	}
+	recs, err := c.checkKeyVaults(ctx, src)
+	return append(records, recs...), errors.Join(append(errs, err)...)
+}
+
+// checkKeyVaults resolves the vault list (configured + discovered) and
+// checks every vault. A failing vault or subscription is reported in
+// the error while the others still count; an authentication failure for
+// Key Vault fails this part.
+func (c *Checker) checkKeyVaults(ctx context.Context, src tokenSource) ([]checker.ExpiryRecord, error) {
 	kvToken, err := src.token(ctx, resVault)
 	if err != nil {
 		return nil, err
