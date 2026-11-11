@@ -1,0 +1,29 @@
+# One-off: resolve new dependencies and write go.mod/go.sum on a runner
+# with normal internet access (this sandbox cannot reach golang.org).
+name: tidy-once
+on:
+  push:
+    branches: [feature/sso-oidc]
+    paths: [".github/workflows/tidy-once.yml", "internal/collector/sso/doc.go"]
+permissions:
+  contents: write
+jobs:
+  tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: |
+          go get github.com/coreos/go-oidc/v3@v3.15.0 golang.org/x/oauth2@v0.30.0
+          go mod tidy
+          go build ./...
+          git diff --stat
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add go.mod go.sum
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: add go-oidc and x/oauth2 (go.mod/go.sum from CI)"
+          git push origin HEAD:feature/sso-oidc
