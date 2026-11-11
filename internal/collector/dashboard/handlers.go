@@ -10,6 +10,7 @@ import (
 
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/export"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/rules"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/store"
 )
 
@@ -24,6 +25,13 @@ type recordView struct {
 	Record store.StoredRecord
 	Muted  bool
 	Owner  string
+}
+
+// listView is the list page model: the records plus the CSRF token of
+// the session viewing it (empty for bearer-token requests).
+type listView struct {
+	Records []recordView
+	CSRF    string
 }
 
 // historyView holds the parameters and results of a history query for
@@ -63,7 +71,7 @@ func NewMux(st store.Store, rs rules.Store) *http.ServeMux {
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := templates.ExecuteTemplate(w, "list.html", views); err != nil {
+		if err := templates.ExecuteTemplate(w, "list.html", listView{Records: views, CSRF: session.CSRFToken(ctx)}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

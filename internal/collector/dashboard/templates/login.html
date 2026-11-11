@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head><title>Expiry Radar · Login</title></head>
+<body>
+<h1>Expiry Radar</h1>
+{{if .Error}}<p role="alert">{{.Error}}</p>{{end}}
+<form method="post" action="/login" autocomplete="off">
+<p><label>Password / Palavra-passe<br><input type="password" name="password" required autofocus></label></p>
+<p><label>Authenticator or recovery code / Código do autenticador ou de recuperação<br><input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" required></label></p>
+<button type="submit">Sign in / Entrar</button>
+</form>
+</body>
+</html>

@@ -14,12 +14,14 @@ import (
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/auth"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/alert"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/alert/notifiers"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/dashboard"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/db"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/ingest"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/rules"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/store"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 )
@@ -177,8 +179,15 @@ func Run(cfg Config) error {
 
 	dashboardMux := dashboard.NewMux(st, rs)
 
+	sessions := &session.Store{DB: database, Now: time.Now}
+	authenticator := &admin.Authenticator{Store: &admin.Store{DB: database}, Now: time.Now}
+	loginGet, loginPost, logout := dashboard.LoginHandlers(authenticator, sessions)
+
 	mux := http.NewServeMux()
-	mux.Handle("/", auth.Middleware(cfg.AdminTokens, dashboardMux))
+	mux.Handle("GET /login", loginGet)
+	mux.Handle("POST /login", loginPost)
+	mux.Handle("POST /logout", session.Middleware(sessions, cfg.AdminTokens, logout))
+	mux.Handle("/", session.Middleware(sessions, cfg.AdminTokens, dashboardMux))
 	mux.Handle("POST /ingest", auth.Middleware(cfg.AuthTokens, ingest.Handler(st)))
 
 	if interval := cfg.EffectiveAlertInterval(); interval > 0 {

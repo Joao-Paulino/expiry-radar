@@ -158,3 +158,44 @@ func TestConfig_Validate_RejectsWeakTokens(t *testing.T) {
 		}
 	}
 }
+
+// TestRun_BrowserWithoutSessionRedirectsToLogin proves an
+// unauthenticated browser is sent to the login page, and that the
+// login page itself is reachable without authentication.
+func TestRun_BrowserWithoutSessionRedirectsToLogin(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := testhelpers.WriteSelfSignedCertForTest(t, dir)
+	cfg := server.Config{
+		DBPath:      filepath.Join(dir, "radar.db"),
+		ListenAddr:  "127.0.0.1:0",
+		AuthTokens:  []string{"agent-token-0123456789abcdef0123456789"},
+		AdminTokens: []string{"admin-token-0123456789abcdef0123456789"},
+		TLSCertFile: certFile,
+		TLSKeyFile:  keyFile,
+	}
+	addr, stop, err := testhelpers.StartForTest(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	client := &http.Client{
+		Transport:     &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	req, _ := http.NewRequest("GET", "https://"+addr+"/", nil)
+	req.Header.Set("Accept", "text/html")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login" {
+		t.Fatalf("code=%d location=%q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	resp, err = client.Get("https://" + addr + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("login page: got %d", resp.StatusCode)
+	}
+}

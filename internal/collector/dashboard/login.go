@@ -1,0 +1,89 @@
+package dashboard
+
+import (
+	"errors"
+	"log"
+	"net/http"
+
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
+	"github.com/Joao-Paulino/expiry-radar/internal/logging"
+)
+
+type loginView struct {
+	Error string
+}
+
+// genericLoginError is shown for every failure, so the page never
+// reveals whether the password, the code, the lockout or the setup
+// was the problem.
+const genericLoginError = "Invalid credentials. / Credenciais inválidas."
+
+// LoginHandlers returns the login page (GET), the login form handler
+// (POST) and the logout handler. get and post are public; logout must
+// be wrapped in session.Middleware so it is CSRF-protected.
+func LoginHandlers(auth *admin.Authenticator, sessions *session.Store) (get, post, logout http.Handler) {
+	render := func(w http.ResponseWriter, msg string) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		if err := templates.ExecuteTemplate(w, "login.html", loginView{Error: msg}); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+	}
+
+	get = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { render(w, "") })
+
+	post = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if err := r.ParseForm(); err != nil {
+			render(w, genericLoginError)
+			return
+		}
+		err := auth.Login(ctx, r.PostFormValue("password"), r.PostFormValue("code"))
+		switch {
+		case err == nil:
+		case errors.Is(err, admin.ErrLocked):
+			log.Printf("dashboard: account locked (from %s)", logging.Sanitize(r.RemoteAddr))
+			render(w, genericLoginError)
+			return
+		case errors.Is(err, admin.ErrNotConfigured):
+			log.Printf("dashboard: login failed, administrator not configured (from %s)", logging.Sanitize(r.RemoteAddr))
+			render(w, genericLoginError)
+			return
+		case errors.Is(err, admin.ErrInvalidCredentials):
+			log.Printf("dashboard: login failed (from %s)", logging.Sanitize(r.RemoteAddr))
+			render(w, genericLoginError)
+			return
+		default:
+			log.Printf("dashboard: login error: %s", logging.Sanitize(err.Error()))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		// Never reuse a session id that existed before login.
+		if c, err := r.Cookie(session.CookieName); err == nil && c.Value != "" {
+			sessions.Delete(ctx, c.Value)
+		}
+		id, _, err := sessions.Create(ctx)
+		if err != nil {
+			log.Printf("dashboard: session create error: %s", logging.Sanitize(err.Error()))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("dashboard: login success (from %s)", logging.Sanitize(r.RemoteAddr))
+		http.SetCookie(w, session.Cookie(id))
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+
+	logout = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c, err := r.Cookie(session.CookieName); err == nil && c.Value != "" {
+			if err := sessions.Delete(r.Context(), c.Value); err != nil {
+				log.Printf("dashboard: logout error: %s", logging.Sanitize(err.Error()))
+			}
+		}
+		log.Printf("dashboard: logout (from %s)", logging.Sanitize(r.RemoteAddr))
+		http.SetCookie(w, session.ExpiredCookie())
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	})
+	return get, post, logout
+}

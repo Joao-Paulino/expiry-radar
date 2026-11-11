@@ -3,12 +3,13 @@
 <head><title>Expiry Radar</title></head>
 <body>
 <h1>Expiry Radar</h1>
+{{if .CSRF}}<form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit">Sign out / Sair</button></form>{{end}}
 <table>
 <thead>
 <tr><th>Source</th><th>Name</th><th>Kind</th><th>Expires At</th><th>Reported By</th><th>Checked At</th><th>Muted</th><th>Owner</th></tr>
 </thead>
 <tbody>
-{{range .}}
+{{range .Records}}
 <tr>
 <td>{{.Record.Source}}</td>
 <td><a href="/history?source={{.Record.Source}}&name={{.Record.Name}}&kind={{.Record.Kind}}">{{.Record.Name}}</a></td>
@@ -24,6 +25,7 @@
 </table>
 <h2>Mute / assign owner</h2>
 <form method="post" action="/rules">
+{{if .CSRF}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
 <input type="text" name="source" placeholder="source" required>
 <input type="text" name="name" placeholder="name" required>
 <input type="text" name="kind" placeholder="kind" required>

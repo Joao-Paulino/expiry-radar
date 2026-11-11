@@ -1,0 +1,151 @@
+package dashboard
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/db"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
+)
+
+const loginPassword = "correct horse battery staple"
+
+type loginEnv struct {
+	auth     *admin.Authenticator
+	sessions *session.Store
+	secret   string
+	get      http.Handler
+	post     http.Handler
+	logout   http.Handler
+}
+
+func newLoginEnv(t *testing.T, configured bool) *loginEnv {
+	t.Helper()
+	database, err := db.Open(filepath.Join(t.TempDir(), "radar.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	ctx := context.Background()
+	as := &admin.Store{DB: database}
+	e := &loginEnv{
+		auth:     &admin.Authenticator{Store: as, Now: time.Now},
+		sessions: &session.Store{DB: database, Now: time.Now},
+	}
+	if configured {
+		h, _ := admin.HashPassword(loginPassword)
+		as.SetPassword(ctx, h)
+		e.secret, _ = admin.NewTOTPSecret()
+		_, hashes, _ := admin.NewRecoveryCodes()
+		as.SetTOTP(ctx, e.secret, hashes)
+	}
+	e.get, e.post, e.logout = LoginHandlers(e.auth, e.sessions)
+	return e
+}
+
+func (e *loginEnv) postLogin(t *testing.T, password, code string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	form := url.Values{"password": {password}, "code": {code}}
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	e.post.ServeHTTP(rec, req)
+	return rec
+}
+
+func sessionCookie(rec *httptest.ResponseRecorder) *http.Cookie {
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == session.CookieName {
+			return c
+		}
+	}
+	return nil
+}
+
+func TestLoginPage_RendersForm(t *testing.T) {
+	e := newLoginEnv(t, true)
+	rec := httptest.NewRecorder()
+	e.get.ServeHTTP(rec, httptest.NewRequest("GET", "/login", nil))
+	body := rec.Body.String()
+	if rec.Code != 200 || !strings.Contains(body, `name="password"`) || !strings.Contains(body, `name="code"`) {
+		t.Fatalf("code=%d body=%s", rec.Code, body)
+	}
+}
+
+func TestLoginPost_SuccessSetsFreshSession(t *testing.T) {
+	e := newLoginEnv(t, true)
+	oldID, _, _ := e.sessions.Create(context.Background())
+	code, _ := admin.TOTPCode(e.secret, time.Now().Unix()/30)
+	rec := e.postLogin(t, loginPassword, code, session.Cookie(oldID))
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
+		t.Fatalf("code=%d location=%q", rec.Code, rec.Header().Get("Location"))
+	}
+	c := sessionCookie(rec)
+	if c == nil || c.Value == "" || c.Value == oldID {
+		t.Fatalf("expected a fresh session cookie, got %+v", c)
+	}
+	if _, ok, _ := e.sessions.Lookup(context.Background(), c.Value); !ok {
+		t.Fatal("new session not stored")
+	}
+	if _, ok, _ := e.sessions.Lookup(context.Background(), oldID); ok {
+		t.Fatal("pre-login session still valid (fixation)")
+	}
+}
+
+func TestLoginPost_FailureIsGeneric(t *testing.T) {
+	for name, configured := range map[string]bool{"bad credentials": true, "not configured": false} {
+		e := newLoginEnv(t, configured)
+		rec := e.postLogin(t, "wrong password!!", "000000")
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Invalid credentials") {
+			t.Errorf("%s: code=%d body=%s", name, rec.Code, rec.Body.String())
+		}
+		if sessionCookie(rec) != nil {
+			t.Errorf("%s: session cookie set on failure", name)
+		}
+	}
+}
+
+func TestLogout_DeletesSession(t *testing.T) {
+	e := newLoginEnv(t, true)
+	id, _, _ := e.sessions.Create(context.Background())
+	req := httptest.NewRequest("POST", "/logout", nil)
+	req.AddCookie(session.Cookie(id))
+	rec := httptest.NewRecorder()
+	e.logout.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/login" {
+		t.Fatalf("code=%d location=%q", rec.Code, rec.Header().Get("Location"))
+	}
+	if _, ok, _ := e.sessions.Lookup(context.Background(), id); ok {
+		t.Fatal("session survived logout")
+	}
+	if c := sessionCookie(rec); c == nil || c.MaxAge >= 0 {
+		t.Fatalf("cookie not expired: %+v", c)
+	}
+}
+
+func TestListPage_IncludesCSRFFieldForSessions(t *testing.T) {
+	e := newLoginEnv(t, true)
+	id, s, _ := e.sessions.Create(context.Background())
+	h := session.Middleware(e.sessions, nil, NewMux(&fakeStore{}, &fakeRulesStore{}))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(session.Cookie(id))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `name="csrf_token" value="`+s.CSRFToken+`"`) {
+		t.Fatalf("CSRF field missing: %s", body)
+	}
+	if !strings.Contains(body, `action="/logout"`) {
+		t.Fatal("logout form missing")
+	}
+}
