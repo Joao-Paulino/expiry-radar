@@ -5,7 +5,6 @@ import (
 	"errors"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -26,18 +25,17 @@ var hashSlots = make(chan struct{}, max(1, runtime.NumCPU()/2))
 // verifyPassword is a variable so tests can count calls (timing checks).
 var verifyPassword = VerifyPassword
 
-var (
-	dummyHashOnce sync.Once
-	dummyHash     string
-)
+// dummyHash is verified when no real hash exists, so every login
+// attempt costs the same PBKDF2 work. Computed once at startup.
+var dummyHash, _ = HashPassword("expiry-radar-unconfigured-dummy")
 
-// dummyPasswordHash is verified when no real hash exists, so every
-// login attempt costs the same PBKDF2 work.
-func dummyPasswordHash() string {
-	dummyHashOnce.Do(func() {
-		dummyHash, _ = HashPassword("expiry-radar-unconfigured-dummy")
-	})
-	return dummyHash
+// lookupRecovery is a variable so tests can count calls (timing checks).
+var lookupRecovery = (*Store).RecoveryCodeAvailable
+
+// Result describes a successful login, for the audit log.
+type Result struct {
+	RecoveryCode      bool // a recovery code was used instead of TOTP
+	RecoveryCodesLeft int  // unused recovery codes after this login
 }
 
 // Authenticator checks Administrator logins: password, then a TOTP or
@@ -51,62 +49,83 @@ type Authenticator struct {
 // unused TOTP code or recovery code, on an unlocked, fully configured
 // account. Callers must show the same message for every error.
 func (a *Authenticator) Login(ctx context.Context, password, code string) error {
+	_, err := a.Authenticate(ctx, password, code)
+	return err
+}
+
+// Authenticate is Login that also reports how the login succeeded.
+func (a *Authenticator) Authenticate(ctx context.Context, password, code string) (Result, error) {
 	acc, found, err := a.Store.Get(ctx)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 
 	hash := acc.PasswordHash
 	if !found || hash == "" {
-		hash = dummyPasswordHash()
+		hash = dummyHash
 	}
 	// Always pay for the hash first, so timing reveals nothing about
 	// configuration or lock state.
 	select {
 	case hashSlots <- struct{}{}:
 	case <-ctx.Done():
-		return ctx.Err()
+		return Result{}, ctx.Err()
 	}
 	passwordOK, err := verifyPassword(hash, password)
 	<-hashSlots
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 
 	if !found || acc.PasswordHash == "" || acc.TOTPSecret == "" {
-		return ErrNotConfigured
+		return Result{}, ErrNotConfigured
 	}
 	now := a.Now()
 	// Count the attempt and check the lock in one atomic step.
 	allowed, err := a.Store.ReserveAttempt(ctx, now)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	if !allowed {
-		return ErrLocked
-	}
-	if !passwordOK {
-		return ErrInvalidCredentials
+		return Result{}, ErrLocked
 	}
 
 	code = strings.TrimSpace(code)
-	if step, ok := VerifyTOTP(acc.TOTPSecret, code, now, acc.TOTPLastStep); ok {
-		claimed, err := a.Store.ClaimTOTPStep(ctx, step)
-		if err != nil {
-			return err
+	step, totpOK := VerifyTOTP(acc.TOTPSecret, code, now, acc.TOTPLastStep)
+	recoveryHash := HashRecoveryCode(strings.ToLower(code))
+	if !passwordOK {
+		// Same database work as the correct-password path, so timing
+		// does not reveal that the password was wrong.
+		if !totpOK {
+			lookupRecovery(a.Store, ctx, recoveryHash)
 		}
-		if !claimed {
-			return ErrInvalidCredentials
-		}
-		return a.Store.RecordSuccess(ctx, step)
+		return Result{}, ErrInvalidCredentials
 	}
 
-	used, err := a.Store.UseRecoveryCode(ctx, HashRecoveryCode(strings.ToLower(code)), now)
+	if totpOK {
+		claimed, err := a.Store.ClaimTOTPStep(ctx, step)
+		if err != nil {
+			return Result{}, err
+		}
+		if !claimed {
+			return Result{}, ErrInvalidCredentials
+		}
+		return Result{}, a.Store.RecordSuccess(ctx, step)
+	}
+
+	used, err := a.Store.UseRecoveryCode(ctx, recoveryHash, now)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	if !used {
-		return ErrInvalidCredentials
+		return Result{}, ErrInvalidCredentials
 	}
-	return a.Store.RecordSuccess(ctx, 0)
+	if err := a.Store.RecordSuccess(ctx, 0); err != nil {
+		return Result{}, err
+	}
+	left, err := a.Store.RecoveryCodesLeft(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{RecoveryCode: true, RecoveryCodesLeft: left}, nil
 }

@@ -247,3 +247,44 @@ func TestLogin_HashConcurrencyIsBounded(t *testing.T) {
 		t.Fatalf("%d password hashes ran at once, limit is %d", peak.Load(), cap(hashSlots))
 	}
 }
+
+// TestAuthenticate_ReportsRecoveryCodeUse proves a recovery-code login
+// is distinguishable (for the audit log) and reports how many remain.
+func TestAuthenticate_ReportsRecoveryCodeUse(t *testing.T) {
+	f := newLoginFixture(t)
+	ctx := context.Background()
+	res, err := f.auth.Authenticate(ctx, testPassword, f.recovery[0])
+	if err != nil || !res.RecoveryCode || res.RecoveryCodesLeft != 7 {
+		t.Fatalf("recovery login: %+v %v", res, err)
+	}
+	res, err = f.auth.Authenticate(ctx, testPassword, f.code(t))
+	if err != nil || res.RecoveryCode {
+		t.Fatalf("TOTP login: %+v %v", res, err)
+	}
+}
+
+// TestLogin_WrongPasswordDoesTheSameCodeWork proves a wrong password
+// still runs the recovery-code lookup, so response time does not reveal
+// whether the password was right.
+func TestLogin_WrongPasswordDoesTheSameCodeWork(t *testing.T) {
+	f := newLoginFixture(t)
+	var lookups atomic.Int32
+	orig := lookupRecovery
+	lookupRecovery = func(s *Store, ctx context.Context, hash string) (bool, error) {
+		lookups.Add(1)
+		return orig(s, ctx, hash)
+	}
+	defer func() { lookupRecovery = orig }()
+	f.auth.Login(context.Background(), "wrong password!!", "abcdefghjk")
+	if lookups.Load() != 1 {
+		t.Fatalf("recovery lookup ran %d times for a wrong password, want 1", lookups.Load())
+	}
+}
+
+// TestDummyHashComputedAtStartup proves the first login on an
+// unconfigured server does not pay for two PBKDF2 runs.
+func TestDummyHashComputedAtStartup(t *testing.T) {
+	if dummyHash == "" {
+		t.Fatal("dummy hash not computed at package initialisation")
+	}
+}

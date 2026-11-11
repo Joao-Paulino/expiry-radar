@@ -143,3 +143,18 @@ func (s *Store) ClaimTOTPStep(ctx context.Context, step int64) (bool, error) {
 	n, err := res.RowsAffected()
 	return n == 1, err
 }
+
+// RecoveryCodeAvailable reports, without consuming it, whether an
+// unused recovery code with this hash exists.
+func (s *Store) RecoveryCodeAvailable(ctx context.Context, hash string) (bool, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM admin_recovery_codes WHERE code_hash = ? AND used_at IS NULL`, hash).Scan(&n)
+	return n > 0, err
+}
+
+// RecoveryCodesLeft returns how many recovery codes are still unused.
+func (s *Store) RecoveryCodesLeft(ctx context.Context) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM admin_recovery_codes WHERE used_at IS NULL`).Scan(&n)
+	return n, err
+}
