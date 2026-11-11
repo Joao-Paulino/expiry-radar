@@ -204,14 +204,47 @@ Cada comando gera um token de 64 caracteres. Corre-o uma vez por token.
 | Rotate | Add the new token, update the agents, then remove the old one. Both work in between. | Adiciona o novo token, atualiza os agentes e depois remove o antigo. Ambos funcionam entretanto. |
 | Revoke | Remove the token from the list and restart the collector. | Remove o token da lista e reinicia o collector. |
 
-To open the dashboard, send the admin token as a header (for example with
-`curl`, or a header extension in your browser):
-Para abrir o painel, envia o token de administração num cabeçalho (por
-exemplo com `curl`, ou com uma extensão de cabeçalhos no browser):
+Scripts use the admin token as a header; people use the login page below.
+Os scripts usam o token de administração num cabeçalho; as pessoas usam a página de login abaixo.
 
 ```bash
 curl -H "Authorization: Bearer <admin token>" https://<collector>:8443/export.json
 ```
+
+### 🔐 Dashboard login / Login no painel
+
+The dashboard has one **Administrator** account protected by a password **and**
+an authenticator app (TOTP). Both are set on the collector server, never in a
+config file. Login stays disabled until both are set.
+
+O painel tem uma conta **Administrator** protegida por password **e** por uma
+app de autenticação (TOTP). As duas são definidas no servidor do collector,
+nunca num ficheiro de configuração. O login só fica ativo depois de ambas
+estarem definidas.
+
+```bash
+# 1. Password (min. 12 characters, typed twice, not shown)
+./collector set-admin-password collector.json
+
+# 2. Authenticator app: scan the key, type the 6-digit code, save the 8 recovery codes
+./collector set-admin-totp collector.json
+#    optional QR code in the terminal / QR opcional no terminal:
+#    qrencode -t ansiutf8 '<otpauth URI printed above>'
+```
+
+Then open `https://<collector>:8443/`, sign in with the password and the current
+code (or a recovery code).
+Depois abre `https://<collector>:8443/` e entra com a password e o código atual
+(ou um código de recuperação).
+
+| | EN | PT |
+|---|---|---|
+| 🔒 Lockout | 5 failed logins lock the account for 15 minutes | 5 tentativas falhadas bloqueiam a conta durante 15 minutos |
+| ⏱️ Session | Ends after 30 min idle or 8 h in total; **Sign out** ends it now | Termina após 30 min sem atividade ou 8 h no total; **Sair** termina-a já |
+| 🔁 Codes | Each authenticator code and each recovery code works only once | Cada código da app e cada código de recuperação só funciona uma vez |
+| 🆘 Lost phone | Run `set-admin-totp` again on the server (new key, new recovery codes) | Corre de novo `set-admin-totp` no servidor (nova chave, novos códigos) |
+| 🚪 Sign out everyone | Running either command signs out every open session | Correr qualquer um dos comandos termina todas as sessões abertas |
+| 🕒 Clock | The server clock must be correct (NTP) for codes to match | O relógio do servidor tem de estar certo (NTP) para os códigos baterem certo |
 
 ### 📧 Email
 
@@ -288,7 +321,8 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 
 **Still open in M1 / Ainda em aberto no M1**
 
-- [ ] Dashboard login page / Página de login no painel
+- [x] Dashboard login (password + TOTP) / Login no painel (password + TOTP)
+- [ ] SSO via OIDC (Entra ID, Google) / SSO via OIDC (Entra ID, Google)
 - [ ] Alert deduplication / Deduplicação de alertas
 - [ ] Alerts for failing checkers and silent agents / Alertas de verificadores em falha e agentes silenciosos
 - [ ] Agent validated on RedHat, Debian, Arch / Agente validado em RedHat, Debian, Arch
