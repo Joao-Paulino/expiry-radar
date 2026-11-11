@@ -39,6 +39,12 @@ type Config struct {
 	// in their custom metadata, under KVExpiryKey (default "expires_at").
 	KVMounts    []string `json:"kv_mounts"`
 	KVExpiryKey string   `json:"kv_expiry_key"`
+	// CheckTokens lists every token through its accessor. Off by default:
+	// listing accessors needs "sudo" on auth/token/accessors.
+	CheckTokens      bool `json:"check_tokens"`
+	TokenMinTTLHours int  `json:"token_min_ttl_hours"` // default 24
+	// AppRoleMounts are AppRole auth mounts whose secret IDs are checked.
+	AppRoleMounts []string `json:"approle_mounts"`
 }
 
 const defaultExpiryKey = "expires_at"
@@ -82,10 +88,14 @@ func (c Config) Validate() error {
 	if hasAppRole && (c.Auth.AppRole.RoleID == "" || c.Auth.AppRole.SecretIDFile == "") {
 		return errors.New("vault: auth.approle needs role_id and secret_id_file")
 	}
-	if len(c.PKIMounts)+len(c.KVMounts) == 0 {
-		return errors.New("vault: set at least one of pki_mounts or kv_mounts")
+	if len(c.PKIMounts)+len(c.KVMounts)+len(c.AppRoleMounts) == 0 && !c.CheckTokens {
+		return errors.New("vault: set at least one of pki_mounts, kv_mounts, approle_mounts or check_tokens")
 	}
-	for _, m := range append(append([]string{}, c.PKIMounts...), c.KVMounts...) {
+	if c.TokenMinTTLHours < 0 {
+		return errors.New("vault: token_min_ttl_hours must not be negative")
+	}
+	mounts := append(append(append([]string{}, c.PKIMounts...), c.KVMounts...), c.AppRoleMounts...)
+	for _, m := range mounts {
 		if !mountRe.MatchString(m) {
 			return fmt.Errorf("vault: invalid mount path %q", m)
 		}
@@ -293,6 +303,20 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 		records = append(records, recs...)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("kv mount %s: %w", mount, err))
+		}
+	}
+	if c.cfg.CheckTokens {
+		recs, err := c.checkTokens(ctx, s, "vault://"+host+"/auth/token")
+		records = append(records, recs...)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("tokens: %w", err))
+		}
+	}
+	for _, mount := range c.cfg.AppRoleMounts {
+		recs, err := c.checkSecretIDs(ctx, s, "vault://"+host+"/auth/"+mount, mount)
+		records = append(records, recs...)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("approle mount %s: %w", mount, err))
 		}
 	}
 	return records, errors.Join(errs...)
