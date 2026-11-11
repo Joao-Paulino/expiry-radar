@@ -427,6 +427,11 @@ func (c *Checker) checkKV(ctx context.Context, s *session, source, mount string)
 			if err != nil {
 				log.Printf("vault: %s/%s: %s %q is not a date (use 2027-03-31 or RFC 3339); skipped",
 					mount, logging.Sanitize(p), key, logging.Sanitize(raw))
+				// An error, so the run is incomplete and the secret is not
+				// taken for gone (its last known date keeps alerting).
+				if firstErr == nil {
+					firstErr = fmt.Errorf("secret %s: %s is not a date", p, key)
+				}
 				return
 			}
 			records = append(records, checker.ExpiryRecord{Source: source, Name: p, Kind: "secret", ExpiresAt: exp,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +20,8 @@ type fakeStore struct {
 	forgotten []string
 	touched   []string
 	saved     []checker.ExpiryRecord
+	runs      []string // "agent/checker/complete" per SaveResult call
+	checked   []time.Time
 	health    []struct {
 		name, reportedBy string
 		err              error
@@ -27,6 +30,12 @@ type fakeStore struct {
 
 func (f *fakeStore) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error {
 	f.saved = append(f.saved, records...)
+	return nil
+}
+func (f *fakeStore) SaveResult(ctx context.Context, agentID, checkerName string, records []checker.ExpiryRecord, checkedAt time.Time, complete bool) error {
+	f.saved = append(f.saved, records...)
+	f.runs = append(f.runs, fmt.Sprintf("%s/%s/%v", agentID, checkerName, complete))
+	f.checked = append(f.checked, checkedAt)
 	return nil
 }
 func (f *fakeStore) RecordCheckerHealth(ctx context.Context, name, reportedBy string, err error) error {
@@ -128,5 +137,37 @@ func TestHandler_EmptyBatchStillMarksAgentSeen(t *testing.T) {
 	Handler(st).ServeHTTP(rec, httptest.NewRequest("POST", "/ingest", body))
 	if rec.Code != 204 || len(st.touched) != 1 || st.touched[0] != "web-09" {
 		t.Fatalf("code=%d touched=%v", rec.Code, st.touched)
+	}
+}
+
+// Every result is saved as a run, also one with no records (all items
+// gone), and only an error-free run counts as complete.
+func TestHandler_EveryResultIsARun(t *testing.T) {
+	fs := &fakeStore{}
+	batch := checker.Batch{AgentID: "agent-1", Results: []checker.Result{
+		{CheckerName: "vault", CheckedAt: time.Now()},
+		{CheckerName: "azure", ErrMsg: "vault kv-x: 403", CheckedAt: time.Now(),
+			Records: []checker.ExpiryRecord{{Source: "a", Name: "b", Kind: "secret", ExpiresAt: time.Now()}}},
+	}}
+	body, _ := json.Marshal(batch)
+	rec := httptest.NewRecorder()
+	Handler(fs)(rec, httptest.NewRequest("POST", "/ingest", bytes.NewReader(body)))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if fmt.Sprint(fs.runs) != "[agent-1/vault/true agent-1/azure/false]" {
+		t.Fatalf("runs: %v", fs.runs)
+	}
+}
+
+// An agent clock far ahead must not push the collector's notion of
+// "latest run" into the future (it would hide new items until then).
+func TestHandler_FutureCheckedAtClamped(t *testing.T) {
+	fs := &fakeStore{}
+	batch := checker.Batch{AgentID: "agent-1", Results: []checker.Result{{CheckerName: "vault", CheckedAt: time.Now().Add(365 * 24 * time.Hour)}}}
+	body, _ := json.Marshal(batch)
+	Handler(fs)(httptest.NewRecorder(), httptest.NewRequest("POST", "/ingest", bytes.NewReader(body)))
+	if len(fs.checked) != 1 || fs.checked[0].After(time.Now().Add(6*time.Minute)) {
+		t.Fatalf("future checked_at stored: %v", fs.checked)
 	}
 }

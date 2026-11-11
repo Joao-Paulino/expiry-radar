@@ -90,6 +90,9 @@ type Notification struct {
 	Severity Severity
 	Muted    bool
 	Resolved bool // set by the sender when this reports a return to OK
+	// Gone: the item is no longer reported (deleted, renamed, rotated
+	// away). Its ExpiresAt is unknown (zero).
+	Gone bool
 }
 
 // Key identifies the alert subject for deduplication.

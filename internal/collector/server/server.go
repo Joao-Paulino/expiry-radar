@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/auth"
@@ -196,6 +197,11 @@ func deliver(ctx context.Context, engine *alert.Engine, state *alert.StateStore,
 		log.Printf("collector: alert evaluate error: %s", logging.Sanitize(err.Error()))
 		return
 	}
+	evaluated := map[string]bool{}
+	for _, n := range notifications {
+		evaluated[n.Key()] = true
+	}
+	notifications = append(notifications, goneResolutions(ctx, engine, state, evaluated)...)
 	for _, n := range notifications {
 		key := n.Key()
 		if n.Muted {
@@ -225,6 +231,40 @@ func deliver(ctx context.Context, engine *alert.Engine, state *alert.StateStore,
 			}
 		}
 	}
+}
+
+// goneResolutions returns an OK notification for every open expiry
+// alert whose item is no longer current (deleted, renamed, rotated
+// away, or its agent forgotten), so the alert is resolved once instead
+// of staying open.
+func goneResolutions(ctx context.Context, engine *alert.Engine, state *alert.StateStore, evaluated map[string]bool) []alert.Notification {
+	keys, err := state.OpenKeys(ctx, "expiry|")
+	if err != nil {
+		log.Printf("collector: alert state error: %s", logging.Sanitize(err.Error()))
+		return nil
+	}
+	var out []alert.Notification
+	for _, k := range keys {
+		if evaluated[k] {
+			continue
+		}
+		rest := strings.TrimPrefix(k, "expiry|")
+		i, j := strings.Index(rest, "|"), strings.LastIndex(rest, "|")
+		if i < 0 || j <= i {
+			continue
+		}
+		var r store.StoredRecord
+		r.Source, r.Name, r.Kind = rest[:i], rest[i+1:j], rest[j+1:]
+		muted := false
+		if engine.Rules != nil {
+			if rule, found, err := engine.Rules.Get(ctx, r.Source, r.Name, r.Kind); err == nil && found {
+				muted = rule.Muted
+			}
+		}
+		out = append(out, alert.Notification{Type: alert.TypeExpiry, Record: r, Severity: alert.SeverityOK, Gone: true, Muted: muted,
+			Detail: "no longer reported (deleted, renamed or rotated away)"})
+	}
+	return out
 }
 
 func runAlertLoop(engine *alert.Engine, state *alert.StateStore, ns []notifiers.Notifier, interval time.Duration, done <-chan struct{}) {

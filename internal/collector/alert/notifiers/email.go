@@ -71,6 +71,9 @@ func subjectFor(n alert.Notification) string {
 	if n.Resolved {
 		prefix = "Expiry Radar resolved: "
 	}
+	if n.Gone {
+		prefix = "Expiry Radar no longer reported: "
+	}
 	subject := n.Record.Name
 	switch n.Type {
 	case alert.TypeCheckerFailed:

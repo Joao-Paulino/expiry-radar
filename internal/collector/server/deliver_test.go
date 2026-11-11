@@ -114,3 +114,57 @@ func TestDeliver_FailedDeliveryIsRetried(t *testing.T) {
 		t.Fatalf("warning lost after a failed delivery: %+v", ok.sent)
 	}
 }
+
+// TestDeliver_GoneItemResolvesItsAlert: an item that stops being
+// reported (deleted, rotated away) gets one "resolved" notification and
+// its alert state is cleared, instead of alerting forever or going quiet
+// with a stale open alert.
+func TestDeliver_GoneItemResolvesItsAlert(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(filepath.Join(t.TempDir(), "radar.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	st, rs := store.NewSQLite(database), rules.NewSQLite(database)
+	now := time.Now()
+	old := checker.ExpiryRecord{Source: "azure://graph.microsoft.com/applications/x", Name: "App · prod · 11111111", Kind: "secret", ExpiresAt: now.Add(2 * 24 * time.Hour)}
+	st.SaveResult(ctx, "agent-1", "azure", []checker.ExpiryRecord{old}, now, true)
+	engine := &alert.Engine{Store: st, Rules: rs, Thresholds: alert.DefaultThresholds()}
+	state := &alert.StateStore{DB: database, ReminderCritical: 24 * time.Hour}
+	n := &countingNotifier{}
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, now)
+
+	st.SaveResult(ctx, "agent-1", "azure", nil, now.Add(time.Minute), true) // rotated away
+	st.SaveResult(ctx, "agent-1", "azure", nil, now.Add(2*time.Minute), true)
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, now.Add(time.Hour))
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, now.Add(2*time.Hour))
+	if len(n.sent) != 2 || !n.sent[1].Resolved || !n.sent[1].Gone || n.sent[1].Record.Name != old.Name || n.sent[1].Record.Source != old.Source {
+		t.Fatalf("want alert + one resolution for the gone item, got %+v", n.sent)
+	}
+}
+
+// A muted item that disappears gets no notification at all.
+func TestDeliver_GoneMutedItemIsSilent(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(filepath.Join(t.TempDir(), "radar.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	st, rs := store.NewSQLite(database), rules.NewSQLite(database)
+	now := time.Now()
+	r := checker.ExpiryRecord{Source: "s", Name: "n", Kind: "secret", ExpiresAt: now.Add(24 * time.Hour)}
+	st.SaveResult(ctx, "agent-1", "vault", []checker.ExpiryRecord{r}, now, true)
+	engine := &alert.Engine{Store: st, Rules: rs, Thresholds: alert.DefaultThresholds()}
+	state := &alert.StateStore{DB: database}
+	n := &countingNotifier{}
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, now)
+	rs.Upsert(ctx, rules.Rule{Source: "s", Name: "n", Kind: "secret", Muted: true})
+	st.SaveResult(ctx, "agent-1", "vault", nil, now.Add(time.Minute), true)
+	st.SaveResult(ctx, "agent-1", "vault", nil, now.Add(2*time.Minute), true)
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, now.Add(time.Hour))
+	if len(n.sent) != 1 {
+		t.Fatalf("muted gone item notified: %+v", n.sent)
+	}
+}

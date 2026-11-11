@@ -23,6 +23,9 @@ type fakeStore struct {
 	health    []store.CheckerHealth
 }
 
+func (f *fakeStore) SaveResult(ctx context.Context, agentID, checkerName string, records []checker.ExpiryRecord, checkedAt time.Time, complete bool) error {
+	return f.SaveRecords(ctx, agentID, records, checkedAt)
+}
 func (f *fakeStore) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error {
 	return nil
 }

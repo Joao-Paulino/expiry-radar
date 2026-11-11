@@ -70,3 +70,22 @@ func (s *StateStore) Clear(ctx context.Context, key string) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM alert_state WHERE alert_key = ?`, key)
 	return err
 }
+
+// OpenKeys lists the alert keys starting with prefix that have an open
+// (unresolved) alert.
+func (s *StateStore) OpenKeys(ctx context.Context, prefix string) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT alert_key FROM alert_state WHERE substr(alert_key, 1, ?) = ?`, len(prefix), prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
+}
