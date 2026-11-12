@@ -15,6 +15,7 @@ build() { # <cmd> <goos> <goarch>
 
 build collector linux amd64
 build collector linux arm64
+build collector windows amd64
 build agent linux amd64
 build agent linux arm64
 build agent windows amd64

@@ -7,7 +7,7 @@
 ![CI](https://github.com/Joao-Paulino/expiry-radar/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 ![Status](https://img.shields.io/badge/status-milestone%201-orange)
-![Platforms](https://img.shields.io/badge/agent-Windows%20%7C%20Linux%20amd64%20%7C%20arm64-blue)
+![Platforms](https://img.shields.io/badge/agent%20%26%20collector-Windows%20%7C%20Linux%20amd64%20%7C%20arm64-blue)
 ![Lang](https://img.shields.io/badge/lang-PT%20%7C%20EN-green)
 ![Licence](https://img.shields.io/badge/licence-MIT-lightgrey)
 
@@ -74,7 +74,7 @@ gh attestation verify expiry-radar-agent-<version>-linux-amd64 --repo Joao-Pauli
 
 | Binary / Binário | Platforms / Plataformas |
 |---|---|
-| `expiry-radar-collector` | Linux amd64, arm64 |
+| `expiry-radar-collector` | Linux amd64, arm64 · Windows amd64 |
 | `expiry-radar-agent` | Linux amd64, arm64 · Windows amd64 |
 
 **Docker:** multi-arch images (amd64, arm64), distroless, non-root / imagens multi-arquitetura, distroless, sem root:
