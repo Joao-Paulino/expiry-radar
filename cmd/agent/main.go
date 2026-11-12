@@ -19,6 +19,7 @@ import (
 
 	"github.com/Joao-Paulino/expiry-radar/internal/agent"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
+	awscheck "github.com/Joao-Paulino/expiry-radar/internal/checker/aws"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
 	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
@@ -39,9 +40,11 @@ type Config struct {
 	TLSTargets      []tlschecker.Target `json:"tls_targets"`
 	// Vault, if set, also checks a HashiCorp Vault (see README).
 	Vault *vault.Config `json:"vault"`
-	// Azure, if set, also checks Azure Key Vaults (see README).
-	Azure           *azure.Config `json:"azure"`
-	IntervalSeconds int           `json:"interval_seconds"`
+	// Azure, if set, also checks Azure (see README).
+	Azure *azure.Config `json:"azure"`
+	// AWS, if set, also checks AWS (see README).
+	AWS             *awscheck.Config `json:"aws"`
+	IntervalSeconds int              `json:"interval_seconds"`
 }
 
 // loadConfig reads and decodes the JSON config file at path.
@@ -88,6 +91,11 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
+	if c.AWS != nil {
+		if err := c.AWS.Validate(); err != nil {
+			return err
+		}
+	}
 	if c.IntervalSeconds <= 0 {
 		return fmt.Errorf("agent: interval_seconds must be a positive number of seconds")
 	}
@@ -121,8 +129,8 @@ func trustCAFile(p *agent.Pusher, path string) error {
 	return nil
 }
 
-// checkers returns the checkers this agent runs: TLS always, Vault and
-// Azure when configured.
+// checkers returns the checkers this agent runs: TLS always, Vault,
+// Azure and AWS when configured.
 func checkers(cfg Config) []checker.Checker {
 	cs := []checker.Checker{tlschecker.New(cfg.TLSTargets)}
 	if cfg.Vault != nil {
@@ -130,6 +138,9 @@ func checkers(cfg Config) []checker.Checker {
 	}
 	if cfg.Azure != nil {
 		cs = append(cs, azure.New(*cfg.Azure))
+	}
+	if cfg.AWS != nil {
+		cs = append(cs, awscheck.New(*cfg.AWS))
 	}
 	return cs
 }

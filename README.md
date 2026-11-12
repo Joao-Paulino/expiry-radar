@@ -549,6 +549,40 @@ gh variable set AZURE_TEST_GRAPH -b 1
 ```
 </details>
 
+### 🟧 AWS (ACM, IAM server certificates)
+
+The agent can also check AWS: ACM certificates (issued, **imported** and **ACME** — the last two never renew on their own) and IAM server certificates, in several regions and accounts. Requests are signed with SigV4 by the agent itself (no AWS SDK). Static access keys are not supported, on purpose.
+O agente também pode verificar a AWS: certificados do ACM (emitidos, **importados** e **ACME** — os dois últimos nunca renovam sozinhos) e IAM server certificates, em várias regiões e contas. Os pedidos são assinados com SigV4 pelo próprio agente (sem SDK da AWS). Access keys estáticas não são suportadas, de propósito.
+
+```json
+"aws": {
+  "auth": "instance_role",
+  "regions": ["eu-west-1", "us-east-1"],
+  "assume_roles": [{ "role_arn": "arn:aws:iam::222222222222:role/expiry-radar-read", "external_id": "optional" }],
+  "services": ["acm", "iam_server_certificates"]
+}
+```
+
+| | EN | PT |
+|---|---|---|
+| 🖥️ `instance_role` | EC2 (IMDSv2 only), ECS / Fargate task role, EKS Pod Identity; detected from the environment | EC2 (só IMDSv2), task role ECS / Fargate, EKS Pod Identity; detetado pelo ambiente |
+| 🔗 `web_identity` | EKS IRSA or any platform that keeps a fresh OIDC token in a file: `token_file` + `role_arn` (default `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`). The file is re-read on every refresh | EKS IRSA ou qualquer plataforma que mantenha um token OIDC atualizado num ficheiro: `token_file` + `role_arn` (por omissão `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`). O ficheiro é relido em cada renovação |
+| 📜 `roles_anywhere` | On-premises servers: IAM Roles Anywhere with an X.509 certificate (`certificate_file` PEM with certificate, optional chain and RSA/ECDSA key; `trust_anchor_arn`, `profile_arn` in the same region, which is used; `role_arn`) | Servidores on-prem: IAM Roles Anywhere com certificado X.509 (`certificate_file` PEM com certificado, cadeia opcional e chave RSA/ECDSA; `trust_anchor_arn`, `profile_arn` na mesma região, que é a usada; `role_arn`) |
+| 🏢 Multi-account | `assume_roles`: a read-only role in each account (`sts:AssumeRole`, optional `external_id`); `skip_base_account: true` to check only those | `assume_roles`: uma role só de leitura em cada conta (`sts:AssumeRole`, `external_id` opcional); `skip_base_account: true` para verificar só essas |
+| 🌍 Regions | `regions` for ACM (only regions enabled in every account: a disabled one is reported as an error); IAM is global. `region` (STS) defaults to the first one. Standard `aws` partition only (not China / GovCloud / ISO yet). The host clock must be right (SigV4 allows 5 minutes) | `regions` para o ACM (só regiões ativas em todas as contas: uma desativada aparece como erro); o IAM é global. `region` (STS) é por omissão a primeira. Só a partição `aws` standard (ainda não China / GovCloud / ISO). O relógio do servidor tem de estar certo (o SigV4 tolera 5 minutos) |
+| 🚫 Skipped | ACM certificates pending validation (no date yet), revoked, failed, timed out or inactive. Expired ones keep alerting (they may still be served) | Certificados ACM à espera de validação (ainda sem data), revogados, falhados, expirados por timeout ou inativos. Os expirados continuam a alertar (podem ainda estar em uso) |
+
+Read-only policy / Policy só de leitura (in each account / em cada conta):
+
+```json
+{ "Version": "2012-10-17", "Statement": [{ "Effect": "Allow",
+  "Action": ["acm:ListCertificates", "iam:ListServerCertificates"], "Resource": "*" }] }
+```
+
+Multi-account / Multi-conta: the base role also needs `sts:AssumeRole` on the `assume_roles` ARNs; each target role trusts the base role (`"Principal": {"AWS": "<base role ARN>"}`, with an `sts:ExternalId` condition if you set `external_id`) / a role base precisa também de `sts:AssumeRole` sobre os ARNs de `assume_roles`; cada role de destino confia na role base (com a condição `sts:ExternalId` se definires `external_id`).
+
+Trust for the agent's own role / Confiança da role do próprio agente: IRSA → the cluster's OIDC provider with an `aud`/`sub` condition; Roles Anywhere → `"Service": "rolesanywhere.amazonaws.com"` with `sts:AssumeRole`, `sts:TagSession`, `sts:SetSourceIdentity`. `sts:GetCallerIdentity` needs no permission.
+
 ## ⚠️ Known limitations / Limitações conhecidas
 
 | EN | PT |
@@ -564,7 +598,7 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 | ✅ | **M1** | TLS certificates + core platform (agent, collector, alerts, dashboard, export) | Certificados TLS + plataforma base (agente, collector, alertas, painel, exportação) |
 | ✅ | **M2** | HashiCorp Vault: secrets, leases, token TTLs | HashiCorp Vault: segredos, leases, TTL de tokens |
 | ✅ | **M3** | Azure: Key Vault, App Registration credentials, managed certificates | Azure: Key Vault, credenciais de App Registrations, certificados geridos |
-| ⚪ | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
+| 🟡 | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
 | ⚪ | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
 | ⚪ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
 | ⚪ | Later / Depois | Software licences, SaaS subscriptions, then OT/ICS | Licenças de software, subscrições SaaS e depois OT/ICS |
