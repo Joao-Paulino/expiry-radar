@@ -549,7 +549,7 @@ gh variable set AZURE_TEST_GRAPH -b 1
 ```
 </details>
 
-### 🟧 AWS (ACM, IAM server certificates, access keys)
+### 🟧 AWS (ACM, IAM server certificates, access keys, Secrets Manager)
 
 The agent can also check AWS: ACM certificates (issued, **imported** and **ACME** — the last two never renew on their own) and IAM server certificates, in several regions and accounts. Requests are signed with SigV4 by the agent itself (no AWS SDK). Static access keys are not supported, on purpose.
 O agente também pode verificar a AWS: certificados do ACM (emitidos, **importados** e **ACME** — os dois últimos nunca renovam sozinhos) e IAM server certificates, em várias regiões e contas. Os pedidos são assinados com SigV4 pelo próprio agente (sem SDK da AWS). Access keys estáticas não são suportadas, de propósito.
@@ -559,8 +559,9 @@ O agente também pode verificar a AWS: certificados do ACM (emitidos, **importad
   "auth": "instance_role",
   "regions": ["eu-west-1", "us-east-1"],
   "assume_roles": [{ "role_arn": "arn:aws:iam::222222222222:role/expiry-radar-read", "external_id": "optional" }],
-  "services": ["acm", "iam_server_certificates", "access_keys"],
-  "access_key_max_age_days": 90
+  "services": ["acm", "iam_server_certificates", "access_keys", "secrets_manager"],
+  "access_key_max_age_days": 90,
+  "secret_max_age_days": 0
 }
 ```
 
@@ -572,6 +573,7 @@ O agente também pode verificar a AWS: certificados do ACM (emitidos, **importad
 | 🏢 Multi-account | `assume_roles`: a read-only role in each account (`sts:AssumeRole`, optional `external_id`); `skip_base_account: true` to check only those | `assume_roles`: uma role só de leitura em cada conta (`sts:AssumeRole`, `external_id` opcional); `skip_base_account: true` para verificar só essas |
 | 🌍 Regions | `regions` for ACM (only regions enabled in every account: a disabled one is reported as an error); IAM is global. `region` (STS) defaults to the first one. Standard `aws` partition only (not China / GovCloud / ISO yet). The host clock must be right (SigV4 allows 5 minutes) | `regions` para o ACM (só regiões ativas em todas as contas: uma desativada aparece como erro); o IAM é global. `region` (STS) é por omissão a primeira. Só a partição `aws` standard (ainda não China / GovCloud / ISO). O relógio do servidor tem de estar certo (o SigV4 tolera 5 minutos) |
 | 🔑 `access_keys` | From the IAM credential report (one per account, up to 4 hours old; the keys are never seen), as a separate checker `aws-access-keys`. Access keys never expire: an active key is due `access_key_max_age_days` (default 90, CIS) after its last rotation; a rotated key is a new item. Any root key is due at once (root should have none). **Inactive** keys are shown as `inactive (no alerts)` on the dashboard and in exports and never alert: they cannot be used, but should be deleted | Do credential report do IAM (um por conta, até 4 horas de idade; as chaves nunca são vistas), como checker separado `aws-access-keys`. As access keys não expiram: uma chave ativa vence `access_key_max_age_days` (por omissão 90, CIS) depois da última rotação; uma chave rodada é um item novo. Qualquer chave root vence logo (a root não devia ter nenhuma). Chaves **inativas** aparecem como `inactive (no alerts)` no painel e nos exports e nunca alertam: não podem ser usadas, mas devem ser apagadas |
+| 🗝️ `secrets_manager` | Separate checker `aws-secrets`; `ListSecrets` only (never `GetSecretValue`). Rotation on: due at the next scheduled rotation — a failing rotation leaves that date in the past, so it alerts. Rotation off: due `secret_max_age_days` after the last change, or not reported when 0 (default) | Checker separado `aws-secrets`; só `ListSecrets` (nunca `GetSecretValue`). Rotação ligada: vence na próxima rotação agendada — uma rotação que falha deixa essa data no passado, por isso alerta. Rotação desligada: vence `secret_max_age_days` depois da última alteração, ou não é reportado com 0 (por omissão) |
 | 🚫 Skipped | ACM certificates pending validation (no date yet), revoked, failed, timed out or inactive. Expired ones keep alerting (they may still be served) | Certificados ACM à espera de validação (ainda sem data), revogados, falhados, expirados por timeout ou inativos. Os expirados continuam a alertar (podem ainda estar em uso) |
 
 Read-only policy / Policy só de leitura (in each account / em cada conta):
@@ -579,7 +581,8 @@ Read-only policy / Policy só de leitura (in each account / em cada conta):
 ```json
 { "Version": "2012-10-17", "Statement": [{ "Effect": "Allow",
   "Action": ["acm:ListCertificates", "iam:ListServerCertificates",
-             "iam:GenerateCredentialReport", "iam:GetCredentialReport"], "Resource": "*" }] }
+             "iam:GenerateCredentialReport", "iam:GetCredentialReport",
+             "secretsmanager:ListSecrets"], "Resource": "*" }] }
 ```
 
 Multi-account / Multi-conta: the base role also needs `sts:AssumeRole` on the `assume_roles` ARNs; each target role trusts the base role (`"Principal": {"AWS": "<base role ARN>"}`, with an `sts:ExternalId` condition if you set `external_id`) / a role base precisa também de `sts:AssumeRole` sobre os ARNs de `assume_roles`; cada role de destino confia na role base (com a condição `sts:ExternalId` se definires `external_id`).
