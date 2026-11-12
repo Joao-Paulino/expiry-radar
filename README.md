@@ -614,6 +614,25 @@ Certificados do Certificate Manager e SSL do Compute (load balancers), chaves de
 
 Roles (on the organization, folders or projects) / Roles (na organização, pastas ou projetos): `roles/cloudasset.viewer` (discovery), `resourcemanager.projects.get` (project IDs → numbers), `roles/certificatemanager.viewer`, `roles/compute.viewer`, `roles/iam.serviceAccountKeyAdmin` is **not** needed — use a custom role with `iam.serviceAccounts.list`, `iam.serviceAccountKeys.list`, `secretmanager.secrets.list`, `secretmanager.versions.list` (no access to values).
 
+### 🟩 VMware vSphere (vCenter, ESXi, licences)
+
+vCenter TLS and **STS signing** certificates (its expiry stops every vSphere login), trusted root CAs, the TLS certificate of every connected ESXi host, and licences with an expiry date (evaluation, subscription). REST + SOAP, read-only; only the last 5 characters of a licence key are kept.
+Certificados TLS e de **assinatura STS** do vCenter (quando expira, nenhum login vSphere funciona), CAs de confiança, o certificado TLS de cada host ESXi ligado e licenças com data de expiração (avaliação, subscrição). REST + SOAP, só leitura; de cada chave de licença guardam-se só os últimos 5 caracteres.
+
+```json
+"vmware": {
+  "url": "https://vcenter.example.com",
+  "username": "expiry-radar@vsphere.local",
+  "password_file": "/etc/expiry-radar/vcenter.pw",
+  "ca_file": "/etc/expiry-radar/vmca-root.pem",
+  "esxi_hosts": true,
+  "licenses": true
+}
+```
+
+ESXi certificates are read even when not trusted (only the date; `verified` in metadata says whether they chain to `ca_file`); hosts vCenter knows but the agent cannot reach are reported as errors. vSphere has no password-less API login: use a dedicated **read-only** account (global Read-only role; certificate reads may also need *Certificate Management* read privileges), password file `chmod 600`. `ca_file` = the VMCA root (download from `https://<vcenter>/certs/download.zip`).
+Os certificados ESXi são lidos mesmo sem confiança (só a data; `verified` nos metadados diz se encadeiam na `ca_file`); hosts que o vCenter conhece mas o agente não alcança aparecem como erro. O vSphere não tem login de API sem password: usa uma conta **só de leitura** dedicada (role global Read-only; ler certificados pode precisar também de privilégios de leitura de *Certificate Management*), ficheiro da password `chmod 600`. `ca_file` = a raiz VMCA (descarrega de `https://<vcenter>/certs/download.zip`).
+
 ## ⚠️ Known limitations / Limitações conhecidas
 
 | EN | PT |
@@ -630,8 +649,8 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 | ✅ | **M2** | HashiCorp Vault: secrets, leases, token TTLs | HashiCorp Vault: segredos, leases, TTL de tokens |
 | ✅ | **M3** | Azure: Key Vault, App Registration credentials, managed certificates | Azure: Key Vault, credenciais de App Registrations, certificados geridos |
 | ✅ | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
-| 🟡 | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
-| ⚪ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
+| ✅ | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
+| ✅ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
 | ⚪ | Later / Depois | Software licences, SaaS subscriptions, then OT/ICS | Licenças de software, subscrições SaaS e depois OT/ICS |
 
 ✅ done / concluído · 🟡 in progress / em curso · ⚪ planned / planeado

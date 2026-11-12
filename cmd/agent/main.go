@@ -24,6 +24,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/gcp"
 	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/vmware"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 )
 
@@ -46,8 +47,10 @@ type Config struct {
 	// AWS, if set, also checks AWS (see README).
 	AWS *awscheck.Config `json:"aws"`
 	// GCP, if set, also checks Google Cloud (see README).
-	GCP             *gcp.Config `json:"gcp"`
-	IntervalSeconds int         `json:"interval_seconds"`
+	GCP *gcp.Config `json:"gcp"`
+	// VMware, if set, also checks vCenter / ESXi (see README).
+	VMware          *vmware.Config `json:"vmware"`
+	IntervalSeconds int            `json:"interval_seconds"`
 }
 
 // loadConfig reads and decodes the JSON config file at path.
@@ -104,6 +107,14 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
+	if c.VMware != nil {
+		if err := c.VMware.Validate(); err != nil {
+			return err
+		}
+		if _, err := vmware.New(*c.VMware); err != nil {
+			return err
+		}
+	}
 	if c.IntervalSeconds <= 0 {
 		return fmt.Errorf("agent: interval_seconds must be a positive number of seconds")
 	}
@@ -152,6 +163,11 @@ func checkers(cfg Config) []checker.Checker {
 	}
 	if cfg.GCP != nil {
 		cs = append(cs, gcp.Checkers(*cfg.GCP)...)
+	}
+	if cfg.VMware != nil {
+		if vc, err := vmware.New(*cfg.VMware); err == nil { // validated at start-up
+			cs = append(cs, vc)
+		}
 	}
 	return cs
 }
