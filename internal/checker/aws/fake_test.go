@@ -42,9 +42,11 @@ type fakeAWS struct {
 	acm         map[string][]map[string]any // "account/region" -> certificate summaries
 	acmFail     string                      // "account/region" answering an error
 	serverCerts map[string][]map[string]string
-	credReport  map[string]string // account -> CSV
-	reportPolls int               // GenerateCredentialReport answers STARTED this many times first
-	reportGone  int               // GetCredentialReport answers ReportExpired this many times first
+	credReport  map[string]string           // account -> CSV
+	secrets     map[string][]map[string]any // "account/region" -> SecretListEntry
+	versions    map[string][]map[string]any // secret ARN -> versions
+	reportPolls int                         // GenerateCredentialReport answers STARTED this many times first
+	reportGone  int                         // GetCredentialReport answers ReportExpired this many times first
 	imdsToken   string
 	throttle    int    // ACM answers ThrottlingException this many times first
 	raRegion    string // region the Roles Anywhere request was sent to
@@ -52,7 +54,7 @@ type fakeAWS struct {
 }
 
 func newFakeAWS(t *testing.T) *fakeAWS {
-	f := &fakeAWS{acm: map[string][]map[string]any{}, serverCerts: map[string][]map[string]string{}, credReport: map[string]string{}, imdsToken: "imds-tok"}
+	f := &fakeAWS{acm: map[string][]map[string]any{}, serverCerts: map[string][]map[string]string{}, credReport: map[string]string{}, secrets: map[string][]map[string]any{}, versions: map[string][]map[string]any{}, imdsToken: "imds-tok"}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(f.serveAPI))
 	f.meta = httptest.NewServer(http.HandlerFunc(f.serveMeta))
 	t.Cleanup(func() { f.srv.Close(); f.meta.Close() })
@@ -143,6 +145,41 @@ func (f *fakeAWS) serveAPI(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"credentialSet": []map[string]any{{"credentials": map[string]any{
 			"accessKeyId": "ASIA-BASE", "secretAccessKey": "secret-ASIA-BASE", "sessionToken": "token-ASIA-BASE",
 			"expiration": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}}}})
+	case r.Header.Get("X-Amz-Target") == "secretsmanager.ListSecretVersionIds":
+		var in struct{ SecretId string }
+		json.Unmarshal(body, &in)
+		f.calls = append(f.calls, "secretsmanager ListSecretVersionIds "+in.SecretId)
+		v, ok := f.versions[in.SecretId]
+		if !ok {
+			http.Error(w, `{"__type":"ResourceNotFoundException"}`, 400)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"Versions": v})
+	case r.Header.Get("X-Amz-Target") == "secretsmanager.ListSecrets":
+		f.calls = append(f.calls, "secretsmanager ListSecrets "+region+" "+ak)
+		if service != "secretsmanager" {
+			http.Error(w, "bad scope", 400)
+			return
+		}
+		var in struct {
+			NextToken  string
+			MaxResults int
+		}
+		json.Unmarshal(body, &in)
+		if in.MaxResults > 100 {
+			http.Error(w, `{"__type":"ValidationException"}`, 400)
+			return
+		}
+		items := f.secrets[accountOf(ak)+"/"+region]
+		if in.NextToken == "s2" {
+			json.NewEncoder(w).Encode(map[string]any{"SecretList": items[1:]})
+			return
+		}
+		out := map[string]any{"SecretList": items[:min(1, len(items))]}
+		if len(items) > 1 {
+			out["NextToken"] = "s2"
+		}
+		json.NewEncoder(w).Encode(out)
 	case r.Header.Get("X-Amz-Target") == "CertificateManager.ListCertificates":
 		key := accountOf(ak) + "/" + region
 		f.calls = append(f.calls, "acm ListCertificates "+region+" "+ak)
@@ -280,6 +317,7 @@ func (f *fakeAWS) endpoints() endpoints {
 		sts:           func(string) string { return f.srv.URL },
 		rolesAnywhere: func(r string) string { f.raRegion = r; return f.srv.URL },
 		acm:           func(string) string { return f.srv.URL },
+		secrets:       func(string) string { return f.srv.URL },
 		iam:           f.srv.URL,
 	}
 }

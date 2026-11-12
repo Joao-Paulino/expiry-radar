@@ -31,6 +31,9 @@ type Config struct {
 	// AccessKeyMaxAgeDays: an access key is due this many days after
 	// its last rotation (default 90, CIS AWS Foundations).
 	AccessKeyMaxAgeDays int `json:"access_key_max_age_days"`
+	// SecretMaxAgeDays: Secrets Manager secrets without rotation are due
+	// this many days after their last change (0 = not reported).
+	SecretMaxAgeDays int `json:"secret_max_age_days"`
 }
 
 var (
@@ -39,8 +42,8 @@ var (
 	regionRe  = regexp.MustCompile(`^(us|eu|ap|ca|sa|me|af|il|mx)-[a-z]+-\d$`)
 	roleARNRe = regexp.MustCompile(`^arn:aws:iam::\d{12}:role/[\w+=,.@/-]{1,512}$`)
 	raARNRe   = regexp.MustCompile(`^arn:aws:rolesanywhere:([a-z0-9-]+):\d{12}:(trust-anchor|profile)/[\w-]+$`)
-	services  = map[string]bool{"acm": true, "iam_server_certificates": true, "access_keys": true}
-	regional  = map[string]bool{"acm": true}
+	services  = map[string]bool{"acm": true, "iam_server_certificates": true, "access_keys": true, "secrets_manager": true}
+	regional  = map[string]bool{"acm": true, "secrets_manager": true}
 )
 
 func (c *Config) services() []string {
@@ -104,7 +107,7 @@ func (c *Config) Validate() error {
 		needRegions = needRegions || regional[s]
 	}
 	if needRegions && len(c.Regions) == 0 {
-		return errors.New("aws: regions are required for acm")
+		return errors.New("aws: regions are required for acm and secrets_manager")
 	}
 	for _, r := range append(append([]string{}, c.Regions...), c.Region) {
 		if r != "" && !regionRe.MatchString(r) {
@@ -118,6 +121,9 @@ func (c *Config) Validate() error {
 	}
 	if c.AccessKeyMaxAgeDays < 0 || c.AccessKeyMaxAgeDays > 3650 {
 		return errors.New("aws: access_key_max_age_days must be between 0 (default 90) and 3650")
+	}
+	if c.SecretMaxAgeDays < 0 || c.SecretMaxAgeDays > 3650 {
+		return errors.New("aws: secret_max_age_days must be between 0 (off) and 3650")
 	}
 	if c.SkipBaseAccount && len(c.AssumeRoles) == 0 {
 		return errors.New("aws: skip_base_account needs assume_roles")

@@ -49,11 +49,14 @@ func New(cfg Config) *Checker {
 // report problem never makes the certificate run incomplete (which
 // would stop gone-detection for every certificate).
 func Checkers(cfg Config) []checker.Checker {
-	var certs, keys []string
+	var certs, keys, secrets []string
 	for _, s := range cfg.services() {
-		if s == "access_keys" {
+		switch s {
+		case "access_keys":
 			keys = append(keys, s)
-		} else {
+		case "secrets_manager":
+			secrets = append(secrets, s)
+		default:
 			certs = append(certs, s)
 		}
 	}
@@ -66,6 +69,11 @@ func Checkers(cfg Config) []checker.Checker {
 	if len(keys) > 0 {
 		c := New(cfg)
 		c.name, c.services = "aws-access-keys", keys
+		out = append(out, c)
+	}
+	if len(secrets) > 0 {
+		c := New(cfg)
+		c.name, c.services = "aws-secrets", secrets
 		out = append(out, c)
 	}
 	return out
@@ -155,6 +163,14 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 					records = append(records, recs...)
 					if err != nil {
 						errs = append(errs, fmt.Errorf("account %s acm %s: %w", t.account, region, err))
+					}
+				}
+			case "secrets_manager":
+				for _, region := range c.cfg.Regions {
+					recs, err := c.listSecrets(ctx, cr, t.account, region)
+					records = append(records, recs...)
+					if err != nil {
+						errs = append(errs, fmt.Errorf("account %s secrets manager %s: %w", t.account, region, err))
 					}
 				}
 			case "access_keys":
