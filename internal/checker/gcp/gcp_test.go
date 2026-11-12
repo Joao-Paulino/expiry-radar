@@ -163,9 +163,9 @@ func writeExternal(t *testing.T, f *fake, tokenURL, impURL string) string {
 
 func TestExternalAccount_ExchangeAndImpersonation(t *testing.T) {
 	f := newFake(t)
-	f.routes["/v1/projects/proj-one/secrets"] = map[string]any{}
+	f.routes["/v1/projects/555/secrets"] = map[string]any{}
 	file := writeExternal(t, f, f.srv.URL+"/v1/token", f.srv.URL+"/v1/projects/-/serviceAccounts/radar@p.iam.gserviceaccount.com:generateAccessToken")
-	c := f.checker(t, Config{Auth: "external_account", CredentialFile: file, Projects: []string{"proj-one"}, Services: []string{"secret_manager"}}, "gcp-secrets")
+	c := f.checker(t, Config{Auth: "external_account", CredentialFile: file, Projects: []string{"555"}, Services: []string{"secret_manager"}}, "gcp-secrets")
 	if _, err := c.Check(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestExternalAccount_ExchangeAndImpersonation(t *testing.T) {
 func TestExternalAccount_TokenURLMustBeGoogle(t *testing.T) {
 	f := newFake(t)
 	file := writeExternal(t, f, "https://evil.example.com/v1/token", "")
-	c := f.checker(t, Config{Auth: "external_account", CredentialFile: file, Projects: []string{"proj-one"}}, "gcp")
+	c := f.checker(t, Config{Auth: "external_account", CredentialFile: file, Projects: []string{"555"}}, "gcp")
 	if _, err := c.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "sts.googleapis.com") {
 		t.Fatalf("got %v", err)
 	}
@@ -190,14 +190,14 @@ func TestExternalAccount_TokenURLMustBeGoogle(t *testing.T) {
 
 func TestServiceAccountKeys(t *testing.T) {
 	f := newFake(t)
-	f.routes["/v1/projects/proj-one/serviceAccounts"] = map[string]any{"accounts": []any{map[string]any{"email": "app@proj-one.iam.gserviceaccount.com"}}}
-	f.routes["/v1/projects/proj-one/serviceAccounts/app@proj-one.iam.gserviceaccount.com/keys"] = map[string]any{"keys": []any{
+	f.routes["/v1/projects/555/serviceAccounts"] = map[string]any{"accounts": []any{map[string]any{"email": "app@proj-one.iam.gserviceaccount.com"}}}
+	f.routes["/v1/projects/555/serviceAccounts/app@proj-one.iam.gserviceaccount.com/keys"] = map[string]any{"keys": []any{
 		map[string]any{"name": "projects/proj-one/serviceAccounts/app/keys/aaaaaaaa1111", "validAfterTime": ts(-100 * 24 * time.Hour), "validBeforeTime": "9999-12-31T23:59:59Z", "keyType": "USER_MANAGED"},
 		map[string]any{"name": "projects/proj-one/serviceAccounts/app/keys/bbbbbbbb2222", "validAfterTime": ts(-10 * 24 * time.Hour), "validBeforeTime": ts(5 * 24 * time.Hour), "keyType": "USER_MANAGED"},
 		map[string]any{"name": "projects/proj-one/serviceAccounts/app/keys/cccccccc3333", "validAfterTime": ts(-200 * 24 * time.Hour), "keyType": "USER_MANAGED", "disabled": true},
 		map[string]any{"name": "projects/proj-one/serviceAccounts/app/keys/dddddddd4444", "validAfterTime": ts(-5 * 24 * time.Hour), "keyType": "SYSTEM_MANAGED"},
 	}}
-	c := f.checker(t, Config{Auth: "metadata", Projects: []string{"proj-one"}, Services: []string{"service_account_keys"}}, "gcp-service-account-keys")
+	c := f.checker(t, Config{Auth: "metadata", Projects: []string{"555"}, Services: []string{"service_account_keys"}}, "gcp-service-account-keys")
 	recs, err := c.Check(context.Background())
 	if err != nil || len(recs) != 3 {
 		t.Fatalf("got %+v, %v", recs, err)
@@ -216,15 +216,15 @@ func TestServiceAccountKeys(t *testing.T) {
 
 func TestSecretManager(t *testing.T) {
 	f := newFake(t)
-	f.routes["/v1/projects/proj-one/secrets"] = map[string]any{"secrets": []any{
-		map[string]any{"name": "projects/proj-one/secrets/db", "rotation": map[string]any{"rotationPeriod": "2592000s", "nextRotationTime": ts(10 * 24 * time.Hour)}},
-		map[string]any{"name": "projects/proj-one/secrets/temp", "expireTime": ts(3 * 24 * time.Hour)},
-		map[string]any{"name": "projects/proj-one/secrets/plain"},
+	f.routes["/v1/projects/555/secrets"] = map[string]any{"secrets": []any{
+		map[string]any{"name": "projects/555/secrets/db", "rotation": map[string]any{"rotationPeriod": "2592000s", "nextRotationTime": ts(10 * 24 * time.Hour)}},
+		map[string]any{"name": "projects/555/secrets/temp", "expireTime": ts(3 * 24 * time.Hour)},
+		map[string]any{"name": "projects/555/secrets/plain"},
 	}}
 	// last enabled version 60 days old with a 30-day period: overdue,
 	// although nextRotationTime (a notification schedule) is in the future
-	f.routes["/v1/projects/proj-one/secrets/db/versions"] = map[string]any{"versions": []any{map[string]any{"createTime": ts(-60 * 24 * time.Hour)}, map[string]any{"createTime": ts(-90 * 24 * time.Hour)}}}
-	c := f.checker(t, Config{Auth: "metadata", Projects: []string{"proj-one"}, Services: []string{"secret_manager"}}, "gcp-secrets")
+	f.routes["/v1/projects/555/secrets/db/versions"] = map[string]any{"versions": []any{map[string]any{"createTime": ts(-60 * 24 * time.Hour)}, map[string]any{"createTime": ts(-90 * 24 * time.Hour)}}}
+	c := f.checker(t, Config{Auth: "metadata", Projects: []string{"555"}, Services: []string{"secret_manager"}}, "gcp-secrets")
 	recs, err := c.Check(context.Background())
 	if err != nil || len(recs) != 2 {
 		t.Fatalf("got %+v, %v", recs, err)
@@ -250,7 +250,7 @@ func TestConfig(t *testing.T) {
 		"bad org":       {Auth: "metadata", Organization: "org-1"},
 		"bad project":   {Auth: "metadata", Projects: []string{"P_1"}},
 		"short project": {Auth: "metadata", Projects: []string{"p-one"}},
-		"bad service":   {Auth: "metadata", Projects: []string{"proj-one"}, Services: []string{"bigquery"}},
+		"bad service":   {Auth: "metadata", Projects: []string{"555"}, Services: []string{"bigquery"}},
 	} {
 		if c.Validate() == nil {
 			t.Errorf("%s accepted", name)
@@ -261,4 +261,40 @@ func TestConfig(t *testing.T) {
 func TestMain(m *testing.M) {
 	retryWait = time.Millisecond
 	os.Exit(m.Run())
+}
+
+func TestCertificateManagerUnreachable(t *testing.T) {
+	f := newFake(t)
+	f.routes["/v1/projects/111/locations/-/certificates"] = map[string]any{"unreachable": []string{"europe-west1"}}
+	c := f.checker(t, Config{Auth: "metadata", Projects: []string{"111"}, Services: []string{"certificate_manager"}}, "gcp")
+	if _, err := c.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "europe-west1") {
+		t.Fatalf("partial list accepted: %v", err)
+	}
+}
+
+// A project given by ID and discovered by number is one project.
+func TestProjectIDResolvedToNumber(t *testing.T) {
+	f := newFake(t)
+	f.routes["/v3/projects/proj-one"] = map[string]any{"name": "projects/111", "projectId": "proj-one"}
+	f.assets["compute.googleapis.com/SslCertificate"] = []string{"111"}
+	f.routes["/compute/v1/projects/111/aggregated/sslCertificates"] = map[string]any{"items": map[string]any{
+		"global": map[string]any{"sslCertificates": []any{map[string]any{"name": "c", "expireTime": ts(9 * 24 * time.Hour)}}}}}
+	c := f.checker(t, Config{Auth: "metadata", Organization: "9", Projects: []string{"proj-one"}, Services: []string{"compute_ssl"}}, "gcp")
+	recs, err := c.Check(context.Background())
+	if err != nil || len(recs) != 1 || recs[0].Source != "gcp://compute/111/global/c" {
+		t.Fatalf("got %+v, %v", recs, err)
+	}
+}
+
+func TestSecretRotationFromNextRotationTime(t *testing.T) {
+	f := newFake(t)
+	f.routes["/v1/projects/proj-one/secrets"] = map[string]any{"secrets": []any{
+		map[string]any{"name": "projects/proj-one/secrets/api", "rotation": map[string]any{"nextRotationTime": ts(-5 * 24 * time.Hour)}}}}
+	f.routes["/v3/projects/proj-one"] = map[string]any{"name": "projects/proj-one"}
+	c := f.checker(t, Config{Auth: "metadata", Projects: []string{"222"}, Services: []string{"secret_manager"}}, "gcp-secrets")
+	f.routes["/v1/projects/222/secrets"] = f.routes["/v1/projects/proj-one/secrets"]
+	recs, err := c.Check(context.Background())
+	if err != nil || len(recs) != 1 || !recs[0].ExpiresAt.Before(time.Now()) || recs[0].Metadata["reason"] != "rotation" {
+		t.Fatalf("got %+v, %v", recs, err)
+	}
 }

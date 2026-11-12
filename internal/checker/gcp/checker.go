@@ -35,6 +35,7 @@ type Checker struct {
 	http     *http.Client
 	ep       endpoints
 	src      *tokenSource
+	numbers  map[string]string // project ID -> number
 }
 
 func newChecker(cfg Config, name string, services []string) *Checker {
@@ -117,10 +118,15 @@ func (c *Checker) pages(ctx context.Context, tok, base string, visit func(data j
 // to find projects only, never for dates (it can lag by days).
 func (c *Checker) projects(ctx context.Context, tok, service string) ([]string, error) {
 	set := map[string]bool{}
-	for _, p := range c.cfg.Projects {
-		set[p] = true
-	}
 	var errs []error
+	for _, p := range c.cfg.Projects {
+		n, err := c.projectNumber(ctx, tok, p)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("project %s: %w", p, err))
+			continue
+		}
+		set[n] = true
+	}
 	for _, scope := range c.cfg.scopes() {
 		base := c.ep.api("cloudasset") + "/v1/" + scope + ":searchAllResources?pageSize=500&assetTypes=" + url.QueryEscape(assetTypes[service])
 		err := c.pages(ctx, tok, base, func(raw json.RawMessage) (string, error) {
@@ -152,6 +158,32 @@ func (c *Checker) projects(ctx context.Context, tok, service string) ([]string, 
 	return out, errors.Join(errs...)
 }
 
+// projectNumber resolves a project ID to its number (Asset Inventory
+// reports numbers): one identity per project, whatever the config says.
+func (c *Checker) projectNumber(ctx context.Context, tok, p string) (string, error) {
+	if idRe.MatchString(p) {
+		return p, nil
+	}
+	if n, ok := c.numbers[p]; ok {
+		return n, nil
+	}
+	var r struct {
+		Name string `json:"name"`
+	}
+	if err := c.get(ctx, tok, c.ep.api("cloudresourcemanager")+"/v3/projects/"+p, &r); err != nil {
+		return "", err
+	}
+	n := strings.TrimPrefix(r.Name, "projects/")
+	if !idRe.MatchString(n) {
+		return "", errors.New("no project number")
+	}
+	if c.numbers == nil {
+		c.numbers = map[string]string{}
+	}
+	c.numbers[p] = n
+	return n, nil
+}
+
 func parseTime(s string) (time.Time, error) {
 	t, err := time.Parse(time.RFC3339Nano, s)
 	return t.UTC(), err
@@ -180,6 +212,9 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 			errs = append(errs, err)
 		}
 		for _, p := range projects {
+			if tok, err = c.src.get(ctx); err != nil { // cached; renewed on long runs
+				return records, errors.Join(append(errs, err)...)
+			}
 			recs, err := c.list(ctx, tok, svc, p)
 			records = append(records, recs...)
 			var ae *apiError
@@ -219,10 +254,14 @@ func (c *Checker) certificateManager(ctx context.Context, tok, project string) (
 				SanDnsnames      []string                `json:"sanDnsnames"`
 				Managed          *struct{ State string } `json:"managed"`
 			} `json:"certificates"`
-			NextPageToken string `json:"nextPageToken"`
+			NextPageToken string   `json:"nextPageToken"`
+			Unreachable   []string `json:"unreachable"`
 		}
 		if err := json.Unmarshal(raw, &r); err != nil {
 			return "", err
+		}
+		if len(r.Unreachable) > 0 { // a location was down: the list is partial
+			return "", fmt.Errorf("unreachable locations %s", strings.Join(r.Unreachable, ", "))
 		}
 		for _, x := range r.Certificates {
 			if x.ExpireTime == "" {
@@ -341,7 +380,7 @@ func (c *Checker) serviceAccountKeys(ctx context.Context, tok, project string) (
 		}
 		u := c.ep.api("iam") + "/v1/projects/" + project + "/serviceAccounts/" + url.PathEscape(email) + "/keys?keyTypes=USER_MANAGED"
 		if err := c.get(ctx, tok, u, &r); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", email, err))
+			errs = append(errs, fmt.Errorf("%s: %v", email, err))
 			continue
 		}
 		for _, k := range r.Keys {
@@ -381,7 +420,7 @@ func (c *Checker) serviceAccountKeys(ctx context.Context, tok, project string) (
 func (c *Checker) secretManager(ctx context.Context, tok, project string) ([]checker.ExpiryRecord, error) {
 	type secret struct {
 		Name, ExpireTime string
-		Rotation         *struct{ RotationPeriod string } `json:"rotation"`
+		Rotation         *struct{ RotationPeriod, NextRotationTime string } `json:"rotation"`
 	}
 	var secrets []secret
 	err := c.pages(ctx, tok, c.ep.api("secretmanager")+"/v1/projects/"+project+"/secrets?pageSize=250", func(raw json.RawMessage) (string, error) {
@@ -411,6 +450,19 @@ func (c *Checker) secretManager(ctx context.Context, tok, project string) ([]che
 			}
 			exp, meta["reason"] = t, "expire_time"
 		}
+		// rotationPeriod is input-only (not returned on reads):
+		// nextRotationTime (+ grace) is the due date; with a period, the
+		// newest enabled version + period + grace may be earlier.
+		if s.Rotation != nil && s.Rotation.NextRotationTime != "" && s.Rotation.RotationPeriod == "" {
+			t, err := parseTime(s.Rotation.NextRotationTime)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("secret %s: unreadable nextRotationTime", lastSegment(s.Name)))
+				continue
+			}
+			if due := t.Add(rotationGrace); exp.IsZero() || due.Before(exp) {
+				exp, meta["reason"] = due, "rotation"
+			}
+		}
 		if s.Rotation != nil && s.Rotation.RotationPeriod != "" {
 			period, err := time.ParseDuration(strings.TrimSuffix(s.Rotation.RotationPeriod, "s") + "s")
 			if err != nil {
@@ -421,7 +473,7 @@ func (c *Checker) secretManager(ctx context.Context, tok, project string) ([]che
 				Versions []struct{ CreateTime string } `json:"versions"`
 			}
 			if err := c.get(ctx, tok, c.ep.api("secretmanager")+"/v1/"+s.Name+"/versions?filter="+url.QueryEscape("state:ENABLED")+"&pageSize=25", &v); err != nil {
-				errs = append(errs, fmt.Errorf("secret %s: %w", lastSegment(s.Name), err))
+				errs = append(errs, fmt.Errorf("secret %s: %v", lastSegment(s.Name), err))
 				continue
 			}
 			var newest time.Time
