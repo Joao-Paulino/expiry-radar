@@ -104,7 +104,7 @@ func sameOrigin(first, next string) error {
 		return fmt.Errorf("refused malformed nextLink")
 	}
 	if nu.Scheme != "https" || fu.Scheme != "https" || nu.User != nil || !strings.EqualFold(nu.Hostname(), fu.Hostname()) ||
-		port(nu) != port(fu) || nu.Path != fu.Path {
+		port(nu) != port(fu) || !strings.EqualFold(nu.Path, fu.Path) {
 		return fmt.Errorf("refused nextLink to another host or path (%s%s)", nu.Hostname(), nu.Path)
 	}
 	return nil
@@ -180,16 +180,20 @@ func (c *Checker) discover(ctx context.Context, src tokenSource, sub string) ([]
 		if json.Unmarshal(raw, &r) != nil || !vaultNameRe.MatchString(r.Name) {
 			continue
 		}
-		rg := ""
-		parts := strings.Split(r.ID, "/")
-		for i := 0; i+1 < len(parts); i++ {
-			if strings.EqualFold(parts[i], "resourceGroups") {
-				rg = parts[i+1]
-			}
-		}
-		out = append(out, vaultTarget{r.Name, map[string]string{"location": r.Location, "resource_group": rg, "subscription": sub}})
+		out = append(out, vaultTarget{r.Name, map[string]string{"location": r.Location, "resource_group": resourceGroup(r.ID), "subscription": sub}})
 	}
 	return out, nil
+}
+
+// resourceGroup returns the resource group named in an ARM resource ID.
+func resourceGroup(id string) string {
+	parts := strings.Split(id, "/")
+	for i := 0; i+1 < len(parts); i++ {
+		if strings.EqualFold(parts[i], "resourceGroups") {
+			return parts[i+1]
+		}
+	}
+	return ""
 }
 
 type kvItem struct {
@@ -254,7 +258,14 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 			errs = append(errs, err)
 		}
 	}
-	if len(c.cfg.KeyVaults)+len(c.cfg.Subscriptions) == 0 {
+	if c.cfg.ManagedCertificates {
+		recs, err := c.checkManagedCerts(ctx, src)
+		records = append(records, recs...)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(c.cfg.KeyVaults) == 0 && !c.cfg.DiscoverKeyVaults {
 		return records, errors.Join(errs...)
 	}
 	recs, err := c.checkKeyVaults(ctx, src)
@@ -276,6 +287,9 @@ func (c *Checker) checkKeyVaults(ctx context.Context, src tokenSource) ([]checke
 	}
 	var errs []error
 	for _, sub := range c.cfg.Subscriptions {
+		if !c.cfg.DiscoverKeyVaults {
+			break
+		}
 		found, err := c.discover(ctx, src, sub)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("subscription %s: %w", sub, err))
