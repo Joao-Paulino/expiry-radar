@@ -6,6 +6,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
 	awscheck "github.com/Joao-Paulino/expiry-radar/internal/checker/aws"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/gcp"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"net/http"
 	"net/http/httptest"
@@ -209,6 +210,17 @@ func TestCheckers_IncludesAWSWhenConfigured(t *testing.T) {
 	cfg.AWS.Auth = "access_keys"
 	if cfg.Validate() == nil {
 		t.Fatal("static keys accepted")
+	}
+}
+
+func TestCheckers_IncludesGCP(t *testing.T) {
+	cfg := Config{CollectorURL: "https://c", Token: "t", AgentID: "a", QueuePath: "/q", IntervalSeconds: 60,
+		GCP: &gcp.Config{Auth: "metadata", Organization: "123", Services: []string{"compute_ssl", "secret_manager"}}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if names := checkerNames(checkers(cfg)); names != "tls-checker,gcp,gcp-secrets" {
+		t.Fatalf("got %q", names)
 	}
 }
 
