@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -41,6 +42,9 @@ type fakeAWS struct {
 	acm         map[string][]map[string]any // "account/region" -> certificate summaries
 	acmFail     string                      // "account/region" answering an error
 	serverCerts map[string][]map[string]string
+	credReport  map[string]string // account -> CSV
+	reportPolls int               // GenerateCredentialReport answers STARTED this many times first
+	reportGone  int               // GetCredentialReport answers ReportExpired this many times first
 	imdsToken   string
 	throttle    int    // ACM answers ThrottlingException this many times first
 	raRegion    string // region the Roles Anywhere request was sent to
@@ -48,7 +52,7 @@ type fakeAWS struct {
 }
 
 func newFakeAWS(t *testing.T) *fakeAWS {
-	f := &fakeAWS{acm: map[string][]map[string]any{}, serverCerts: map[string][]map[string]string{}, imdsToken: "imds-tok"}
+	f := &fakeAWS{acm: map[string][]map[string]any{}, serverCerts: map[string][]map[string]string{}, credReport: map[string]string{}, imdsToken: "imds-tok"}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(f.serveAPI))
 	f.meta = httptest.NewServer(http.HandlerFunc(f.serveMeta))
 	t.Cleanup(func() { f.srv.Close(); f.meta.Close() })
@@ -225,6 +229,26 @@ func (f *fakeAWS) queryAPI(w http.ResponseWriter, v map[string]string, ak string
 		xmlCreds("AssumeRole", "ASIA-"+acct)
 	case "GetCallerIdentity":
 		fmt.Fprintf(w, `<GetCallerIdentityResponse><GetCallerIdentityResult><Account>%s</Account></GetCallerIdentityResult></GetCallerIdentityResponse>`, accountOf(ak))
+	case "GenerateCredentialReport":
+		state := "COMPLETE"
+		if f.reportPolls > 0 {
+			f.reportPolls--
+			state = "STARTED"
+		}
+		fmt.Fprintf(w, `<GenerateCredentialReportResponse><GenerateCredentialReportResult><State>%s</State></GenerateCredentialReportResult></GenerateCredentialReportResponse>`, state)
+	case "GetCredentialReport":
+		if f.reportGone > 0 {
+			f.reportGone--
+			http.Error(w, "<ErrorResponse><Error><Code>ReportExpired</Code><Message>expired</Message></Error></ErrorResponse>", 410)
+			return
+		}
+		csv, ok := f.credReport[accountOf(ak)]
+		if !ok {
+			http.Error(w, "<ErrorResponse><Error><Code>ReportNotPresent</Code></Error></ErrorResponse>", 410)
+			return
+		}
+		fmt.Fprintf(w, `<GetCredentialReportResponse><GetCredentialReportResult><Content>%s</Content><ReportFormat>text/csv</ReportFormat><GeneratedTime>%s</GeneratedTime></GetCredentialReportResult></GetCredentialReportResponse>`,
+			base64.StdEncoding.EncodeToString([]byte(csv)), time.Now().UTC().Format(time.RFC3339))
 	case "ListServerCertificates":
 		items := f.serverCerts[accountOf(ak)]
 		page := items
@@ -274,6 +298,6 @@ func writeECCert(t *testing.T) (string, *x509.Certificate) {
 }
 
 func TestMain(m *testing.M) {
-	retryWait = time.Millisecond
+	retryWait, reportWait = time.Millisecond, time.Millisecond
 	os.Exit(m.Run())
 }

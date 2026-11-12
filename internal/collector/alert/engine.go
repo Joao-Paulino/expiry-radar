@@ -140,10 +140,16 @@ func (e *Engine) Evaluate(ctx context.Context, now time.Time) ([]Notification, e
 			return nil, err
 		}
 
+		sev := Evaluate(record, now, e.Thresholds)
+		// Informational records (a checker sets alerts=off, e.g. an
+		// inactive access key) are shown on the dashboard, never alerted.
+		if record.Informational() {
+			sev = SeverityOK
+		}
 		notifications = append(notifications, Notification{
 			Type:     TypeExpiry,
 			Record:   record,
-			Severity: Evaluate(record, now, e.Thresholds),
+			Severity: sev,
 			Muted:    found && rule.Muted,
 		})
 	}

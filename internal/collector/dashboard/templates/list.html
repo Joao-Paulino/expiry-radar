@@ -7,7 +7,7 @@
 <form method="post" action="/sessions/revoke-all"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit" title="Ends every open dashboard session, including yours">Sign out all sessions / Terminar todas as sessões</button></form>{{end}}
 <table>
 <thead>
-<tr><th>Source</th><th>Name</th><th>Kind</th><th>Expires At</th><th>Reported By</th><th>Checked At</th><th>Muted</th><th>Owner</th></tr>
+<tr><th>Source</th><th>Name</th><th>Kind</th><th>Expires At</th><th>Reported By</th><th>Checked At</th><th>Status</th><th>Muted</th><th>Owner</th></tr>
 </thead>
 <tbody>
 {{range .Records}}
@@ -18,6 +18,7 @@
 <td>{{.Record.ExpiresAt}}</td>
 <td>{{.Record.ReportedBy}}</td>
 <td>{{.Record.CheckedAt}}</td>
+<td>{{.Record.Status}}</td>
 <td>{{.Muted}}</td>
 <td>{{.Owner}}</td>
 </tr>

@@ -171,3 +171,30 @@ func TestEngine_Evaluate_SilenceUsesAgentLastSeen(t *testing.T) {
 		t.Fatalf("got %+v", h)
 	}
 }
+
+// A record a checker marks informational (metadata alerts=off, e.g. an
+// inactive AWS access key) is listed but never alerts.
+func TestEngine_Evaluate_InformationalRecordNeverAlerts(t *testing.T) {
+	st := &fakeStore{current: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "aws://iam/1/user/bob/access_key_1", Name: "bob · key 1",
+		Kind: "access_key", ExpiresAt: time.Now().Add(-48 * time.Hour), Metadata: map[string]string{"status": "inactive", "alerts": "off"}}}}}
+	e := &Engine{Store: st, Rules: &fakeRulesStore{}, Thresholds: DefaultThresholds()}
+	ns, err := e.Evaluate(context.Background(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ns) != 1 || ns[0].Severity != SeverityOK {
+		t.Fatalf("informational record alerted: %+v", ns)
+	}
+}
+
+// Only access keys may be informational: a record of another kind with
+// alerts=off (any agent can send metadata) still alerts.
+func TestEngine_Evaluate_AlertsOffOnlyForAccessKeys(t *testing.T) {
+	st := &fakeStore{current: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "s", Name: "n", Kind: "certificate",
+		ExpiresAt: time.Now().Add(-time.Hour), Metadata: map[string]string{"alerts": "off"}}}}}
+	e := &Engine{Store: st, Rules: &fakeRulesStore{}, Thresholds: DefaultThresholds()}
+	ns, _ := e.Evaluate(context.Background(), time.Now())
+	if len(ns) != 1 || ns[0].Severity != SeverityCritical {
+		t.Fatalf("certificate silenced by alerts=off: %+v", ns)
+	}
+}

@@ -179,3 +179,15 @@ func TestMux_ForgetAgent(t *testing.T) {
 		t.Fatal("no Forget button on the dashboard")
 	}
 }
+
+// An informational record (inactive access key) says so on the page,
+// or it would look like an overdue key that never alerts.
+func TestMux_List_ShowsStatus(t *testing.T) {
+	st := &fakeStore{current: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "aws://iam/1/user/bob/access_key_1", Name: "bob · key 1",
+		Kind: "access_key", ExpiresAt: time.Now().Add(-48 * time.Hour), Metadata: map[string]string{"status": "inactive", "alerts": "off"}}}}}
+	rec := httptest.NewRecorder()
+	NewMux(st, &fakeRulesStore{}).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if !strings.Contains(rec.Body.String(), "inactive (no alerts)") {
+		t.Fatal("status not shown")
+	}
+}

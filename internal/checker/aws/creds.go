@@ -102,7 +102,8 @@ type apiError struct {
 func (e *apiError) Error() string { return fmt.Sprintf("%s: HTTP %d %s", e.what, e.status, e.msg) }
 
 func (e *apiError) retryable() bool {
-	return e.status == 429 || e.status >= 500 || strings.Contains(e.msg, "Throttling") || strings.Contains(e.msg, "RequestLimitExceeded")
+	return e.status == 429 || e.status >= 500 || strings.Contains(e.msg, "Throttling") || strings.Contains(e.msg, "RequestLimitExceeded") ||
+		strings.Contains(e.msg, "LimitExceeded")
 }
 
 func readBody(resp *http.Response, what string) ([]byte, error) {

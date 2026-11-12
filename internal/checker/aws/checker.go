@@ -25,6 +25,9 @@ type Checker struct {
 	ep     endpoints
 	getenv func(string) string
 
+	name     string   // checker name ("aws" or "aws-access-keys")
+	services []string // services this instance checks
+
 	mu      sync.Mutex
 	base    credentialSource
 	assumed map[string]credentialSource
@@ -37,10 +40,38 @@ func New(cfg Config) *Checker {
 	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	hc := &http.Client{Timeout: 15 * time.Second, Transport: tr,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return &Checker{cfg: cfg, http: hc, ep: defaultEndpoints(), getenv: os.Getenv, assumed: map[string]credentialSource{}}
+	return &Checker{cfg: cfg, http: hc, ep: defaultEndpoints(), getenv: os.Getenv, assumed: map[string]credentialSource{},
+		name: "aws", services: cfg.services()}
 }
 
-func (c *Checker) Name() string { return "aws" }
+// Checkers returns the checkers for cfg: certificates under "aws" and,
+// when configured, access keys under their own name, so a credential
+// report problem never makes the certificate run incomplete (which
+// would stop gone-detection for every certificate).
+func Checkers(cfg Config) []checker.Checker {
+	var certs, keys []string
+	for _, s := range cfg.services() {
+		if s == "access_keys" {
+			keys = append(keys, s)
+		} else {
+			certs = append(certs, s)
+		}
+	}
+	var out []checker.Checker
+	if len(certs) > 0 {
+		c := New(cfg)
+		c.services = certs
+		out = append(out, c)
+	}
+	if len(keys) > 0 {
+		c := New(cfg)
+		c.name, c.services = "aws-access-keys", keys
+		out = append(out, c)
+	}
+	return out
+}
+
+func (c *Checker) Name() string { return c.name }
 func (c *Checker) Kind() string { return "certificate" }
 
 type target struct {
@@ -116,7 +147,7 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 			errs = append(errs, fmt.Errorf("account %s: %w", t.account, err))
 			continue
 		}
-		for _, s := range c.cfg.services() {
+		for _, s := range c.services {
 			switch s {
 			case "acm":
 				for _, region := range c.cfg.Regions {
@@ -125,6 +156,12 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 					if err != nil {
 						errs = append(errs, fmt.Errorf("account %s acm %s: %w", t.account, region, err))
 					}
+				}
+			case "access_keys":
+				recs, err := c.listAccessKeys(ctx, cr, t.account)
+				records = append(records, recs...)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("account %s access keys: %w", t.account, err))
 				}
 			case "iam_server_certificates":
 				recs, err := c.listServerCertificates(ctx, cr, t.account)
@@ -203,6 +240,19 @@ func (c *Checker) listACM(ctx context.Context, cr credentials, account, region s
 		next = out.NextToken
 	}
 	return records, errors.New("ListCertificates: more than 1000 pages")
+}
+
+// iamQuery sends a signed IAM Query API call (global, us-east-1).
+func (c *Checker) iamQuery(ctx context.Context, cr credentials, q url.Values) ([]byte, error) {
+	q.Set("Version", "2010-05-08")
+	return send(ctx, c.http, q.Get("Action"), func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ep.iam+"/?"+q.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		signV4(req, nil, cr, "us-east-1", "iam", time.Now())
+		return req, nil
+	})
 }
 
 // listServerCertificates pages through IAM ListServerCertificates
