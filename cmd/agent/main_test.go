@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/pem"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
+	awscheck "github.com/Joao-Paulino/expiry-radar/internal/checker/aws"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"net/http"
@@ -193,6 +194,21 @@ func TestCheckers_IncludesAzureWhenConfigured(t *testing.T) {
 	cfg.Azure.Auth = "password"
 	if cfg.Validate() == nil {
 		t.Fatal("invalid azure config accepted")
+	}
+}
+
+func TestCheckers_IncludesAWSWhenConfigured(t *testing.T) {
+	cfg := Config{CollectorURL: "https://c", Token: "t", AgentID: "a", QueuePath: "/q", IntervalSeconds: 60,
+		AWS: &awscheck.Config{Auth: "instance_role", Regions: []string{"eu-west-1"}}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid aws config rejected: %v", err)
+	}
+	if names := checkerNames(checkers(cfg)); names != "tls-checker,aws" {
+		t.Fatalf("with aws: %q", names)
+	}
+	cfg.AWS.Auth = "access_keys"
+	if cfg.Validate() == nil {
+		t.Fatal("static keys accepted")
 	}
 }
 
