@@ -44,6 +44,7 @@ type fakeAWS struct {
 	serverCerts map[string][]map[string]string
 	credReport  map[string]string           // account -> CSV
 	secrets     map[string][]map[string]any // "account/region" -> SecretListEntry
+	versions    map[string][]map[string]any // secret ARN -> versions
 	reportPolls int                         // GenerateCredentialReport answers STARTED this many times first
 	reportGone  int                         // GetCredentialReport answers ReportExpired this many times first
 	imdsToken   string
@@ -53,7 +54,7 @@ type fakeAWS struct {
 }
 
 func newFakeAWS(t *testing.T) *fakeAWS {
-	f := &fakeAWS{acm: map[string][]map[string]any{}, serverCerts: map[string][]map[string]string{}, credReport: map[string]string{}, secrets: map[string][]map[string]any{}, imdsToken: "imds-tok"}
+	f := &fakeAWS{acm: map[string][]map[string]any{}, serverCerts: map[string][]map[string]string{}, credReport: map[string]string{}, secrets: map[string][]map[string]any{}, versions: map[string][]map[string]any{}, imdsToken: "imds-tok"}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(f.serveAPI))
 	f.meta = httptest.NewServer(http.HandlerFunc(f.serveMeta))
 	t.Cleanup(func() { f.srv.Close(); f.meta.Close() })
@@ -144,6 +145,16 @@ func (f *fakeAWS) serveAPI(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"credentialSet": []map[string]any{{"credentials": map[string]any{
 			"accessKeyId": "ASIA-BASE", "secretAccessKey": "secret-ASIA-BASE", "sessionToken": "token-ASIA-BASE",
 			"expiration": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}}}})
+	case r.Header.Get("X-Amz-Target") == "secretsmanager.ListSecretVersionIds":
+		var in struct{ SecretId string }
+		json.Unmarshal(body, &in)
+		f.calls = append(f.calls, "secretsmanager ListSecretVersionIds "+in.SecretId)
+		v, ok := f.versions[in.SecretId]
+		if !ok {
+			http.Error(w, `{"__type":"ResourceNotFoundException"}`, 400)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"Versions": v})
 	case r.Header.Get("X-Amz-Target") == "secretsmanager.ListSecrets":
 		f.calls = append(f.calls, "secretsmanager ListSecrets "+region+" "+ak)
 		if service != "secretsmanager" {
