@@ -47,8 +47,10 @@ type Config struct {
 	// AWS, if set, also checks AWS (see README).
 	AWS *awscheck.Config `json:"aws"`
 	// GCP, if set, also checks Google Cloud (see README).
-	GCP             *gcp.Config `json:"gcp"`
-	IntervalSeconds int         `json:"interval_seconds"`
+	GCP *gcp.Config `json:"gcp"`
+	// VMware, if set, also checks vCenter / ESXi (see README).
+	VMware          *vmware.Config `json:"vmware"`
+	IntervalSeconds int            `json:"interval_seconds"`
 }
 
 // loadConfig reads and decodes the JSON config file at path.
