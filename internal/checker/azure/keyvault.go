@@ -180,16 +180,20 @@ func (c *Checker) discover(ctx context.Context, src tokenSource, sub string) ([]
 		if json.Unmarshal(raw, &r) != nil || !vaultNameRe.MatchString(r.Name) {
 			continue
 		}
-		rg := ""
-		parts := strings.Split(r.ID, "/")
-		for i := 0; i+1 < len(parts); i++ {
-			if strings.EqualFold(parts[i], "resourceGroups") {
-				rg = parts[i+1]
-			}
-		}
-		out = append(out, vaultTarget{r.Name, map[string]string{"location": r.Location, "resource_group": rg, "subscription": sub}})
+		out = append(out, vaultTarget{r.Name, map[string]string{"location": r.Location, "resource_group": resourceGroup(r.ID), "subscription": sub}})
 	}
 	return out, nil
+}
+
+// resourceGroup returns the resource group named in an ARM resource ID.
+func resourceGroup(id string) string {
+	parts := strings.Split(id, "/")
+	for i := 0; i+1 < len(parts); i++ {
+		if strings.EqualFold(parts[i], "resourceGroups") {
+			return parts[i+1]
+		}
+	}
+	return ""
 }
 
 type kvItem struct {
@@ -249,6 +253,13 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 	var errs []error
 	if c.cfg.AppRegistrations || c.cfg.ServicePrincipals {
 		recs, err := c.checkGraph(ctx, src)
+		records = append(records, recs...)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if c.cfg.ManagedCertificates {
+		recs, err := c.checkManagedCerts(ctx, src)
 		records = append(records, recs...)
 		if err != nil {
 			errs = append(errs, err)

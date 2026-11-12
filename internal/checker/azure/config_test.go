@@ -35,6 +35,7 @@ func TestConfig_Validate(t *testing.T) {
 		"bad subscription":         func(c *Config) { c.Subscriptions = []string{"not-a-guid"} },
 		"nothing to check":         func(c *Config) { c.KeyVaults = nil; c.Subscriptions = nil },
 		"bad tenant":               func(c *Config) { c.TenantID = "x/../y" },
+		"managed certs, no subs":   func(c *Config) { c.KeyVaults = nil; c.Subscriptions = nil; c.ManagedCertificates = true },
 	}
 	for name, mutate := range cases {
 		c := base("certificate")

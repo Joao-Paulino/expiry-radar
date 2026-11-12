@@ -46,11 +46,13 @@ type fakeAzure struct {
 	graph        map[string][]map[string]any // "applications"/"servicePrincipals" -> objects
 	graphTokens  []string                    // bearer tokens seen on Graph requests
 	throttleOnce bool                        // next Graph request answers 429
+	arm          map[string][]map[string]any // ARM list path -> items (managed certificates)
+	armFail      string                      // ARM list path answering 403
 }
 
 func newFake(t *testing.T) *fakeAzure {
 	t.Helper()
-	f := &fakeAzure{vaults: map[string]map[string][]map[string]any{}, subs: map[string][]map[string]any{}, graph: map[string][]map[string]any{}}
+	f := &fakeAzure{vaults: map[string]map[string][]map[string]any{}, subs: map[string][]map[string]any{}, graph: map[string][]map[string]any{}, arm: map[string][]map[string]any{}}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -136,6 +138,27 @@ func (f *fakeAzure) serve(w http.ResponseWriter, r *http.Request) {
 		out := map[string]any{"value": items[:min(1, len(items))]}
 		if len(items) > 1 {
 			out["@odata.nextLink"] = f.srv.URL + p + "?" + r.URL.RawQuery + "&$skiptoken=2"
+		}
+		reply(w, out)
+		return
+	}
+	if strings.HasPrefix(p, "/subscriptions/") && p == f.armFail {
+		w.WriteHeader(403)
+		reply(w, map[string]any{"error": map[string]any{"code": "AuthorizationFailed", "message": "no read on " + p}})
+		return
+	}
+	if items, ok := f.arm[p]; ok {
+		if r.URL.Query().Get("api-version") == "" {
+			http.Error(w, "api-version missing", 400)
+			return
+		}
+		if r.URL.Query().Get("page") == "2" {
+			reply(w, map[string]any{"value": items[1:]})
+			return
+		}
+		out := map[string]any{"value": items[:min(1, len(items))]}
+		if len(items) > 1 {
+			out["nextLink"] = f.srv.URL + p + "?" + r.URL.RawQuery + "&page=2"
 		}
 		reply(w, out)
 		return

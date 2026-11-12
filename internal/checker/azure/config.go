@@ -27,6 +27,10 @@ type Config struct {
 	// enterprise apps) via Microsoft Graph; need Application.Read.All.
 	AppRegistrations  bool `json:"app_registrations"`
 	ServicePrincipals bool `json:"service_principals"`
+	// ManagedCertificates checks App Service certificates and orders,
+	// Front Door (Standard/Premium) and Application Gateway certificates
+	// in Subscriptions via ARM (Reader).
+	ManagedCertificates bool `json:"managed_certificates"`
 }
 
 var (
@@ -67,6 +71,9 @@ func (c *Config) Validate() error {
 	}
 	if c.TenantID != "" && !tenantRe.MatchString(c.TenantID) {
 		return fmt.Errorf("azure: invalid tenant_id %q", c.TenantID)
+	}
+	if c.ManagedCertificates && len(c.Subscriptions) == 0 {
+		return errors.New("azure: managed_certificates needs subscriptions")
 	}
 	if len(c.KeyVaults)+len(c.Subscriptions) == 0 && !c.AppRegistrations && !c.ServicePrincipals {
 		return errors.New("azure: set at least one of key_vaults, subscriptions, app_registrations or service_principals")
