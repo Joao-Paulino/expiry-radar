@@ -589,6 +589,31 @@ Multi-account / Multi-conta: the base role also needs `sts:AssumeRole` on the `a
 
 Trust for the agent's own role / Confiança da role do próprio agente: IRSA → the cluster's OIDC provider with an `aud`/`sub` condition; Roles Anywhere → `"Service": "rolesanywhere.amazonaws.com"` with `sts:AssumeRole`, `sts:TagSession`, `sts:SetSourceIdentity`. `sts:GetCallerIdentity` needs no permission.
 
+### 🟦 Google Cloud (certificates, service account keys, Secret Manager)
+
+Certificate Manager and Compute (load balancer) SSL certificates, user-managed service account keys and Secret Manager expiry / rotation. Plain REST (no Google SDK), read-only, never a secret value. Service account key files are not supported for the agent itself, on purpose.
+Certificados do Certificate Manager e SSL do Compute (load balancers), chaves de service accounts geridas pelo utilizador e expiração / rotação do Secret Manager. REST direto (sem SDK da Google), só leitura, nunca um valor de segredo. Ficheiros de chave de service account não são suportados para o próprio agente, de propósito.
+
+```json
+"gcp": {
+  "auth": "metadata",
+  "organization": "123456789012",
+  "folders": [],
+  "projects": [],
+  "services": ["certificate_manager", "compute_ssl", "service_account_keys", "secret_manager"],
+  "key_max_age_days": 90
+}
+```
+
+| | EN | PT |
+|---|---|---|
+| 🔐 Auth | `metadata`: Compute Engine, GKE Workload Identity, Cloud Run. `external_account` + `credential_file`: workload identity federation (Google's standard configuration, file-sourced token, optional service account impersonation; token endpoints must be Google's) | `metadata`: Compute Engine, GKE Workload Identity, Cloud Run. `external_account` + `credential_file`: workload identity federation (configuração standard da Google, token de ficheiro, impersonation opcional; os endpoints têm de ser da Google) |
+| 🏢 Scope | `organization` / `folders`: projects found with Cloud Asset Inventory (discovery only; dates come from each service, as Asset Inventory can lag by days); `projects`: explicit list. A project where an API is not enabled has nothing of that kind | `organization` / `folders`: projetos encontrados com o Cloud Asset Inventory (só descoberta; as datas vêm de cada serviço, porque o Asset Inventory pode ter dias de atraso); `projects`: lista explícita. Um projeto sem a API ativa não tem nada desse tipo |
+| 🔑 Keys | Separate checker `gcp-service-account-keys`; user-managed keys due `key_max_age_days` (default 90, CIS GCP) after creation, or at their own expiry if earlier; disabled keys shown as `disabled (no alerts)` | Checker separado `gcp-service-account-keys`; chaves geridas pelo utilizador vencem `key_max_age_days` (por omissão 90, CIS GCP) depois da criação, ou na própria expiração se for antes; chaves desativadas aparecem como `disabled (no alerts)` |
+| 🗝️ Secrets | Separate checker `gcp-secrets`; a secret's `expireTime` (it is deleted then) and rotation: Google only notifies, it does not rotate, so rotation is due at the next rotation time + 2 days (or newest enabled version + period + 2 days, if earlier). Regional secrets (`locations/*/secrets`) are not checked yet | Checker separado `gcp-secrets`; o `expireTime` do segredo (é apagado nessa data) e a rotação: a Google só notifica, não roda, por isso a rotação vence na próxima rotação + 2 dias (ou versão ativa mais recente + período + 2 dias, se for antes). Segredos regionais (`locations/*/secrets`) ainda não são verificados |
+
+Roles (on the organization, folders or projects) / Roles (na organização, pastas ou projetos): `roles/cloudasset.viewer` (discovery), `resourcemanager.projects.get` (project IDs → numbers), `roles/certificatemanager.viewer`, `roles/compute.viewer`, `roles/iam.serviceAccountKeyAdmin` is **not** needed — use a custom role with `iam.serviceAccounts.list`, `iam.serviceAccountKeys.list`, `secretmanager.secrets.list`, `secretmanager.versions.list` (no access to values).
+
 ## ⚠️ Known limitations / Limitações conhecidas
 
 | EN | PT |
@@ -604,8 +629,8 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 | ✅ | **M1** | TLS certificates + core platform (agent, collector, alerts, dashboard, export) | Certificados TLS + plataforma base (agente, collector, alertas, painel, exportação) |
 | ✅ | **M2** | HashiCorp Vault: secrets, leases, token TTLs | HashiCorp Vault: segredos, leases, TTL de tokens |
 | ✅ | **M3** | Azure: Key Vault, App Registration credentials, managed certificates | Azure: Key Vault, credenciais de App Registrations, certificados geridos |
-| 🟡 | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
-| ⚪ | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
+| ✅ | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
+| 🟡 | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
 | ⚪ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
 | ⚪ | Later / Depois | Software licences, SaaS subscriptions, then OT/ICS | Licenças de software, subscrições SaaS e depois OT/ICS |
 

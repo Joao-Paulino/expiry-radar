@@ -21,6 +21,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
 	awscheck "github.com/Joao-Paulino/expiry-radar/internal/checker/aws"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/gcp"
 	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
@@ -43,8 +44,10 @@ type Config struct {
 	// Azure, if set, also checks Azure (see README).
 	Azure *azure.Config `json:"azure"`
 	// AWS, if set, also checks AWS (see README).
-	AWS             *awscheck.Config `json:"aws"`
-	IntervalSeconds int              `json:"interval_seconds"`
+	AWS *awscheck.Config `json:"aws"`
+	// GCP, if set, also checks Google Cloud (see README).
+	GCP             *gcp.Config `json:"gcp"`
+	IntervalSeconds int         `json:"interval_seconds"`
 }
 
 // loadConfig reads and decodes the JSON config file at path.
@@ -96,6 +99,11 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
+	if c.GCP != nil {
+		if err := c.GCP.Validate(); err != nil {
+			return err
+		}
+	}
 	if c.IntervalSeconds <= 0 {
 		return fmt.Errorf("agent: interval_seconds must be a positive number of seconds")
 	}
@@ -141,6 +149,9 @@ func checkers(cfg Config) []checker.Checker {
 	}
 	if cfg.AWS != nil {
 		cs = append(cs, awscheck.Checkers(*cfg.AWS)...)
+	}
+	if cfg.GCP != nil {
+		cs = append(cs, gcp.Checkers(*cfg.GCP)...)
 	}
 	return cs
 }

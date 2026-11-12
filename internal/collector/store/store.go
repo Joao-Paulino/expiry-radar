@@ -138,10 +138,10 @@ func (s *SQLite) RecordCheckerHealth(ctx context.Context, checkerName, reportedB
 }
 
 // Informational reports a record the checker marked as shown-but-never-
-// alerted. Only access keys may be (an inactive key cannot be used);
-// metadata comes from agents, so other kinds can never be silenced.
+// alerted. Only cloud keys may be (an inactive/disabled key cannot be
+// used); metadata comes from agents, so other kinds are never silenced.
 func (r StoredRecord) Informational() bool {
-	return r.Kind == "access_key" && r.Metadata["alerts"] == "off"
+	return (r.Kind == "access_key" || r.Kind == "service_account_key") && r.Metadata["alerts"] == "off"
 }
 
 // Status is a short label for the dashboard and exports, e.g.
