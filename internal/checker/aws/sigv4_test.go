@@ -29,6 +29,8 @@ func TestSignV4_Vectors(t *testing.T) {
 			map[string]string{"Content-Type": "application/x-amz-json-1.1", "X-Amz-Target": "CertificateManager.ListCertificates"}, session},
 		{"query api with escaping", "GET", "https://iam.amazonaws.com/?Action=ListServerCertificates&Version=2010-05-08&Marker=a%2Fb%20c~d%2Ae", "us-east-1", "iam", "",
 			"AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/iam/aws4_request, SignedHeaders=host;x-amz-date;x-amz-security-token, Signature=4a3956122580b2271b69ea17a177078e120c8d0bf4c63880627e65de485af2d6", nil, session},
+		{"key prefix sort (key, then value)", "GET", "https://example.amazonaws.com/?a-b=2&a=1&Filter.1.Name=x&Filter.1=y", "us-east-1", "service", "",
+			"AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, SignedHeaders=host;x-amz-date, Signature=4fe501b68c0a909b0a264d701fd3bfa679d2964c1e68f18a012696d6da3a41a8", nil, plain},
 	}
 	for _, c := range cases {
 		req, _ := http.NewRequest(c.method, c.url, strings.NewReader(c.body))

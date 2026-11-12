@@ -15,7 +15,7 @@ Exactly one `auth`:
 - **SigV4** implemented in stdlib and tested against AWS's published signature test vectors.
 
 ## What is reported (step 1)
-- **ACM** (`CertificateManager.ListCertificates`, JSON 1.1, paginated `NextToken`, `Includes.keyTypes` = all key types — without it ACM lists RSA-2048 only): kind `certificate`, name = domain, source `aws://acm/<account>/<region>/<certificate id>`, metadata `type` (AMAZON_ISSUED / IMPORTED / PRIVATE), `in_use`, `renewal_eligibility`, `status`, `account`, `region`. Imported certificates do not renew on their own: metadata says so. Certificates without `NotAfter` (pending validation) skipped.
+- **ACM** (`CertificateManager.ListCertificates`, JSON 1.1, paginated `NextToken`, `Includes.keyTypes` = all key types and `CertificateKeyPairOrigins` = AWS_MANAGED, ACME, CUSTOMER_PROVIDED — by default ACM lists RSA-1024/2048 only and leaves ACME certificates out): kind `certificate`, name = domain, source `aws://acm/<account>/<region>/<certificate id>`, metadata `type` (AMAZON_ISSUED / IMPORTED / PRIVATE), `in_use`, `renewal_eligibility`, `status`, `account`, `region`. Imported certificates do not renew on their own: metadata says so. Certificates without `NotAfter` (pending validation) skipped.
 - **IAM server certificates** (`ListServerCertificates`, Query API, paginated `Marker`): kind `certificate`, source `aws://iam/<account>/server-certificate/<name>`.
 - No 30-day horizon for certificates (an expired one may still be served).
 
@@ -24,7 +24,7 @@ Exactly one `auth`:
 - Step 3: Secrets Manager `ListSecrets` (no `GetSecretValue`): rotation enabled → `NextRotationDate`; disabled → optional `secret_max_age_days` from `LastChangedDate`.
 
 ## Errors and gone items
-A failing account/region/service never hides the others. Empty dates are skipped, not errors (an error makes the run incomplete and turns off gone-detection for the whole checker). Service not enabled / region not opted-in → empty, not error.
+A failing account/region/service never hides the others. Empty dates are skipped, not errors (an error makes the run incomplete and turns off gone-detection for the whole checker); unreadable dates are errors. Throttling, 5xx and network errors are retried twice. A region not enabled in the account is reported as an error (it cannot be told apart from a credential failure without an extra permission): configure only enabled regions. Standard `aws` partition only (China, GovCloud, ISO use other hosts and signing regions). Roles Anywhere uses the trust anchor's region.
 
 ## Permissions (read-only policy in README)
 `acm:ListCertificates`, `iam:ListServerCertificates` (+ step 2 `iam:GenerateCredentialReport`, `iam:GetCredentialReport`; step 3 `secretsmanager:ListSecrets`); for multi-account `sts:AssumeRole` on the listed roles.

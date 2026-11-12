@@ -55,16 +55,31 @@ func TestInstanceRole_ECSAndPodIdentity(t *testing.T) {
 // or the credentials (and the authorization token) would go elsewhere.
 func TestInstanceRole_ContainerURIMustBeLocal(t *testing.T) {
 	f := newFakeAWS(t)
-	for _, uri := range []string{"http://evil.example.com/creds", "http://169.254.170.3/creds", "https://user@127.0.0.1/x", "file:///etc/passwd"} {
+	for _, uri := range []string{"http://evil.example.com/creds", "http://169.254.170.3/creds", "https://user:pw@127.0.0.1/x", "file:///etc/passwd"} {
 		env := map[string]string{"AWS_CONTAINER_CREDENTIALS_FULL_URI": uri}
-		if _, err := provider(t, f, Config{Auth: "instance_role"}, func(k string) string { return env[k] }).get(context.Background()); err == nil {
+		_, err := provider(t, f, Config{Auth: "instance_role"}, func(k string) string { return env[k] }).get(context.Background())
+		if err == nil {
 			t.Errorf("%s accepted", uri)
+		} else if strings.Contains(err.Error(), "pw@") {
+			t.Errorf("credentials in the URI leaked into the error: %v", err)
 		}
 	}
-	for _, uri := range []string{"http://169.254.170.2/v2/credentials", "http://169.254.170.23/v1/credentials", "http://[fd00:ec2::23]/v1/credentials", "http://localhost:8080/x"} {
+	// As the AWS SDKs: https to any host is allowed (TLS checks the host).
+	for _, uri := range []string{"http://169.254.170.2/v2/credentials", "http://169.254.170.23/v1/credentials", "http://[fd00:ec2::23]/v1/credentials", "http://localhost:8080/x", "https://creds.internal.example/x"} {
 		if err := checkContainerURI(uri); err != nil {
 			t.Errorf("%s refused: %v", uri, err)
 		}
+	}
+}
+
+// As botocore: the relative URI wins over the full one, and the
+// authorization token is sent with it too.
+func TestInstanceRole_RelativeURIWinsAndCarriesToken(t *testing.T) {
+	f := newFakeAWS(t)
+	env := map[string]string{"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI": "/ecs-creds", "AWS_CONTAINER_CREDENTIALS_FULL_URI": "http://evil.example.com/x",
+		"AWS_CONTAINER_AUTHORIZATION_TOKEN": "tok-1"}
+	if _, err := provider(t, f, Config{Auth: "instance_role"}, func(k string) string { return env[k] }).get(context.Background()); err != nil || f.relAuth != "tok-1" {
+		t.Fatalf("got %v, auth %q", err, f.relAuth)
 	}
 }
 
@@ -92,13 +107,20 @@ func TestWebIdentity(t *testing.T) {
 func TestRolesAnywhere(t *testing.T) {
 	f := newFakeAWS(t)
 	file, cert := writeECCert(t)
-	cfg := Config{Auth: "roles_anywhere", CertificateFile: file, Region: "eu-west-1",
+	cfg := Config{Auth: "roles_anywhere", CertificateFile: file, Regions: []string{"us-east-1", "eu-west-1"},
 		TrustAnchorARN: "arn:aws:rolesanywhere:eu-west-1:111111111111:trust-anchor/ta",
 		ProfileARN:     "arn:aws:rolesanywhere:eu-west-1:111111111111:profile/p",
 		RoleARN:        "arn:aws:iam::111111111111:role/expiry-radar"}
-	c, err := provider(t, f, cfg, noEnv).get(context.Background())
+	p, err := newCredentialSource(cfg, f.srv.Client(), f.endpoints(), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := p.get(context.Background())
 	if err != nil || c.AccessKeyID != "ASIA-BASE" {
 		t.Fatalf("got %+v, %v", c, err)
+	}
+	if f.raRegion != "eu-west-1" {
+		t.Fatalf("CreateSession sent to %q, not the trust anchor's region", f.raRegion)
 	}
 	h := f.raHeaders
 	if h.Get("X-Amz-X509") != base64.StdEncoding.EncodeToString(cert.Raw) {

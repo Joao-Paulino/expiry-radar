@@ -53,6 +53,11 @@ func TestCheck_ACMAndIAMAcrossAccountsAndRegions(t *testing.T) {
 		acmCert("c2", "legacy.example.com", "IMPORTED", "ISSUED", exp+0.5),
 		acmCert("c3", "new.example.com", "AMAZON_ISSUED", "PENDING_VALIDATION", 0), // no date yet
 		acmCert("c4", "old.example.com", "AMAZON_ISSUED", "REVOKED", exp),
+		func() map[string]any {
+			m := acmCert("c7", "acme.example.com", "IMPORTED", "ISSUED", exp)
+			m["CertificateKeyPairOrigin"] = "ACME"
+			return m
+		}(),
 	}
 	f.acm[acct1+"/us-east-1"] = []map[string]any{acmCert("c5", "cdn.example.com", "AMAZON_ISSUED", "EXPIRED", float64(time.Now().Add(-48*time.Hour).Unix()))}
 	f.acm[acct2+"/eu-west-1"] = []map[string]any{acmCert("c6", "shop.example.com", "IMPORTED", "ISSUED", exp)}
@@ -68,6 +73,7 @@ func TestCheck_ACMAndIAMAcrossAccountsAndRegions(t *testing.T) {
 	got := byKey(t, recs)
 	want := []string{
 		"aws://acm/111111111111/eu-west-1/c1", "aws://acm/111111111111/eu-west-1/c2", "aws://acm/111111111111/us-east-1/c5",
+		"aws://acm/111111111111/eu-west-1/c7",
 		"aws://acm/222222222222/eu-west-1/c6",
 		"aws://iam/222222222222/server-certificate/elb-old", "aws://iam/222222222222/server-certificate/cf-cert",
 	}
@@ -134,8 +140,16 @@ func TestConfig_Validate(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]func(c *Config){
-		"unknown auth":           func(c *Config) { c.Auth = "access_keys" },
-		"bad region":             func(c *Config) { c.Regions = []string{"eu west 1"} },
+		"unknown auth":       func(c *Config) { c.Auth = "access_keys" },
+		"bad region":         func(c *Config) { c.Regions = []string{"eu west 1"} },
+		"china partition":    func(c *Config) { c.Regions = []string{"cn-north-1"} },
+		"govcloud partition": func(c *Config) { c.Regions = []string{"us-gov-west-1"} },
+		"china role arn":     func(c *Config) { c.AssumeRoles = []AssumeRole{{RoleARN: "arn:aws-cn:iam::111111111111:role/r"}} },
+		"ra regions differ": func(c *Config) {
+			c.Auth, c.CertificateFile, c.RoleARN = "roles_anywhere", "/c", "arn:aws:iam::111111111111:role/r"
+			c.TrustAnchorARN = "arn:aws:rolesanywhere:eu-west-1:111111111111:trust-anchor/ta"
+			c.ProfileARN = "arn:aws:rolesanywhere:us-east-1:111111111111:profile/p"
+		},
 		"acm without regions":    func(c *Config) { c.Regions = nil },
 		"web identity no token":  func(c *Config) { c.Auth = "web_identity"; c.RoleARN = "arn:aws:iam::111111111111:role/r" },
 		"roles anywhere missing": func(c *Config) { c.Auth = "roles_anywhere"; c.CertificateFile = "/c" },
@@ -153,5 +167,39 @@ func TestConfig_Validate(t *testing.T) {
 	iamOnly := Config{Auth: "instance_role", Services: []string{"iam_server_certificates"}}
 	if err := iamOnly.Validate(); err != nil {
 		t.Errorf("IAM only without regions rejected: %v", err)
+	}
+}
+
+func TestCheck_ThrottlingRetried(t *testing.T) {
+	f := newFakeAWS(t)
+	f.throttle = 2
+	f.acm[acct1+"/eu-west-1"] = []map[string]any{acmCert("c1", "a.example.com", "IMPORTED", "ISSUED", float64(time.Now().Add(240*time.Hour).Unix()))}
+	recs, err := newTestChecker(t, f, Config{Regions: []string{"eu-west-1"}, Services: []string{"acm"}}).Check(context.Background())
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("throttling not retried: %d records, %v", len(recs), err)
+	}
+}
+
+func TestCheck_UnreadableIAMDateIsAnError(t *testing.T) {
+	f := newFakeAWS(t)
+	f.serverCerts[acct1] = []map[string]string{{"name": "x", "arn": "arn:aws:iam::111111111111:server-certificate/x", "exp": "soon"}}
+	if _, err := newTestChecker(t, f, Config{Services: []string{"iam_server_certificates"}}).Check(context.Background()); err == nil || !strings.Contains(err.Error(), "x") {
+		t.Fatalf("bad date not reported: %v", err)
+	}
+}
+
+// Base credentials that cannot be obtained are tried once per run, not
+// once per assumed account.
+func TestCheck_BaseOutageTriedOnce(t *testing.T) {
+	f := newFakeAWS(t)
+	f.imdsToken = "dead"
+	cfg := Config{SkipBaseAccount: true, Regions: []string{"eu-west-1"}, Services: []string{"acm"},
+		AssumeRoles: []AssumeRole{{RoleARN: "arn:aws:iam::222222222222:role/a"}, {RoleARN: "arn:aws:iam::333333333333:role/b"}, {RoleARN: "arn:aws:iam::444444444444:role/c"}}}
+	c := newTestChecker(t, f, cfg)
+	if _, err := c.Check(context.Background()); err == nil {
+		t.Fatal("no error")
+	}
+	if f.credCalls > 3 { // one attempt (with its retries), not one per account
+		t.Fatalf("base credentials fetched %d times", f.credCalls)
 	}
 }

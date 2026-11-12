@@ -42,6 +42,9 @@ type fakeAWS struct {
 	acmFail     string                      // "account/region" answering an error
 	serverCerts map[string][]map[string]string
 	imdsToken   string
+	throttle    int    // ACM answers ThrottlingException this many times first
+	raRegion    string // region the Roles Anywhere request was sent to
+	relAuth     string // Authorization header seen on the ECS relative URI
 }
 
 func newFakeAWS(t *testing.T) *fakeAWS {
@@ -75,12 +78,19 @@ func (f *fakeAWS) serveMeta(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.credCalls++
+		if f.imdsToken == "dead" {
+			http.Error(w, "unreachable", 503)
+			return
+		}
 		if r.URL.Path == "/latest/meta-data/iam/security-credentials/" {
 			io.WriteString(w, "expiry-radar-role\n")
 			return
 		}
 		json.NewEncoder(w).Encode(credsJSON("ASIA-BASE"))
 	case r.URL.Path == "/ecs-creds" || r.URL.Path == "/pod-identity":
+		if r.URL.Path == "/ecs-creds" {
+			f.relAuth = r.Header.Get("Authorization")
+		}
 		if r.URL.Path == "/pod-identity" && r.Header.Get("Authorization") != "pod-token" {
 			http.Error(w, "auth", 401)
 			return
@@ -142,17 +152,31 @@ func (f *fakeAWS) serveAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var in struct {
-			NextToken string
-			Includes  struct {
+			NextToken                 string
+			CertificateKeyPairOrigins []string
+			Includes                  struct {
 				KeyTypes []string `json:"keyTypes"`
 			}
 		}
 		json.Unmarshal(body, &in)
+		if f.throttle > 0 {
+			f.throttle--
+			w.WriteHeader(400)
+			io.WriteString(w, `{"__type":"ThrottlingException","message":"Rate exceeded"}`)
+			return
+		}
 		if len(in.Includes.KeyTypes) < 5 {
 			http.Error(w, `{"__type":"Test","message":"without Includes.keyTypes ACM lists RSA_2048 only"}`, 400)
 			return
 		}
-		items := f.acm[key]
+		var items []map[string]any
+		for _, it := range f.acm[key] {
+			// Default ACM filtering leaves ACME certificates out.
+			if it["CertificateKeyPairOrigin"] == "ACME" && !strings.Contains(strings.Join(in.CertificateKeyPairOrigins, ","), "ACME") {
+				continue
+			}
+			items = append(items, it)
+		}
 		if in.NextToken == "p2" {
 			json.NewEncoder(w).Encode(map[string]any{"CertificateSummaryList": items[1:]})
 			return
@@ -213,6 +237,7 @@ func (f *fakeAWS) queryAPI(w http.ResponseWriter, v map[string]string, ak string
 		var b strings.Builder
 		for _, c := range page {
 			fmt.Fprintf(&b, "<member><ServerCertificateName>%s</ServerCertificateName><Path>/</Path><Arn>%s</Arn><Expiration>%s</Expiration></member>", c["name"], c["arn"], c["exp"])
+			_ = c
 		}
 		marker := ""
 		if truncated {
@@ -229,7 +254,7 @@ func (f *fakeAWS) endpoints() endpoints {
 		imds:          f.meta.URL,
 		ecsHost:       f.meta.URL,
 		sts:           func(string) string { return f.srv.URL },
-		rolesAnywhere: func(string) string { return f.srv.URL },
+		rolesAnywhere: func(r string) string { f.raRegion = r; return f.srv.URL },
 		acm:           func(string) string { return f.srv.URL },
 		iam:           f.srv.URL,
 	}
@@ -246,4 +271,9 @@ func writeECCert(t *testing.T) (string, *x509.Certificate) {
 	p := filepath.Join(t.TempDir(), "ra.pem")
 	os.WriteFile(p, append(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: kd})...), 0o600)
 	return p, cert
+}
+
+func TestMain(m *testing.M) {
+	retryWait = time.Millisecond
+	os.Exit(m.Run())
 }

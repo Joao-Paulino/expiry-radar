@@ -61,13 +61,24 @@ func canonicalRequest(req *http.Request, body []byte, at time.Time) (string, str
 		path = "/"
 	}
 	q, _ := url.ParseQuery(req.URL.RawQuery)
-	var pairs []string
+	type kv struct{ k, v string }
+	var kvs []kv
 	for k, vs := range q {
 		for _, v := range vs {
-			pairs = append(pairs, awsEscape(k)+"="+awsEscape(v))
+			kvs = append(kvs, kv{awsEscape(k), awsEscape(v)})
 		}
 	}
-	sort.Strings(pairs)
+	// By encoded key, then value (not by "k=v": "a-b" must follow "a").
+	sort.Slice(kvs, func(i, j int) bool {
+		if kvs[i].k != kvs[j].k {
+			return kvs[i].k < kvs[j].k
+		}
+		return kvs[i].v < kvs[j].v
+	})
+	pairs := make([]string, len(kvs))
+	for i, p := range kvs {
+		pairs[i] = p.k + "=" + p.v
+	}
 
 	headers := map[string]string{"host": host}
 	for k, vs := range req.Header {

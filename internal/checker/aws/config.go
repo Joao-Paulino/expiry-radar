@@ -31,9 +31,11 @@ type Config struct {
 }
 
 var (
-	regionRe  = regexp.MustCompile(`^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-\d$`)
-	roleARNRe = regexp.MustCompile(`^arn:aws[a-z-]*:iam::\d{12}:role/[\w+=,.@/-]{1,512}$`)
-	raARNRe   = regexp.MustCompile(`^arn:aws[a-z-]*:rolesanywhere:[a-z0-9-]+:\d{12}:(trust-anchor|profile)/[\w-]+$`)
+	// Standard AWS partition only: China, GovCloud and ISO use other
+	// hosts and signing regions (not supported yet).
+	regionRe  = regexp.MustCompile(`^(us|eu|ap|ca|sa|me|af|il|mx)-[a-z]+-\d$`)
+	roleARNRe = regexp.MustCompile(`^arn:aws:iam::\d{12}:role/[\w+=,.@/-]{1,512}$`)
+	raARNRe   = regexp.MustCompile(`^arn:aws:rolesanywhere:([a-z0-9-]+):\d{12}:(trust-anchor|profile)/[\w-]+$`)
 	services  = map[string]bool{"acm": true, "iam_server_certificates": true}
 	regional  = map[string]bool{"acm": true}
 )
@@ -43,6 +45,15 @@ func (c *Config) services() []string {
 		return []string{"acm", "iam_server_certificates"}
 	}
 	return c.Services
+}
+
+// rolesAnywhereRegion is the trust anchor's region (as the official
+// signing helper does).
+func (c *Config) rolesAnywhereRegion() string {
+	if m := raARNRe.FindStringSubmatch(c.TrustAnchorARN); m != nil {
+		return m[1]
+	}
+	return c.stsRegion()
 }
 
 func (c *Config) stsRegion() string {
@@ -74,7 +85,10 @@ func (c *Config) Validate() error {
 		}
 	case "roles_anywhere":
 		if c.CertificateFile == "" || !roleARNRe.MatchString(c.RoleARN) || !raARNRe.MatchString(c.TrustAnchorARN) || !raARNRe.MatchString(c.ProfileARN) {
-			return errors.New("aws: roles_anywhere needs certificate_file, role_arn, trust_anchor_arn and profile_arn")
+			return errors.New("aws: roles_anywhere needs certificate_file, role_arn, trust_anchor_arn and profile_arn (standard aws partition)")
+		}
+		if c.rolesAnywhereRegion() != raARNRe.FindStringSubmatch(c.ProfileARN)[1] {
+			return errors.New("aws: trust_anchor_arn and profile_arn must be in the same region")
 		}
 	default:
 		return errors.New("aws: auth must be instance_role, web_identity or roles_anywhere (static access keys are not supported)")
@@ -91,7 +105,7 @@ func (c *Config) Validate() error {
 	}
 	for _, r := range append(append([]string{}, c.Regions...), c.Region) {
 		if r != "" && !regionRe.MatchString(r) {
-			return fmt.Errorf("aws: invalid region %q", r)
+			return fmt.Errorf("aws: invalid region %q (standard aws partition only)", r)
 		}
 	}
 	for _, a := range c.AssumeRoles {

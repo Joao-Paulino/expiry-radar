@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 )
 
 const refreshMargin = 5 * time.Minute
@@ -90,18 +92,70 @@ func noProxy(hc *http.Client) *http.Client {
 	return &c
 }
 
+// apiError is a non-2xx answer; retryable for throttling and 5xx.
+type apiError struct {
+	what   string
+	status int
+	msg    string
+}
+
+func (e *apiError) Error() string { return fmt.Sprintf("%s: HTTP %d %s", e.what, e.status, e.msg) }
+
+func (e *apiError) retryable() bool {
+	return e.status == 429 || e.status >= 500 || strings.Contains(e.msg, "Throttling") || strings.Contains(e.msg, "RequestLimitExceeded")
+}
+
 func readBody(resp *http.Response, what string) ([]byte, error) {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if resp.StatusCode/100 != 2 {
-		msg := strings.TrimSpace(string(data))
+		msg := []rune(strings.TrimSpace(string(data)))
 		if len(msg) > 300 {
 			msg = msg[:300]
 		}
-		return nil, fmt.Errorf("%s: HTTP %d %s", what, resp.StatusCode, msg)
+		return nil, &apiError{what, resp.StatusCode, logging.Sanitize(string(msg))}
 	}
 	return data, nil
 }
+
+// send builds, signs and sends a request (build is called again for
+// every attempt: the signature carries the time) and returns the body.
+// Throttling, 5xx and network errors are retried twice with backoff.
+func send(ctx context.Context, hc *http.Client, what string, build func() (*http.Request, error)) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(retryWait * time.Duration(attempt)):
+			}
+		}
+		req, err := build()
+		if err != nil {
+			return nil, err
+		}
+		resp, err := hc.Do(req)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return nil, err
+			}
+			continue
+		}
+		data, err := readBody(resp, what)
+		var ae *apiError
+		if err != nil && errors.As(err, &ae) && ae.retryable() {
+			lastErr = err
+			continue
+		}
+		return data, err
+	}
+	return nil, lastErr
+}
+
+// retryWait is the backoff unit (tests shorten it).
+var retryWait = time.Second
 
 func newCredentialSource(cfg Config, hc *http.Client, ep endpoints, getenv func(string) string) (credentialSource, error) {
 	var f func(ctx context.Context) (credentials, error)
@@ -119,22 +173,23 @@ func newCredentialSource(cfg Config, hc *http.Client, ep endpoints, getenv func(
 	return &cachedSource{fetch: f}, nil
 }
 
-// checkContainerURI allows only the hosts the AWS SDKs allow for
-// AWS_CONTAINER_CREDENTIALS_FULL_URI: loopback, the ECS and EKS Pod
-// Identity link-local addresses.
+// checkContainerURI allows what the AWS SDKs allow for
+// AWS_CONTAINER_CREDENTIALS_FULL_URI: https to any host, http only to
+// loopback and the ECS / EKS Pod Identity link-local addresses. Errors
+// never repeat the URI (it may carry credentials).
 func checkContainerURI(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
-		return fmt.Errorf("aws: container credentials URI %q not allowed", raw)
+		return errors.New("aws: AWS_CONTAINER_CREDENTIALS_FULL_URI not allowed (scheme or userinfo)")
 	}
 	host := u.Hostname()
-	if host == "localhost" || host == "169.254.170.2" || host == "169.254.170.23" || host == "fd00:ec2::23" {
+	if u.Scheme == "https" || host == "localhost" || host == "169.254.170.2" || host == "169.254.170.23" || host == "fd00:ec2::23" {
 		return nil
 	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
 		return nil
 	}
-	return fmt.Errorf("aws: container credentials URI host %q not allowed", host)
+	return fmt.Errorf("aws: container credentials host %q not allowed over http", host)
 }
 
 type jsonCreds struct {
@@ -153,37 +208,64 @@ func (j jsonCreds) toCreds(what string) (credentials, error) {
 }
 
 func doGet(ctx context.Context, hc *http.Client, method, u string, hdr map[string]string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, method, u, nil)
-	if err != nil {
-		return nil, err
+	return send(ctx, hc, method+" credentials endpoint", func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, method, u, nil)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		return req, nil
+	})
+}
+
+// containerToken is the authorization token for container credentials
+// (file re-read every time, as it rotates).
+func containerToken(getenv func(string) string) (map[string]string, error) {
+	hdr := map[string]string{}
+	if f := getenv("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"); f != "" {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return nil, fmt.Errorf("aws: container authorization token: %w", err)
+		}
+		hdr["Authorization"] = strings.TrimSpace(string(b))
+	} else if t := getenv("AWS_CONTAINER_AUTHORIZATION_TOKEN"); t != "" {
+		hdr["Authorization"] = t
 	}
-	for k, v := range hdr {
-		req.Header.Set(k, v)
+	if strings.ContainsAny(hdr["Authorization"], "\r\n") {
+		return nil, errors.New("aws: container authorization token contains a line break")
 	}
-	resp, err := hc.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	return readBody(resp, method+" "+req.URL.Path)
+	return hdr, nil
 }
 
 // instanceRole: EKS Pod Identity / ECS container credentials when the
 // environment says so, else EC2 IMDSv2 (never IMDSv1).
 func instanceRole(ctx context.Context, hc *http.Client, ep endpoints, getenv func(string) string) (credentials, error) {
 	var j jsonCreds
+	// As botocore: the relative URI (ECS) wins over the full one.
+	if rel := getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"); rel != "" {
+		if !strings.HasPrefix(rel, "/") || strings.Contains(rel, "@") {
+			return credentials{}, errors.New("aws: invalid AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
+		}
+		hdr, err := containerToken(getenv)
+		if err != nil {
+			return credentials{}, err
+		}
+		b, err := doGet(ctx, hc, http.MethodGet, ep.ecsHost+rel, hdr)
+		if err != nil {
+			return credentials{}, fmt.Errorf("aws: ECS credentials: %w", err)
+		}
+		json.Unmarshal(b, &j)
+		return j.toCreds("ECS credentials")
+	}
 	if full := getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI"); full != "" {
 		if err := checkContainerURI(full); err != nil {
 			return credentials{}, err
 		}
-		hdr := map[string]string{}
-		if f := getenv("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"); f != "" {
-			b, err := os.ReadFile(f)
-			if err != nil {
-				return credentials{}, fmt.Errorf("aws: container authorization token: %w", err)
-			}
-			hdr["Authorization"] = strings.TrimSpace(string(b))
-		} else if t := getenv("AWS_CONTAINER_AUTHORIZATION_TOKEN"); t != "" {
-			hdr["Authorization"] = t
+		hdr, err := containerToken(getenv)
+		if err != nil {
+			return credentials{}, err
 		}
 		b, err := doGet(ctx, hc, http.MethodGet, full, hdr)
 		if err != nil {
@@ -191,17 +273,6 @@ func instanceRole(ctx context.Context, hc *http.Client, ep endpoints, getenv fun
 		}
 		json.Unmarshal(b, &j)
 		return j.toCreds("container credentials")
-	}
-	if rel := getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"); rel != "" {
-		if !strings.HasPrefix(rel, "/") || strings.Contains(rel, "@") {
-			return credentials{}, errors.New("aws: invalid AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
-		}
-		b, err := doGet(ctx, hc, http.MethodGet, ep.ecsHost+rel, nil)
-		if err != nil {
-			return credentials{}, fmt.Errorf("aws: ECS credentials: %w", err)
-		}
-		json.Unmarshal(b, &j)
-		return j.toCreds("ECS credentials")
 	}
 	tok, err := doGet(ctx, hc, http.MethodPut, ep.imds+"/latest/api/token", map[string]string{"X-aws-ec2-metadata-token-ttl-seconds": "21600"})
 	if err != nil {
@@ -236,19 +307,17 @@ type stsCredentials struct {
 func stsCall(ctx context.Context, hc *http.Client, ep endpoints, region string, c credentials, form url.Values, out any) error {
 	form.Set("Version", "2011-06-15")
 	body := []byte(form.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.sts(region)+"/", strings.NewReader(string(body)))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
-	if c.AccessKeyID != "" {
-		signV4(req, body, c, region, "sts", time.Now())
-	}
-	resp, err := hc.Do(req)
-	if err != nil {
-		return fmt.Errorf("aws: STS %s: %w", form.Get("Action"), err)
-	}
-	data, err := readBody(resp, "aws: STS "+form.Get("Action"))
+	data, err := send(ctx, hc, "aws: STS "+form.Get("Action"), func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.sts(region)+"/", strings.NewReader(string(body)))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+		if c.AccessKeyID != "" {
+			signV4(req, body, c, region, "sts", time.Now())
+		}
+		return req, nil
+	})
 	if err != nil {
 		return err
 	}
@@ -349,7 +418,7 @@ func rolesAnywhere(ctx context.Context, hc *http.Client, ep endpoints, cfg Confi
 	if _, ok := key.(*ecdsa.PrivateKey); ok {
 		alg = "AWS4-X509-ECDSA-SHA256"
 	}
-	region := cfg.stsRegion()
+	region := cfg.rolesAnywhereRegion()
 	q := url.Values{"profileArn": {cfg.ProfileARN}, "roleArn": {cfg.RoleARN}, "trustAnchorArn": {cfg.TrustAnchorARN}}
 	body := []byte(`{"durationSeconds":3600}`)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.rolesAnywhere(region)+"/sessions?"+q.Encode(), strings.NewReader(string(body)))

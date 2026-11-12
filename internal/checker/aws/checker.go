@@ -104,6 +104,11 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 	if len(targets) == 0 {
 		return nil, errors.Join(errs...)
 	}
+	// Base credentials feed every assumed role: if they cannot be had,
+	// say so once instead of waiting on them for each account.
+	if _, err := c.base.get(ctx); err != nil {
+		return nil, errors.Join(append(errs, err)...)
+	}
 	var records []checker.ExpiryRecord
 	for _, t := range targets {
 		cr, err := t.creds.get(ctx)
@@ -143,23 +148,24 @@ func (c *Checker) listACM(ctx context.Context, cr credentials, account, region s
 	var records []checker.ExpiryRecord
 	next := ""
 	for page := 0; page < 1000; page++ {
-		in := map[string]any{"MaxItems": 1000, "Includes": map[string]any{"keyTypes": acmKeyTypes}}
+		// Every key type and key pair origin: by default ACM lists RSA-1024
+		// and RSA-2048 only, and leaves ACME certificates out.
+		in := map[string]any{"MaxItems": 1000, "Includes": map[string]any{"keyTypes": acmKeyTypes},
+			"CertificateKeyPairOrigins": []string{"AWS_MANAGED", "ACME", "CUSTOMER_PROVIDED"}}
 		if next != "" {
 			in["NextToken"] = next
 		}
 		body, _ := json.Marshal(in)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.ep.acm(region)+"/", strings.NewReader(string(body)))
-		if err != nil {
-			return records, err
-		}
-		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
-		req.Header.Set("X-Amz-Target", "CertificateManager.ListCertificates")
-		signV4(req, body, cr, region, "acm", time.Now())
-		resp, err := c.http.Do(req)
-		if err != nil {
-			return records, err
-		}
-		data, err := readBody(resp, "ListCertificates")
+		data, err := send(ctx, c.http, "ListCertificates", func() (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.ep.acm(region)+"/", strings.NewReader(string(body)))
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+			req.Header.Set("X-Amz-Target", "CertificateManager.ListCertificates")
+			signV4(req, body, cr, region, "acm", time.Now())
+			return req, nil
+		})
 		if err != nil {
 			return records, err
 		}
@@ -203,22 +209,21 @@ func (c *Checker) listACM(ctx context.Context, cr credentials, account, region s
 // (global; signed for us-east-1).
 func (c *Checker) listServerCertificates(ctx context.Context, cr credentials, account string) ([]checker.ExpiryRecord, error) {
 	var records []checker.ExpiryRecord
+	var bad []string
 	marker := ""
 	for page := 0; page < 1000; page++ {
 		q := url.Values{"Action": {"ListServerCertificates"}, "Version": {"2010-05-08"}}
 		if marker != "" {
 			q.Set("Marker", marker)
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ep.iam+"/?"+q.Encode(), nil)
-		if err != nil {
-			return records, err
-		}
-		signV4(req, nil, cr, "us-east-1", "iam", time.Now())
-		resp, err := c.http.Do(req)
-		if err != nil {
-			return records, err
-		}
-		data, err := readBody(resp, "ListServerCertificates")
+		data, err := send(ctx, c.http, "ListServerCertificates", func() (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ep.iam+"/?"+q.Encode(), nil)
+			if err != nil {
+				return nil, err
+			}
+			signV4(req, nil, cr, "us-east-1", "iam", time.Now())
+			return req, nil
+		})
 		if err != nil {
 			return records, err
 		}
@@ -237,6 +242,7 @@ func (c *Checker) listServerCertificates(ctx context.Context, cr credentials, ac
 		for _, s := range out.List {
 			exp, err := time.Parse(time.RFC3339, s.Expiration)
 			if err != nil {
+				bad = append(bad, s.Name)
 				continue
 			}
 			records = append(records, checker.ExpiryRecord{
@@ -245,6 +251,9 @@ func (c *Checker) listServerCertificates(ctx context.Context, cr credentials, ac
 			})
 		}
 		if !out.IsTruncated || out.Marker == "" {
+			if len(bad) > 0 {
+				return records, fmt.Errorf("unreadable Expiration on %s", strings.Join(bad, ", "))
+			}
 			return records, nil
 		}
 		marker = out.Marker
