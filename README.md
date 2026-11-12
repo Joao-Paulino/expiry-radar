@@ -563,7 +563,7 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 |---|---|---|---|
 | ✅ | **M1** | TLS certificates + core platform (agent, collector, alerts, dashboard, export) | Certificados TLS + plataforma base (agente, collector, alertas, painel, exportação) |
 | ✅ | **M2** | HashiCorp Vault: secrets, leases, token TTLs | HashiCorp Vault: segredos, leases, TTL de tokens |
-| 🟡 | **M3** | Azure: Key Vault, App Registration credentials, managed certificates | Azure: Key Vault, credenciais de App Registrations, certificados geridos |
+| ✅ | **M3** | Azure: Key Vault, App Registration credentials, managed certificates | Azure: Key Vault, credenciais de App Registrations, certificados geridos |
 | ⚪ | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
 | ⚪ | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
 | ⚪ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
@@ -588,6 +588,14 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 - [x] AppRole secret IDs and (opt-in) tokens / Secret IDs de AppRole e tokens (opcional)
 - [x] Dynamic secret leases (opt-in) / Leases de segredos dinâmicos (opcional)
 - [x] Release gate: no binary or image ships with a known vulnerability / Bloqueio no release: nenhum binário ou imagem sai com vulnerabilidades conhecidas
+
+**Done in M3 / Concluído no M3**
+
+- [x] Azure auth without stored secrets: managed identity, certificate, workload identity / Autenticação Azure sem segredos guardados: managed identity, certificado, workload identity
+- [x] Key Vault certificates, secrets and keys (list or discovery) / Certificados, segredos e chaves do Key Vault (lista ou descoberta)
+- [x] App Registration secrets and certificates, Enterprise App SAML certificates / Secrets e certificados das App Registrations, certificados SAML das Enterprise Apps
+- [x] Managed certificates: App Service, Front Door, Application Gateway / Certificados geridos: App Service, Front Door, Application Gateway
+- [x] Items that disappear stop alerting and resolve once / Itens que desaparecem deixam de alertar e são resolvidos uma vez
 
 ## 🛡️ Security / Segurança
 
