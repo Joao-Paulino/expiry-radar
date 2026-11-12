@@ -18,7 +18,7 @@ func JSON(w io.Writer, records []store.StoredRecord) error {
 // CSV writes records to w as CSV, with a header row.
 func CSV(w io.Writer, records []store.StoredRecord) error {
 	writer := csv.NewWriter(w)
-	if err := writer.Write([]string{"source", "name", "kind", "expires_at", "reported_by", "checked_at"}); err != nil {
+	if err := writer.Write([]string{"source", "name", "kind", "expires_at", "reported_by", "checked_at", "status"}); err != nil {
 		return err
 	}
 	for _, r := range records {
@@ -29,6 +29,7 @@ func CSV(w io.Writer, records []store.StoredRecord) error {
 			r.ExpiresAt.Format(time.RFC3339),
 			r.ReportedBy,
 			r.CheckedAt.Format(time.RFC3339),
+			r.Status(),
 		}); err != nil {
 			return err
 		}

@@ -199,11 +199,11 @@ func TestCheckers_IncludesAzureWhenConfigured(t *testing.T) {
 
 func TestCheckers_IncludesAWSWhenConfigured(t *testing.T) {
 	cfg := Config{CollectorURL: "https://c", Token: "t", AgentID: "a", QueuePath: "/q", IntervalSeconds: 60,
-		AWS: &awscheck.Config{Auth: "instance_role", Regions: []string{"eu-west-1"}}}
+		AWS: &awscheck.Config{Auth: "instance_role", Regions: []string{"eu-west-1"}, Services: []string{"acm", "access_keys"}}}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("valid aws config rejected: %v", err)
 	}
-	if names := checkerNames(checkers(cfg)); names != "tls-checker,aws" {
+	if names := checkerNames(checkers(cfg)); names != "tls-checker,aws,aws-access-keys" {
 		t.Fatalf("with aws: %q", names)
 	}
 	cfg.AWS.Auth = "access_keys"

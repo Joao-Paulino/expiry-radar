@@ -44,6 +44,7 @@ type fakeAWS struct {
 	serverCerts map[string][]map[string]string
 	credReport  map[string]string // account -> CSV
 	reportPolls int               // GenerateCredentialReport answers STARTED this many times first
+	reportGone  int               // GetCredentialReport answers ReportExpired this many times first
 	imdsToken   string
 	throttle    int    // ACM answers ThrottlingException this many times first
 	raRegion    string // region the Roles Anywhere request was sent to
@@ -236,6 +237,11 @@ func (f *fakeAWS) queryAPI(w http.ResponseWriter, v map[string]string, ak string
 		}
 		fmt.Fprintf(w, `<GenerateCredentialReportResponse><GenerateCredentialReportResult><State>%s</State></GenerateCredentialReportResult></GenerateCredentialReportResponse>`, state)
 	case "GetCredentialReport":
+		if f.reportGone > 0 {
+			f.reportGone--
+			http.Error(w, "<ErrorResponse><Error><Code>ReportExpired</Code><Message>expired</Message></Error></ErrorResponse>", 410)
+			return
+		}
 		csv, ok := f.credReport[accountOf(ak)]
 		if !ok {
 			http.Error(w, "<ErrorResponse><Error><Code>ReportNotPresent</Code></Error></ErrorResponse>", 410)

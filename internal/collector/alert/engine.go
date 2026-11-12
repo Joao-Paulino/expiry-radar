@@ -143,7 +143,7 @@ func (e *Engine) Evaluate(ctx context.Context, now time.Time) ([]Notification, e
 		sev := Evaluate(record, now, e.Thresholds)
 		// Informational records (a checker sets alerts=off, e.g. an
 		// inactive access key) are shown on the dashboard, never alerted.
-		if record.Metadata["alerts"] == "off" {
+		if record.Informational() {
 			sev = SeverityOK
 		}
 		notifications = append(notifications, Notification{

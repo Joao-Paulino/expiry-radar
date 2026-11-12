@@ -116,8 +116,8 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("aws: invalid assume_roles role_arn %q", a.RoleARN)
 		}
 	}
-	if c.AccessKeyMaxAgeDays < 0 {
-		return errors.New("aws: access_key_max_age_days must not be negative")
+	if c.AccessKeyMaxAgeDays < 0 || c.AccessKeyMaxAgeDays > 3650 {
+		return errors.New("aws: access_key_max_age_days must be between 0 (default 90) and 3650")
 	}
 	if c.SkipBaseAccount && len(c.AssumeRoles) == 0 {
 		return errors.New("aws: skip_base_account needs assume_roles")

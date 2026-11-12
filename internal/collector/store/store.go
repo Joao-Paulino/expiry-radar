@@ -137,6 +137,23 @@ func (s *SQLite) RecordCheckerHealth(ctx context.Context, checkerName, reportedB
 	return err
 }
 
+// Informational reports a record the checker marked as shown-but-never-
+// alerted. Only access keys may be (an inactive key cannot be used);
+// metadata comes from agents, so other kinds can never be silenced.
+func (r StoredRecord) Informational() bool {
+	return r.Kind == "access_key" && r.Metadata["alerts"] == "off"
+}
+
+// Status is a short label for the dashboard and exports, e.g.
+// "inactive (no alerts)"; empty when the checker gives none.
+func (r StoredRecord) Status() string {
+	s := r.Metadata["status"]
+	if r.Informational() {
+		s += " (no alerts)"
+	}
+	return s
+}
+
 // ListCurrent returns, per (source, name, kind), the newest row among
 // the agents that still report it. An agent's newest row for an item is
 // gone only when that agent and checker then completed two error-free

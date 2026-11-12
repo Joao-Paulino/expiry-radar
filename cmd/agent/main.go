@@ -140,7 +140,7 @@ func checkers(cfg Config) []checker.Checker {
 		cs = append(cs, azure.New(*cfg.Azure))
 	}
 	if cfg.AWS != nil {
-		cs = append(cs, awscheck.New(*cfg.AWS))
+		cs = append(cs, awscheck.Checkers(*cfg.AWS)...)
 	}
 	return cs
 }

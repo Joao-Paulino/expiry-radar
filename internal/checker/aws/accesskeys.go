@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
@@ -25,6 +26,17 @@ var reportWait = 2 * time.Second
 // GenerateCredentialReport reuses a report younger than 4 hours, so
 // this is one or two calls per account per run.
 func (c *Checker) credentialReport(ctx context.Context, cr credentials) ([]byte, error) {
+	data, err := c.fetchReport(ctx, cr)
+	var ae *apiError
+	if err != nil && errors.As(err, &ae) && (ae.status == 404 || ae.status == 410) {
+		// ReportNotPresent / ReportExpired / ReportInProgress: generate
+		// and wait again, once.
+		data, err = c.fetchReport(ctx, cr)
+	}
+	return data, err
+}
+
+func (c *Checker) fetchReport(ctx context.Context, cr credentials) ([]byte, error) {
 	for i := 0; ; i++ {
 		data, err := c.iamQuery(ctx, cr, url.Values{"Action": {"GenerateCredentialReport"}})
 		if err != nil {
@@ -33,7 +45,9 @@ func (c *Checker) credentialReport(ctx context.Context, cr credentials) ([]byte,
 		var g struct {
 			State string `xml:"GenerateCredentialReportResult>State"`
 		}
-		xml.Unmarshal(data, &g)
+		if err := xml.Unmarshal(data, &g); err != nil {
+			return nil, fmt.Errorf("GenerateCredentialReport: %w", err)
+		}
 		if g.State == "COMPLETE" {
 			break
 		}
@@ -90,23 +104,22 @@ func (c *Checker) listAccessKeys(ctx context.Context, cr credentials, account st
 	var records []checker.ExpiryRecord
 	var bad int
 	for _, row := range rows[1:] {
-		if len(row) != len(rows[0]) {
-			bad++
-			continue
-		}
 		user := row[col["user"]]
 		for slot := 1; slot <= 2; slot++ {
 			p := "access_key_" + strconv.Itoa(slot)
-			rotated := row[col[p+"_last_rotated"]]
-			if rotated == "N/A" || rotated == "" {
+			rotated := strings.TrimSpace(row[col[p+"_last_rotated"]])
+			switch strings.ToLower(rotated) {
+			case "", "n/a", "not_supported", "no_information":
 				continue // no key in this slot
 			}
 			rot, err := time.Parse(time.RFC3339, rotated)
 			if err != nil {
-				bad++
+				bad++ // an unknown value: an error, never a silent skip
 				continue
 			}
-			active := row[col[p+"_active"]] == "true"
+			// Fail safe: only an explicit false is inactive; anything else
+			// (TRUE, an unknown value) counts as active and alerts.
+			active := !strings.EqualFold(strings.TrimSpace(row[col[p+"_active"]]), "false")
 			meta := map[string]string{"account": account, "user": user, "slot": strconv.Itoa(slot),
 				"last_rotated": rot.UTC().Format(time.RFC3339), "max_age_days": strconv.Itoa(maxAge), "status": "active"}
 			if i, ok := col[p+"_last_used_date"]; ok {
@@ -118,10 +131,15 @@ func (c *Checker) listAccessKeys(ctx context.Context, cr credentials, account st
 				exp = rot // the root user should have no access keys at all
 			}
 			if !active {
-				meta["status"], meta["alerts"] = "inactive", "off"
+				meta["status"] = "inactive"
+				if user != rootUser { // CIS: root should have no keys, even inactive ones
+					meta["alerts"] = "off"
+				}
 			}
+			// The creation/rotation time is part of the identity: a mute or
+			// owner set on one key never covers a new key in the same slot.
 			records = append(records, checker.ExpiryRecord{
-				Source: "aws://iam/" + account + "/user/" + user + "/" + p, Name: user + " · key " + strconv.Itoa(slot),
+				Source: "aws://iam/" + account + "/user/" + user + "/" + p + "@" + rot.UTC().Format(time.RFC3339), Name: user + " · key " + strconv.Itoa(slot),
 				Kind: "access_key", ExpiresAt: exp.UTC(), Metadata: meta,
 			})
 		}
