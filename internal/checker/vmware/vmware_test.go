@@ -108,8 +108,9 @@ func TestCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	recs, err := c.Check(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	// The disconnected host is still tried: its failure is reported.
+	if err == nil || !strings.Contains(err.Error(), "esx-down.example") {
+		t.Fatalf("unreachable host not reported: %v", err)
 	}
 	got := map[string]string{}
 	for _, r := range recs {
@@ -131,7 +132,12 @@ func TestCheck(t *testing.T) {
 		}
 	}
 	if len(got) != len(want) {
-		t.Fatalf("perpetual licence or disconnected host reported: %v", got)
+		t.Fatalf("perpetual licence reported: %v", got)
+	}
+	for _, r := range recs {
+		if r.Metadata["host"] != "" && r.Metadata["verified"] != "true" {
+			t.Fatalf("ESXi verification not recorded: %+v", r)
+		}
 	}
 	for _, b := range f.soapBodies {
 		if strings.Contains(b, "s3cr<t") {
@@ -162,5 +168,34 @@ func TestConfig(t *testing.T) {
 		if c.Validate() == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+}
+
+// Leaf chosen by role, not position; ESXi self-signed certificate still
+// read (verified=false).
+func TestLeafOfAndSelfSigned(t *testing.T) {
+	leafPEM := pemCert(t, "leaf", time.Now().Add(24*time.Hour))
+	b, _ := pem.Decode([]byte(leafPEM))
+	c, _ := x509.ParseCertificate(b.Bytes)
+	if c.IsCA {
+		// pemCert makes a plain certificate; a CA would set IsCA
+		t.Skip()
+	}
+	got, err := leafOf([]string{leafPEM})
+	if err != nil || got.Subject.CommonName != "leaf" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	f := newFakeVC(t, time.Now().Add(time.Hour), time.Now().Add(time.Hour))
+	dir := t.TempDir()
+	pw := filepath.Join(dir, "pw")
+	os.WriteFile(pw, []byte("s3cr<t"), 0o600)
+	other := filepath.Join(dir, "other.pem")
+	os.WriteFile(other, []byte(pemCert(t, "unrelated CA", time.Now().Add(time.Hour))), 0o600)
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(f.esxi.URL, "https://"))
+	vc, _ := New(Config{URL: f.srv.URL, Username: "radar@vsphere.local", PasswordFile: pw, CAFile: other, esxiPort: port})
+	vc.http = f.srv.Client() // vCenter itself trusted for this test
+	recs, _ := vc.esxi(context.Background(), map[string]string{"vmware-api-session-id": "sess-1"})
+	if len(recs) != 1 || recs[0].Metadata["verified"] != "false" {
+		t.Fatalf("untrusted ESXi certificate not read: %+v", recs)
 	}
 }

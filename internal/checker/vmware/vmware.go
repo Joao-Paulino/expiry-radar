@@ -21,6 +21,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -108,17 +109,41 @@ func (c *Checker) call(ctx context.Context, method, path string, hdr map[string]
 	return data, resp.Header, nil
 }
 
-func leafOf(chain []string) (*x509.Certificate, error) {
+func parseChain(chain []string) []*x509.Certificate {
+	var out []*x509.Certificate
 	for _, p := range chain {
-		b, _ := pem.Decode([]byte(p))
-		if b == nil {
-			continue
-		}
-		if c, err := x509.ParseCertificate(b.Bytes); err == nil {
-			return c, nil
+		rest := []byte(p)
+		for {
+			var b *pem.Block
+			b, rest = pem.Decode(rest)
+			if b == nil {
+				break
+			}
+			if c, err := x509.ParseCertificate(b.Bytes); err == nil {
+				out = append(out, c)
+			}
 		}
 	}
-	return nil, errors.New("no certificate in chain")
+	return out
+}
+
+// leafOf picks the non-CA certificate of a chain (order is not
+// guaranteed), or the one expiring first.
+func leafOf(chain []string) (*x509.Certificate, error) {
+	certs := parseChain(chain)
+	if len(certs) == 0 {
+		return nil, errors.New("no certificate in chain")
+	}
+	best := certs[0]
+	for _, c := range certs {
+		if !c.IsCA {
+			return c, nil
+		}
+		if c.NotAfter.Before(best.NotAfter) {
+			best = c
+		}
+	}
+	return best, nil
 }
 
 func (c *Checker) rec(name, kind, path string, cert *x509.Certificate, meta map[string]string) checker.ExpiryRecord {
@@ -167,12 +192,12 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 				Chain []string `json:"cert_chain"`
 			} `json:"active_cert_chain"`
 		}
-		if err := json.Unmarshal(data, &r); err == nil {
-			if cert, err := leafOf(r.Active.Chain); err == nil {
-				records = append(records, c.rec("vCenter STS signing", "certificate", "vcenter/sts-signing", cert, nil))
-			} else {
-				errs = append(errs, fmt.Errorf("STS signing certificate: %w", err))
-			}
+		if err := json.Unmarshal(data, &r); err != nil {
+			errs = append(errs, fmt.Errorf("STS signing certificate: %w", err))
+		} else if cert, err := leafOf(r.Active.Chain); err == nil {
+			records = append(records, c.rec("vCenter STS signing", "certificate", "vcenter/sts-signing", cert, nil))
+		} else {
+			errs = append(errs, fmt.Errorf("STS signing certificate: %w", err))
 		}
 	}
 	// Trusted root CAs.
@@ -182,7 +207,9 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 		var ids []struct {
 			Chain string `json:"chain"`
 		}
-		json.Unmarshal(data, &ids)
+		if err := json.Unmarshal(data, &ids); err != nil {
+			errs = append(errs, fmt.Errorf("trusted roots: %w", err))
+		}
 		for _, id := range ids {
 			d, _, err := c.call(ctx, http.MethodGet, "/api/vcenter/certificate-management/vcenter/trusted-root-chains/"+url.PathEscape(id.Chain), auth, nil)
 			if err != nil {
@@ -194,9 +221,20 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 					Chain []string `json:"cert_chain"`
 				} `json:"cert_chain"`
 			}
-			json.Unmarshal(d, &r)
-			if cert, err := leafOf(r.CertChain.Chain); err == nil {
-				records = append(records, c.rec(cert.Subject.CommonName, "ca_certificate", "trusted-root/"+id.Chain, cert, nil))
+			if err := json.Unmarshal(d, &r); err != nil {
+				errs = append(errs, fmt.Errorf("trusted root %s: %w", id.Chain, err))
+				continue
+			}
+			certs := parseChain(r.CertChain.Chain)
+			if len(certs) == 0 {
+				errs = append(errs, fmt.Errorf("trusted root %s: no certificate", id.Chain))
+			}
+			for i, cert := range certs { // a chain may hold intermediates too
+				path := "trusted-root/" + id.Chain
+				if i > 0 {
+					path += "/" + strconv.Itoa(i)
+				}
+				records = append(records, c.rec(cert.Subject.CommonName, "ca_certificate", path, cert, nil))
 			}
 		}
 	}
@@ -218,7 +256,9 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 }
 
 // esxi lists the hosts known to vCenter and reads each one's TLS
-// certificate (disconnected hosts are skipped).
+// certificate. Only the date is read (nothing is sent), so the handshake
+// does not require trust; whether the certificate verifies against
+// ca_file is recorded in metadata. Unreachable hosts are errors.
 func (c *Checker) esxi(ctx context.Context, auth map[string]string) ([]checker.ExpiryRecord, error) {
 	data, _, err := c.call(ctx, http.MethodGet, "/api/vcenter/host", auth, nil)
 	if err != nil {
@@ -238,22 +278,28 @@ func (c *Checker) esxi(ctx context.Context, auth map[string]string) ([]checker.E
 	var out []checker.ExpiryRecord
 	var errs []error
 	for _, h := range hosts {
-		if h.ConnectionState != "" && h.ConnectionState != "CONNECTED" {
-			continue
-		}
 		tc := c.tls.Clone()
 		tc.ServerName = h.Name
+		tc.InsecureSkipVerify = true // date only; verification below
 		d := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 10 * time.Second}, Config: tc}
 		conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(h.Name, port))
 		if err != nil {
-			errs = append(errs, fmt.Errorf("ESXi %s: %w", h.Name, err))
+			errs = append(errs, fmt.Errorf("ESXi %s (%s): %w", h.Name, strings.ToLower(h.ConnectionState), err))
 			continue
 		}
 		cs := conn.(*tls.Conn).ConnectionState()
 		conn.Close()
-		if len(cs.PeerCertificates) > 0 {
-			out = append(out, c.rec(h.Name, "certificate", "esxi/"+h.Name, cs.PeerCertificates[0], map[string]string{"host": h.Name}))
+		if len(cs.PeerCertificates) == 0 {
+			continue
 		}
+		leaf := cs.PeerCertificates[0]
+		inter := x509.NewCertPool()
+		for _, ic := range cs.PeerCertificates[1:] {
+			inter.AddCert(ic)
+		}
+		_, verr := leaf.Verify(x509.VerifyOptions{Roots: c.tls.RootCAs, Intermediates: inter, DNSName: h.Name})
+		out = append(out, c.rec(h.Name, "certificate", "esxi/"+h.Name, leaf, map[string]string{"host": h.Name,
+			"verified": strconv.FormatBool(verr == nil), "connection_state": strings.ToLower(h.ConnectionState)}))
 	}
 	return out, errors.Join(errs...)
 }
@@ -264,7 +310,7 @@ func (c *Checker) esxi(ctx context.Context, auth map[string]string) ([]checker.E
 func (c *Checker) licenses(ctx context.Context, password string) ([]checker.ExpiryRecord, error) {
 	soap := func(body string) ([]byte, error) {
 		env := `<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><soapenv:Body>` + body + `</soapenv:Body></soapenv:Envelope>`
-		data, _, err := c.call(ctx, http.MethodPost, "/sdk", map[string]string{"Content-Type": "text/xml; charset=utf-8", "SOAPAction": "urn:vim25/7.0"}, []byte(env))
+		data, _, err := c.call(ctx, http.MethodPost, "/sdk", map[string]string{"Content-Type": "text/xml; charset=utf-8", "SOAPAction": "urn:vim25/6.7"}, []byte(env))
 		return data, err
 	}
 	data, err := soap(`<RetrieveServiceContent xmlns="urn:vim25"><_this type="ServiceInstance">ServiceInstance</_this></RetrieveServiceContent>`)
@@ -305,6 +351,7 @@ func (c *Checker) licenses(ctx context.Context, password string) ([]checker.Expi
 		return nil, err
 	}
 	var out []checker.ExpiryRecord
+	var bad []string
 	for _, l := range r.Infos {
 		var exp string
 		for _, p := range l.Props {
@@ -317,10 +364,14 @@ func (c *Checker) licenses(ctx context.Context, password string) ([]checker.Expi
 		}
 		t, err := time.Parse(time.RFC3339Nano, exp)
 		if err != nil {
-			return out, fmt.Errorf("licence ...%s: unreadable expirationDate", lastN(l.Key, 5))
+			bad = append(bad, "…"+lastN(l.Key, 5))
+			continue
 		}
 		out = append(out, checker.ExpiryRecord{Source: "vmware://" + c.host() + "/license/" + lastN(l.Key, 5), Name: l.Name + " (…" + lastN(l.Key, 5) + ")",
 			Kind: "license", ExpiresAt: t.UTC(), Metadata: map[string]string{"edition": l.EditionKey}})
+	}
+	if len(bad) > 0 {
+		return out, fmt.Errorf("unreadable expirationDate on %s", strings.Join(bad, ", "))
 	}
 	return out, nil
 }

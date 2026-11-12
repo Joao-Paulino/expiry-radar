@@ -630,8 +630,8 @@ Certificados TLS e de **assinatura STS** do vCenter (quando expira, nenhum login
 }
 ```
 
-vSphere has no password-less API login: use a dedicated **read-only** account (global Read-only role; certificate reads may also need *Certificate Management* read privileges), password file `chmod 600`. `ca_file` = the VMCA root (download from `https://<vcenter>/certs/download.zip`).
-O vSphere não tem login de API sem password: usa uma conta **só de leitura** dedicada (role global Read-only; ler certificados pode precisar também de privilégios de leitura de *Certificate Management*), ficheiro da password `chmod 600`. `ca_file` = a raiz VMCA (descarrega de `https://<vcenter>/certs/download.zip`).
+ESXi certificates are read even when not trusted (only the date; `verified` in metadata says whether they chain to `ca_file`); hosts vCenter knows but the agent cannot reach are reported as errors. vSphere has no password-less API login: use a dedicated **read-only** account (global Read-only role; certificate reads may also need *Certificate Management* read privileges), password file `chmod 600`. `ca_file` = the VMCA root (download from `https://<vcenter>/certs/download.zip`).
+Os certificados ESXi são lidos mesmo sem confiança (só a data; `verified` nos metadados diz se encadeiam na `ca_file`); hosts que o vCenter conhece mas o agente não alcança aparecem como erro. O vSphere não tem login de API sem password: usa uma conta **só de leitura** dedicada (role global Read-only; ler certificados pode precisar também de privilégios de leitura de *Certificate Management*), ficheiro da password `chmod 600`. `ca_file` = a raiz VMCA (descarrega de `https://<vcenter>/certs/download.zip`).
 
 ## ⚠️ Known limitations / Limitações conhecidas
 
@@ -650,7 +650,7 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 | ✅ | **M3** | Azure: Key Vault, App Registration credentials, managed certificates | Azure: Key Vault, credenciais de App Registrations, certificados geridos |
 | ✅ | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
 | ✅ | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
-| 🟡 | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
+| ✅ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
 | ⚪ | Later / Depois | Software licences, SaaS subscriptions, then OT/ICS | Licenças de software, subscrições SaaS e depois OT/ICS |
 
 ✅ done / concluído · 🟡 in progress / em curso · ⚪ planned / planeado
