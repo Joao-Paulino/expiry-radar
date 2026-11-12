@@ -126,6 +126,12 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 						errs = append(errs, fmt.Errorf("account %s acm %s: %w", t.account, region, err))
 					}
 				}
+			case "access_keys":
+				recs, err := c.listAccessKeys(ctx, cr, t.account)
+				records = append(records, recs...)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("account %s access keys: %w", t.account, err))
+				}
 			case "iam_server_certificates":
 				recs, err := c.listServerCertificates(ctx, cr, t.account)
 				records = append(records, recs...)
@@ -203,6 +209,19 @@ func (c *Checker) listACM(ctx context.Context, cr credentials, account, region s
 		next = out.NextToken
 	}
 	return records, errors.New("ListCertificates: more than 1000 pages")
+}
+
+// iamQuery sends a signed IAM Query API call (global, us-east-1).
+func (c *Checker) iamQuery(ctx context.Context, cr credentials, q url.Values) ([]byte, error) {
+	q.Set("Version", "2010-05-08")
+	return send(ctx, c.http, q.Get("Action"), func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ep.iam+"/?"+q.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		signV4(req, nil, cr, "us-east-1", "iam", time.Now())
+		return req, nil
+	})
 }
 
 // listServerCertificates pages through IAM ListServerCertificates

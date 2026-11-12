@@ -549,7 +549,7 @@ gh variable set AZURE_TEST_GRAPH -b 1
 ```
 </details>
 
-### 🟧 AWS (ACM, IAM server certificates)
+### 🟧 AWS (ACM, IAM server certificates, access keys)
 
 The agent can also check AWS: ACM certificates (issued, **imported** and **ACME** — the last two never renew on their own) and IAM server certificates, in several regions and accounts. Requests are signed with SigV4 by the agent itself (no AWS SDK). Static access keys are not supported, on purpose.
 O agente também pode verificar a AWS: certificados do ACM (emitidos, **importados** e **ACME** — os dois últimos nunca renovam sozinhos) e IAM server certificates, em várias regiões e contas. Os pedidos são assinados com SigV4 pelo próprio agente (sem SDK da AWS). Access keys estáticas não são suportadas, de propósito.
@@ -559,7 +559,8 @@ O agente também pode verificar a AWS: certificados do ACM (emitidos, **importad
   "auth": "instance_role",
   "regions": ["eu-west-1", "us-east-1"],
   "assume_roles": [{ "role_arn": "arn:aws:iam::222222222222:role/expiry-radar-read", "external_id": "optional" }],
-  "services": ["acm", "iam_server_certificates"]
+  "services": ["acm", "iam_server_certificates", "access_keys"],
+  "access_key_max_age_days": 90
 }
 ```
 
@@ -570,13 +571,15 @@ O agente também pode verificar a AWS: certificados do ACM (emitidos, **importad
 | 📜 `roles_anywhere` | On-premises servers: IAM Roles Anywhere with an X.509 certificate (`certificate_file` PEM with certificate, optional chain and RSA/ECDSA key; `trust_anchor_arn`, `profile_arn` in the same region, which is used; `role_arn`) | Servidores on-prem: IAM Roles Anywhere com certificado X.509 (`certificate_file` PEM com certificado, cadeia opcional e chave RSA/ECDSA; `trust_anchor_arn`, `profile_arn` na mesma região, que é a usada; `role_arn`) |
 | 🏢 Multi-account | `assume_roles`: a read-only role in each account (`sts:AssumeRole`, optional `external_id`); `skip_base_account: true` to check only those | `assume_roles`: uma role só de leitura em cada conta (`sts:AssumeRole`, `external_id` opcional); `skip_base_account: true` para verificar só essas |
 | 🌍 Regions | `regions` for ACM (only regions enabled in every account: a disabled one is reported as an error); IAM is global. `region` (STS) defaults to the first one. Standard `aws` partition only (not China / GovCloud / ISO yet). The host clock must be right (SigV4 allows 5 minutes) | `regions` para o ACM (só regiões ativas em todas as contas: uma desativada aparece como erro); o IAM é global. `region` (STS) é por omissão a primeira. Só a partição `aws` standard (ainda não China / GovCloud / ISO). O relógio do servidor tem de estar certo (o SigV4 tolera 5 minutos) |
+| 🔑 `access_keys` | From the IAM credential report (one per account; the keys are never seen). Access keys never expire: an active key is due `access_key_max_age_days` (default 90, CIS) after its last rotation. An active **root** key is due at once (root should have none). **Inactive** keys are listed as `inactive` and never alert: they cannot be used, but should be deleted | Do credential report do IAM (um por conta; as chaves nunca são vistas). As access keys não expiram: uma chave ativa vence `access_key_max_age_days` (por omissão 90, CIS) depois da última rotação. Uma chave **root** ativa vence logo (a root não devia ter nenhuma). Chaves **inativas** aparecem como `inactive` e nunca alertam: não podem ser usadas, mas devem ser apagadas |
 | 🚫 Skipped | ACM certificates pending validation (no date yet), revoked, failed, timed out or inactive. Expired ones keep alerting (they may still be served) | Certificados ACM à espera de validação (ainda sem data), revogados, falhados, expirados por timeout ou inativos. Os expirados continuam a alertar (podem ainda estar em uso) |
 
 Read-only policy / Policy só de leitura (in each account / em cada conta):
 
 ```json
 { "Version": "2012-10-17", "Statement": [{ "Effect": "Allow",
-  "Action": ["acm:ListCertificates", "iam:ListServerCertificates"], "Resource": "*" }] }
+  "Action": ["acm:ListCertificates", "iam:ListServerCertificates",
+             "iam:GenerateCredentialReport", "iam:GetCredentialReport"], "Resource": "*" }] }
 ```
 
 Multi-account / Multi-conta: the base role also needs `sts:AssumeRole` on the `assume_roles` ARNs; each target role trusts the base role (`"Principal": {"AWS": "<base role ARN>"}`, with an `sts:ExternalId` condition if you set `external_id`) / a role base precisa também de `sts:AssumeRole` sobre os ARNs de `assume_roles`; cada role de destino confia na role base (com a condição `sts:ExternalId` se definires `external_id`).

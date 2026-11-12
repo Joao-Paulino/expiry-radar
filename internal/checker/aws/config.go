@@ -28,6 +28,9 @@ type Config struct {
 	SkipBaseAccount bool         `json:"skip_base_account"`
 	// Services to check; default acm and iam_server_certificates.
 	Services []string `json:"services"`
+	// AccessKeyMaxAgeDays: an access key is due this many days after
+	// its last rotation (default 90, CIS AWS Foundations).
+	AccessKeyMaxAgeDays int `json:"access_key_max_age_days"`
 }
 
 var (
@@ -36,7 +39,7 @@ var (
 	regionRe  = regexp.MustCompile(`^(us|eu|ap|ca|sa|me|af|il|mx)-[a-z]+-\d$`)
 	roleARNRe = regexp.MustCompile(`^arn:aws:iam::\d{12}:role/[\w+=,.@/-]{1,512}$`)
 	raARNRe   = regexp.MustCompile(`^arn:aws:rolesanywhere:([a-z0-9-]+):\d{12}:(trust-anchor|profile)/[\w-]+$`)
-	services  = map[string]bool{"acm": true, "iam_server_certificates": true}
+	services  = map[string]bool{"acm": true, "iam_server_certificates": true, "access_keys": true}
 	regional  = map[string]bool{"acm": true}
 )
 
@@ -112,6 +115,9 @@ func (c *Config) Validate() error {
 		if !roleARNRe.MatchString(a.RoleARN) {
 			return fmt.Errorf("aws: invalid assume_roles role_arn %q", a.RoleARN)
 		}
+	}
+	if c.AccessKeyMaxAgeDays < 0 {
+		return errors.New("aws: access_key_max_age_days must not be negative")
 	}
 	if c.SkipBaseAccount && len(c.AssumeRoles) == 0 {
 		return errors.New("aws: skip_base_account needs assume_roles")
