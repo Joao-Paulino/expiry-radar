@@ -27,11 +27,15 @@ func managedCertsFake(t *testing.T) *fakeAzure {
 			"properties": map[string]any{"subjectName": "api.contoso.com", "canonicalName": "api.contoso.com", "hostNames": []string{"api.contoso.com"},
 				"expirationDate": soon, "thumbprint": "AB12"}},
 		{"id": sub + "/resourceGroups/rg-web/providers/Microsoft.Web/certificates/old", "name": "old",
-			"properties": map[string]any{"subjectName": "old.contoso.com", "expirationDate": "2025-01-01T00:00:00+00:00"}}, // long expired leftover
+			"properties": map[string]any{"subjectName": "old.contoso.com", "expirationDate": "2025-01-01T00:00:00+00:00"}}, // expired: may still be served
+		{"id": sub + "/resourceGroups/rg-web/providers/Microsoft.Web/certificates/kvbroken", "name": "kvbroken",
+			"properties": map[string]any{"subjectName": "kv.contoso.com", "keyVaultSecretStatus": "AzureServiceUnauthorizedToAccessKeyVault"}}, // no date yet
 	}
 	f.arm[sub+"/providers/Microsoft.CertificateRegistration/certificateOrders"] = []map[string]any{
 		{"id": sub + "/resourceGroups/rg-web/providers/Microsoft.CertificateRegistration/certificateOrders/wildcard", "name": "wildcard",
-			"properties": map[string]any{"distinguishedName": "CN=*.contoso.com", "expirationTime": "2027-06-01T00:00:00+00:00", "autoRenew": false, "status": "Issued"}},
+			"properties": map[string]any{"distinguishedName": "CN=*.contoso.com, O=Contoso", "expirationTime": "2027-06-01T00:00:00+00:00", "autoRenew": false, "status": "Issued"}},
+		{"id": sub + "/resourceGroups/rg-web/providers/Microsoft.CertificateRegistration/certificateOrders/cancelled", "name": "cancelled",
+			"properties": map[string]any{"distinguishedName": "CN=gone.contoso.com", "expirationTime": "2027-06-01T00:00:00+00:00", "status": "Canceled"}},
 	}
 	f.arm[sub+"/providers/Microsoft.Cdn/profiles"] = []map[string]any{
 		{"id": sub + "/resourceGroups/RG/providers/Microsoft.Cdn/profiles/profile1", "name": "profile1", "sku": map[string]any{"name": "Standard_AzureFrontDoor"}},
@@ -69,7 +73,7 @@ func TestCheck_ManagedCertificates(t *testing.T) {
 		if err := r.Validate(); err != nil {
 			t.Fatalf("invalid record %+v: %v", r, err)
 		}
-		if r.Kind != "certificate" || !strings.HasPrefix(r.Source, "azure://arm/subscriptions/") {
+		if r.Kind != "certificate" || !strings.HasPrefix(r.Source, "azure://arm/subscriptions/") || r.Source != strings.ToLower(r.Source) {
 			t.Fatalf("record %+v", r)
 		}
 		got[r.Metadata["service"]+"|"+r.Name] = r.Metadata
@@ -77,6 +81,7 @@ func TestCheck_ManagedCertificates(t *testing.T) {
 	}
 	want := []string{
 		"app_service|api.contoso.com",
+		"app_service|old.contoso.com",
 		"app_service_certificate_order|*.contoso.com",
 		"front_door|*.contoso.com",
 		"front_door|bar.contoso.com",
@@ -88,7 +93,7 @@ func TestCheck_ManagedCertificates(t *testing.T) {
 		}
 	}
 	if len(got) != len(want) {
-		t.Fatalf("want %d records (expired leftover, classic CDN, URL signing key and KV-only cert skipped), got %v", len(want), got)
+		t.Fatalf("want %d records (no-date and cancelled certificates, classic CDN, URL signing key and KV-only cert skipped), got %v", len(want), got)
 	}
 	if !exp["application_gateway|agw-prod/www-cert"].Equal(time.Date(2036, 11, 9, 0, 1, 26, 0, time.UTC)) {
 		t.Fatalf("App Gateway leaf expiry %v (CA certificate picked?)", exp["application_gateway|agw-prod/www-cert"])
@@ -111,8 +116,8 @@ func TestCheck_ManagedCertificatesPartialFailure(t *testing.T) {
 	f := managedCertsFake(t)
 	f.armFail = "/subscriptions/" + guid + "/providers/Microsoft.Network/applicationGateways"
 	recs, err := newTestChecker(t, f, Config{Subscriptions: []string{guid}, ManagedCertificates: true}).Check(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "applicationGateways") || len(recs) != 4 {
-		t.Fatalf("want 4 records and the App Gateway error, got %d, %v", len(recs), err)
+	if err == nil || !strings.Contains(err.Error(), "applicationGateways") || len(recs) != 5 {
+		t.Fatalf("want 5 records and the App Gateway error, got %d, %v", len(recs), err)
 	}
 }
 
@@ -126,5 +131,51 @@ func TestParsePublicCertData(t *testing.T) {
 		if _, err := leafFromPublicCertData(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
+	}
+}
+
+// A provider never registered in the subscription is an empty list, not
+// an error that would keep the checker incomplete for ever.
+func TestCheck_ManagedCertificatesUnregisteredProvider(t *testing.T) {
+	f := managedCertsFake(t)
+	f.armFail = "/subscriptions/" + guid + "/providers/Microsoft.CertificateRegistration/certificateOrders"
+	f.armFailBody = map[string]any{"error": map[string]any{"code": "MissingSubscriptionRegistration",
+		"message": "The subscription is not registered to use namespace 'Microsoft.CertificateRegistration'."}}
+	f.armFailStatus = 409
+	recs, err := newTestChecker(t, f, Config{Subscriptions: []string{guid}, ManagedCertificates: true}).Check(context.Background())
+	if err != nil || len(recs) != 5 {
+		t.Fatalf("got %d records, %v", len(recs), err)
+	}
+}
+
+// Resource IDs from responses build URLs: one that would leave the ARM
+// host or the subscription is refused (the token never follows it).
+func TestCheck_ManagedCertificatesHostileResourceID(t *testing.T) {
+	f := managedCertsFake(t)
+	sub := "/subscriptions/" + guid
+	f.arm[sub+"/providers/Microsoft.Cdn/profiles"] = []map[string]any{
+		{"id": ".evil.com/x", "name": "p", "sku": map[string]any{"name": "Standard_AzureFrontDoor"}},
+		{"id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/Microsoft.Cdn/profiles/other", "name": "o", "sku": map[string]any{"name": "Standard_AzureFrontDoor"}},
+		{"id": sub + "/resourceGroups/rg/providers/Microsoft.Cdn/profiles/p/../../x?y", "name": "q", "sku": map[string]any{"name": "Standard_AzureFrontDoor"}},
+	}
+	_, err := newTestChecker(t, f, Config{Subscriptions: []string{guid}, ManagedCertificates: true}).Check(context.Background())
+	if err == nil || strings.Count(err.Error(), "unexpected resource id") != 3 {
+		t.Fatalf("hostile ids not refused: %v", err)
+	}
+	for _, p := range f.paths {
+		if strings.Contains(p, "evil") || strings.Contains(p, "/profiles/other") || strings.Contains(p, "..") {
+			t.Fatalf("followed %q", p)
+		}
+	}
+}
+
+// Managed certificates alone need only Reader: Key Vaults are not
+// discovered unless asked for.
+func TestCheck_ManagedCertificatesWithoutVaultDiscovery(t *testing.T) {
+	f := managedCertsFake(t)
+	f.subs[guid] = []map[string]any{{"id": "/subscriptions/" + guid + "/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv-x", "name": "kv-x"}}
+	f.failVault = "kv-x"
+	if _, err := newTestChecker(t, f, Config{Subscriptions: []string{guid}, ManagedCertificates: true}).Check(context.Background()); err != nil {
+		t.Fatalf("vaults discovered without discover_key_vaults: %v", err)
 	}
 }

@@ -87,7 +87,7 @@ func TestCheck_Discovery(t *testing.T) {
 		{"id": "/subscriptions/" + guid + "/resourceGroups/rg-weu/providers/Microsoft.KeyVault/vaults/kv-weu", "name": "kv-weu", "location": "westeurope"},
 		{"id": "/subscriptions/" + guid + "/resourceGroups/rg-neu/providers/Microsoft.KeyVault/vaults/kv-neu", "name": "kv-neu", "location": "northeurope"},
 	}
-	recs, err := newTestChecker(t, f, Config{KeyVaults: []string{"KV-WEU"}, Subscriptions: []string{guid}}).Check(context.Background())
+	recs, err := newTestChecker(t, f, Config{KeyVaults: []string{"KV-WEU"}, Subscriptions: []string{guid}, DiscoverKeyVaults: true}).Check(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

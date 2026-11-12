@@ -25,29 +25,31 @@ import (
 // endpoints, ARM and Key Vault (under /kv/<name>/) and records every
 // request.
 type fakeAzure struct {
-	srv          *httptest.Server
-	mu           sync.Mutex
-	paths        []string
-	tokenCalls   int
-	lastForm     url.Values
-	lastHeaders  http.Header
-	certPub      *rsa.PublicKey
-	certDER      []byte
-	assertion    string // expected workload identity assertion
-	failToken    bool
-	arcKeyFile   string // realm returned in the Arc challenge
-	arcKey       string
-	vaults       map[string]map[string][]map[string]any // vault -> "certificates"/"secrets"/"keys" -> items
-	failVault    string
-	evilNextLink bool
-	subs         map[string][]map[string]any // subscription -> ARM resources
-	arcAuthSent  bool                        // an Authorization header reached the Arc endpoint
-	redirect     string                      // vault collection answered with a 307 to this path
-	graph        map[string][]map[string]any // "applications"/"servicePrincipals" -> objects
-	graphTokens  []string                    // bearer tokens seen on Graph requests
-	throttleOnce bool                        // next Graph request answers 429
-	arm          map[string][]map[string]any // ARM list path -> items (managed certificates)
-	armFail      string                      // ARM list path answering 403
+	srv           *httptest.Server
+	mu            sync.Mutex
+	paths         []string
+	tokenCalls    int
+	lastForm      url.Values
+	lastHeaders   http.Header
+	certPub       *rsa.PublicKey
+	certDER       []byte
+	assertion     string // expected workload identity assertion
+	failToken     bool
+	arcKeyFile    string // realm returned in the Arc challenge
+	arcKey        string
+	vaults        map[string]map[string][]map[string]any // vault -> "certificates"/"secrets"/"keys" -> items
+	failVault     string
+	evilNextLink  bool
+	subs          map[string][]map[string]any // subscription -> ARM resources
+	arcAuthSent   bool                        // an Authorization header reached the Arc endpoint
+	redirect      string                      // vault collection answered with a 307 to this path
+	graph         map[string][]map[string]any // "applications"/"servicePrincipals" -> objects
+	graphTokens   []string                    // bearer tokens seen on Graph requests
+	throttleOnce  bool                        // next Graph request answers 429
+	arm           map[string][]map[string]any // ARM list path -> items (managed certificates)
+	armFail       string                      // ARM list path answering an error
+	armFailBody   map[string]any              // default: 403 AuthorizationFailed
+	armFailStatus int
 }
 
 func newFake(t *testing.T) *fakeAzure {
@@ -143,6 +145,11 @@ func (f *fakeAzure) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(p, "/subscriptions/") && p == f.armFail {
+		if f.armFailBody != nil {
+			w.WriteHeader(f.armFailStatus)
+			reply(w, f.armFailBody)
+			return
+		}
 		w.WriteHeader(403)
 		reply(w, map[string]any{"error": map[string]any{"code": "AuthorizationFailed", "message": "no read on " + p}})
 		return

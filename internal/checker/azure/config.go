@@ -31,6 +31,9 @@ type Config struct {
 	// Front Door (Standard/Premium) and Application Gateway certificates
 	// in Subscriptions via ARM (Reader).
 	ManagedCertificates bool `json:"managed_certificates"`
+	// DiscoverKeyVaults lists every Key Vault in Subscriptions (then
+	// each needs Key Vault Reader); off, only KeyVaults are checked.
+	DiscoverKeyVaults bool `json:"discover_key_vaults"`
 }
 
 var (
@@ -72,11 +75,14 @@ func (c *Config) Validate() error {
 	if c.TenantID != "" && !tenantRe.MatchString(c.TenantID) {
 		return fmt.Errorf("azure: invalid tenant_id %q", c.TenantID)
 	}
-	if c.ManagedCertificates && len(c.Subscriptions) == 0 {
-		return errors.New("azure: managed_certificates needs subscriptions")
+	if (c.ManagedCertificates || c.DiscoverKeyVaults) && len(c.Subscriptions) == 0 {
+		return errors.New("azure: managed_certificates and discover_key_vaults need subscriptions")
 	}
-	if len(c.KeyVaults)+len(c.Subscriptions) == 0 && !c.AppRegistrations && !c.ServicePrincipals {
-		return errors.New("azure: set at least one of key_vaults, subscriptions, app_registrations or service_principals")
+	if len(c.Subscriptions) > 0 && !c.ManagedCertificates && !c.DiscoverKeyVaults {
+		return errors.New("azure: subscriptions are used by discover_key_vaults or managed_certificates; set one")
+	}
+	if len(c.KeyVaults) == 0 && !c.DiscoverKeyVaults && !c.ManagedCertificates && !c.AppRegistrations && !c.ServicePrincipals {
+		return errors.New("azure: set at least one of key_vaults, discover_key_vaults, managed_certificates, app_registrations or service_principals")
 	}
 	for _, v := range c.KeyVaults {
 		if !vaultNameRe.MatchString(v) {

@@ -21,7 +21,7 @@ func TestConfig_Validate(t *testing.T) {
 	if err := graphOnly.Validate(); err != nil {
 		t.Errorf("app_registrations only rejected: %v", err)
 	}
-	mi := Config{Auth: "managed_identity", Subscriptions: []string{guid}}
+	mi := Config{Auth: "managed_identity", Subscriptions: []string{guid}, DiscoverKeyVaults: true}
 	if err := mi.Validate(); err != nil {
 		t.Errorf("managed identity without tenant/client rejected: %v", err)
 	}
@@ -36,6 +36,8 @@ func TestConfig_Validate(t *testing.T) {
 		"nothing to check":         func(c *Config) { c.KeyVaults = nil; c.Subscriptions = nil },
 		"bad tenant":               func(c *Config) { c.TenantID = "x/../y" },
 		"managed certs, no subs":   func(c *Config) { c.KeyVaults = nil; c.Subscriptions = nil; c.ManagedCertificates = true },
+		"discovery, no subs":       func(c *Config) { c.Subscriptions = nil; c.DiscoverKeyVaults = true },
+		"subs used for nothing":    func(c *Config) { c.KeyVaults = nil; c.Subscriptions = []string{guid} },
 	}
 	for name, mutate := range cases {
 		c := base("certificate")

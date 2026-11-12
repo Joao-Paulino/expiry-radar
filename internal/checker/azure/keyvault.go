@@ -104,7 +104,7 @@ func sameOrigin(first, next string) error {
 		return fmt.Errorf("refused malformed nextLink")
 	}
 	if nu.Scheme != "https" || fu.Scheme != "https" || nu.User != nil || !strings.EqualFold(nu.Hostname(), fu.Hostname()) ||
-		port(nu) != port(fu) || nu.Path != fu.Path {
+		port(nu) != port(fu) || !strings.EqualFold(nu.Path, fu.Path) {
 		return fmt.Errorf("refused nextLink to another host or path (%s%s)", nu.Hostname(), nu.Path)
 	}
 	return nil
@@ -265,7 +265,7 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 			errs = append(errs, err)
 		}
 	}
-	if len(c.cfg.KeyVaults)+len(c.cfg.Subscriptions) == 0 {
+	if len(c.cfg.KeyVaults) == 0 && !c.cfg.DiscoverKeyVaults {
 		return records, errors.Join(errs...)
 	}
 	recs, err := c.checkKeyVaults(ctx, src)
@@ -287,6 +287,9 @@ func (c *Checker) checkKeyVaults(ctx context.Context, src tokenSource) ([]checke
 	}
 	var errs []error
 	for _, sub := range c.cfg.Subscriptions {
+		if !c.cfg.DiscoverKeyVaults {
+			break
+		}
 		found, err := c.discover(ctx, src, sub)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("subscription %s: %w", sub, err))
