@@ -634,6 +634,58 @@ Certificados TLS e de **assinatura STS** do vCenter (quando expira, nenhum login
 ESXi certificates are read even when not trusted (only the date; `verified` in metadata says whether they chain to `ca_file`); hosts vCenter knows but the agent cannot reach are reported as errors. vSphere has no password-less API login: use a dedicated **read-only** account (global Read-only role; certificate reads may also need *Certificate Management* read privileges), password file `chmod 600`. `ca_file` = the VMCA root (download from `https://<vcenter>/certs/download.zip`).
 Os certificados ESXi são lidos mesmo sem confiança (só a data; `verified` nos metadados diz se encadeiam na `ca_file`); hosts que o vCenter conhece mas o agente não alcança aparecem como erro. O vSphere não tem login de API sem password: usa uma conta **só de leitura** dedicada (role global Read-only; ler certificados pode precisar também de privilégios de leitura de *Certificate Management*), ficheiro da password `chmod 600`. `ca_file` = a raiz VMCA (descarrega de `https://<vcenter>/certs/download.zip`).
 
+### ⚙️ Run as a service / Correr como serviço
+
+**Windows** (PowerShell as Administrator / como Administrador). The installer checks the config, registers the service (automatic start, restart after 1 min on failure, Event Log source) and runs it as `NT AUTHORITY\LocalService`. Relative paths in the config are read from the config file's folder.
+O instalador valida a config, regista o serviço (arranque automático, reinício após 1 min em caso de falha, origem no Event Log) e corre-o como `NT AUTHORITY\LocalService`. Caminhos relativos na config contam a partir da pasta do ficheiro.
+
+```powershell
+cd C:\ExpiryRadar
+.\expiry-radar-collector-<version>-windows-amd64.exe install-service collector.json
+icacls C:\ExpiryRadar /grant "NT AUTHORITY\LocalService:(OI)(CI)M"
+Start-Service ExpiryRadarCollector
+# agent / agente: same, with install-service agent.json and service ExpiryRadarAgent
+.\expiry-radar-collector-<version>-windows-amd64.exe uninstall-service   # remove / remover
+```
+
+| | EN | PT |
+|---|---|---|
+| `--account` | `LocalSystem`, `NT AUTHORITY\NetworkService` or a gMSA (`DOMAIN\name$`) instead of LocalService; accounts with a password are refused. Use LocalSystem only when the agent must read files LocalService cannot | `LocalSystem`, `NT AUTHORITY\NetworkService` ou uma gMSA (`DOMÍNIO\nome$`) em vez de LocalService; contas com password são recusadas. Usa LocalSystem só se o agente tiver de ler ficheiros a que LocalService não chega |
+| Logs | Event Viewer → Windows Logs → Application, source `ExpiryRadarCollector` / `ExpiryRadarAgent` | Visualizador de Eventos → Registos do Windows → Aplicação, origem `ExpiryRadarCollector` / `ExpiryRadarAgent` |
+| Upgrade | `Stop-Service`, replace the `.exe` (keep the same file name or reinstall), `Start-Service` | `Stop-Service`, substituir o `.exe` (mesmo nome de ficheiro ou reinstalar), `Start-Service` |
+| Port | Agents on other machines need TCP 8443 open: `New-NetFirewallRule -DisplayName "Expiry Radar" -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow` | Agentes noutras máquinas precisam da porta TCP 8443 aberta (comando ao lado) |
+
+**Linux (systemd)**: `/etc/systemd/system/expiry-radar-collector.service` (agent: same with the agent binary and config / agente: igual com o binário e a config do agente):
+
+```ini
+[Unit]
+Description=Expiry Radar collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=expiry-radar
+ExecStart=/opt/expiry-radar/expiry-radar-collector /etc/expiry-radar/collector.json
+WorkingDirectory=/var/lib/expiry-radar
+Restart=on-failure
+RestartSec=60
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/expiry-radar
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin expiry-radar
+sudo install -d -o expiry-radar -m 700 /var/lib/expiry-radar      # db_path goes here / o db_path fica aqui
+sudo systemctl daemon-reload && sudo systemctl enable --now expiry-radar-collector
+journalctl -u expiry-radar-collector -f
+```
+
 ## ⚠️ Known limitations / Limitações conhecidas
 
 | EN | PT |

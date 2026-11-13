@@ -8,13 +8,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"log"
-	"os"
-	"time"
-
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/server"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
+	"github.com/Joao-Paulino/expiry-radar/internal/service"
+	"log"
+	"os"
+	"path/filepath"
+	"time"
 )
 
 // Config is the collector binary's config type, loaded from a JSON
@@ -22,7 +24,7 @@ import (
 type Config = server.Config
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  collector <config.json>\n  collector version\n  collector set-admin-password <config.json>\n  collector set-admin-totp <config.json>")
+	fmt.Fprintln(os.Stderr, "usage:\n  collector <config.json>\n  collector version\n  collector install-service <config.json> [--account NAME]\n  collector uninstall-service\n  collector set-admin-password <config.json>\n  collector set-admin-totp <config.json>")
 	os.Exit(2)
 }
 
@@ -32,6 +34,13 @@ func main() {
 	}
 	if len(os.Args) < 2 {
 		usage()
+	}
+	if handled, err := service.HandleCommand(os.Args, collectorService(), func(p string) error { _, err := loadConfig(p); return err }, os.Stdout); handled {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "collector: %s\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	switch os.Args[1] {
@@ -58,8 +67,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := server.Run(cfg); err != nil {
+	if service.IsService() {
+		// The SCM starts us in System32; relative paths in the config
+		// are meant from the config file's folder.
+		if err := os.Chdir(filepath.Dir(os.Args[1])); err != nil {
+			log.Printf("collector: %s", logging.Sanitize(err.Error()))
+			os.Exit(1)
+		}
+	}
+	err = service.Run(collectorService().Name, func(ctx context.Context) error {
+		cfg.Done = ctx.Done()
+		return server.Run(cfg)
+	})
+	if err != nil {
 		log.Printf("collector: %s", logging.Sanitize(err.Error()))
 		os.Exit(1)
 	}
+}
+
+// collectorService describes the collector's Windows service.
+func collectorService() service.Spec {
+	exe, _ := os.Executable()
+	return service.Spec{Name: "ExpiryRadarCollector", DisplayName: "Expiry Radar Collector",
+		Description: "Receives expiry reports from Expiry Radar agents, alerts and serves the dashboard.", Exe: exe}
 }
