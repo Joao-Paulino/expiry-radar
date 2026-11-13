@@ -9,14 +9,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
-	"time"
-
 	"github.com/Joao-Paulino/expiry-radar/internal/agent"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
 	awscheck "github.com/Joao-Paulino/expiry-radar/internal/checker/aws"
@@ -26,6 +18,13 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vmware"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
+	"github.com/Joao-Paulino/expiry-radar/internal/service"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 )
 
 // Config configures the agent binary, loaded from a JSON file given
@@ -219,7 +218,14 @@ func main() {
 		return
 	}
 	if len(os.Args) < 2 {
-		log.Fatal("usage: agent <config.json>")
+		log.Fatal("usage: agent <config.json> | version | install-service <config.json> [--account NAME] | uninstall-service")
+	}
+	if handled, err := service.HandleCommand(os.Args, agentService(), func(p string) error { _, err := loadConfig(p); return err }, os.Stdout); handled {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "agent: %s\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	cfg, err := loadConfig(os.Args[1])
@@ -228,11 +234,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	if err := run(ctx, cfg); err != nil {
+	if service.IsService() {
+		// The SCM starts us in System32; relative paths in the config
+		// are meant from the config file's folder.
+		if err := os.Chdir(filepath.Dir(os.Args[1])); err != nil {
+			log.Printf("agent: %s", logging.Sanitize(err.Error()))
+			os.Exit(1)
+		}
+	}
+	if err := service.Run(agentService().Name, func(ctx context.Context) error { return run(ctx, cfg) }); err != nil {
 		log.Printf("agent: %s", logging.Sanitize(err.Error()))
 		os.Exit(1)
 	}
+}
+
+// agentService describes the agent's Windows service.
+func agentService() service.Spec {
+	exe, _ := os.Executable()
+	return service.Spec{Name: "ExpiryRadarAgent", DisplayName: "Expiry Radar Agent",
+		Description: "Checks certificates, secrets, keys and licences for expiry and reports to the Expiry Radar collector.", Exe: exe}
 }
