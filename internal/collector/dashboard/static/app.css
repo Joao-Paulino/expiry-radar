@@ -139,8 +139,10 @@ tr.muted-row td { opacity: .6; }
 /* Agents */
 .agents { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .agent { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
-.agent header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.agent header strong { margin-right: auto; word-break: break-all; }
+.agent header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 10px; }
+.agent header strong { flex-basis: 100%; word-break: break-all; }
+.agent header .sub { margin-right: auto; }
+.agent header button { padding: 3px 8px; font-size: 12px; }
 .agent ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .agent li { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
 .agent li .err { flex-basis: 100%; color: var(--expired); font-size: 12px; word-break: break-word; }

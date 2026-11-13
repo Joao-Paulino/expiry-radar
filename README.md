@@ -148,6 +148,7 @@ go install github.com/Joao-Paulino/expiry-radar/cmd/agent@latest
 | `reminder_warning_hours` | Same for warnings (default `0` = never) | O mesmo para avisos (por omissão `0` = nunca) |
 | `checker_fail_threshold` | Consecutive failures before a checker alerts (default 3) | Falhas seguidas até um verificador alertar (por omissão 3) |
 | `agent_stale_hours` | Hours without a report before an agent alerts as silent (default 3). Keep it about 2× the longest agent `interval_seconds` | Horas sem reportar até um agente alertar como silencioso (por omissão 3). Mantém cerca de 2× o maior `interval_seconds` dos agentes |
+| `theme` | Dashboard colour scheme: `auto` (follow the OS, default), `dark` or `light`. Each browser can switch with the ☀/☾ button | Tema do painel: `auto` (segue o sistema, por omissão), `dark` ou `light`. Cada browser pode trocar com o botão ☀/☾ |
 | `slack_webhook_url` / `teams_webhook_url` / `webhook_url` | Incoming webhook URLs; leave empty to disable | URLs de webhook; vazio desliga |
 | `email` | SMTP settings. See [📧 Email](#-email). Empty `smtp_host` disables email | Definições SMTP. Ver [📧 Email](#-email). `smtp_host` vazio desliga o email |
 

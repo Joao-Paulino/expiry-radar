@@ -67,14 +67,23 @@ func severityOf(r store.StoredRecord, now time.Time) (sev string, days int, rel 
 	return sev, days, rel
 }
 
-// sortByExpiry orders soonest first; records without a date go last.
+// sortByExpiry orders soonest first; informational records (never
+// alerted) follow, and records without a date go last.
 func sortByExpiry(v []recordView) {
-	sort.SliceStable(v, func(i, j int) bool {
-		a, b := v[i].Record.ExpiresAt, v[j].Record.ExpiresAt
-		if a.IsZero() != b.IsZero() {
-			return b.IsZero()
+	rank := func(r recordView) int {
+		switch r.Severity {
+		case "unknown":
+			return 2
+		case "info":
+			return 1
 		}
-		return a.Before(b)
+		return 0
+	}
+	sort.SliceStable(v, func(i, j int) bool {
+		if ri, rj := rank(v[i]), rank(v[j]); ri != rj {
+			return ri < rj
+		}
+		return v[i].Record.ExpiresAt.Before(v[j].Record.ExpiresAt)
 	})
 }
 
