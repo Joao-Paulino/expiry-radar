@@ -69,11 +69,13 @@ func TestMux_List_SortedByExpiry(t *testing.T) {
 		rec("zero", "certificate", time.Time{}, nil),
 		rec("late", "certificate", now.Add(90*24*time.Hour), nil),
 		rec("soon", "certificate", now.Add(24*time.Hour), nil),
+		rec("info", "access_key", now.Add(-30*24*time.Hour), map[string]string{"alerts": "off"}),
 	}}
 	body := get(t, NewMux(st, &fakeRulesStore{}), "/")
-	s, l, z := strings.Index(body, `data-name="soon"`), strings.Index(body, `data-name="late"`), strings.Index(body, `data-name="zero"`)
-	if s < 0 || l < 0 || z < 0 || !(s < l && l < z) {
-		t.Fatalf("order soon=%d late=%d zero=%d", s, l, z)
+	// Informational keys never alert, so they follow everything that can.
+	s, l, i, z := strings.Index(body, `data-name="soon"`), strings.Index(body, `data-name="late"`), strings.Index(body, `data-name="info"`), strings.Index(body, `data-name="zero"`)
+	if s < 0 || l < 0 || i < 0 || z < 0 || !(s < l && l < i && i < z) {
+		t.Fatalf("order soon=%d late=%d info=%d zero=%d", s, l, i, z)
 	}
 }
 
