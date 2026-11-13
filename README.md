@@ -91,6 +91,9 @@ As imagens não têm `stty`, por isso o `set-admin-password` mostra a password e
 ### ⚙️ Install as a service / Instalar como serviço
 
 Collector and agent run as a service on both systems: automatic start, restart on failure, least-privileged account. Use one collector and point every agent at it (each collector has its own database).
+
+> 💡 **Tip / Dica:** collector and agent can run on the same machine. One agent can check the certificates of all your clients: list every domain in its `targets` and see them all in one dashboard.
+> O collector e o agente podem correr na mesma máquina. Um só agente pode verificar os certificados de todos os teus clientes: põe todos os domínios nos `targets` e vês tudo num só painel.
 O collector e o agente correm como serviço nos dois sistemas: arranque automático, reinício em caso de falha, conta com o mínimo de privilégios. Usa um só collector e aponta todos os agentes para ele (cada collector tem a sua base de dados).
 
 #### 🪟 Windows (PowerShell as Administrator / como Administrador)
