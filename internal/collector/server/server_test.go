@@ -153,6 +153,14 @@ func TestConfig_Validate_RejectsWeakTokens(t *testing.T) {
 		"empty admin token":  func(c *server.Config) { c.AdminTokens = []string{""} },
 		"short admin token":  func(c *server.Config) { c.AdminTokens = []string{"admin"} },
 		"admin reuses agent": func(c *server.Config) { c.AdminTokens = []string{strong} },
+		"unknown theme":      func(c *server.Config) { c.Theme = "blue" },
+	}
+	for _, ok := range []string{"", "auto", "dark", "light"} {
+		c := base
+		c.Theme = ok
+		if err := c.Validate(); err != nil {
+			t.Errorf("theme %q rejected: %v", ok, err)
+		}
 	}
 	for name, mutate := range cases {
 		c := base
@@ -236,6 +244,19 @@ func TestRun_SetsSecurityHeaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := resp.Header
+	const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+	if got := h.Get("Content-Security-Policy"); got != csp {
+		t.Errorf("CSP = %q", got)
+	}
+	// The stylesheet is public: the login page needs it before sign-in.
+	css, err := client.Get("https://" + addr + "/static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css.Body.Close()
+	if css.StatusCode != http.StatusOK || css.Header.Get("Content-Security-Policy") != csp {
+		t.Errorf("/static/app.css: %d %q", css.StatusCode, css.Header.Get("Content-Security-Policy"))
+	}
 	if h.Get("X-Frame-Options") != "DENY" || !strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") ||
 		!strings.HasPrefix(h.Get("Strict-Transport-Security"), "max-age=") || h.Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("missing security headers: %v", h)

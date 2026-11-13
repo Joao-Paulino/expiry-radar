@@ -1,31 +1,65 @@
 <!DOCTYPE html>
-<html>
-<head><title>Expiry Radar</title></head>
+<html lang="en" data-theme="{{.Theme}}">
+<head>{{template "head"}}<title>Expiry Radar</title></head>
 <body>
-<h1>Expiry Radar</h1>
-{{if .CSRF}}<form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit">Sign out / Sair</button></form>
-<form method="post" action="/sessions/revoke-all"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit" title="Ends every open dashboard session, including yours">Sign out all sessions / Terminar todas as sessões</button></form>{{end}}
-<table>
-<thead>
-<tr><th>Source</th><th>Name</th><th>Kind</th><th>Expires At</th><th>Reported By</th><th>Checked At</th><th>Status</th><th>Muted</th><th>Owner</th></tr>
-</thead>
+{{template "top" .}}
+<main>
+<section class="cards" aria-label="Summary">
+<button type="button" class="card expired" data-state="expired"><span class="n" data-count="expired">{{.Summary.Expired}}</span><span class="l">Expired / Expirados</span></button>
+<button type="button" class="card critical" data-state="critical"><span class="n" data-count="critical">{{.Summary.Critical}}</span><span class="l">Critical / Críticos</span></button>
+<button type="button" class="card warning" data-state="warning"><span class="n" data-count="warning">{{.Summary.Warning}}</span><span class="l">Warning / Aviso</span></button>
+<button type="button" class="card ok" data-state="ok"><span class="n" data-count="ok">{{.Summary.OK}}</span><span class="l">OK</span></button>
+</section>
+
+<div class="toolbar js-only">
+<input type="search" id="f-q" placeholder="Search name, source, owner… / Pesquisar…" aria-label="Search">
+<select id="f-kind" aria-label="Kind"><option value="">All kinds</option>{{range .Kinds}}<option>{{.}}</option>{{end}}</select>
+<select id="f-source" aria-label="Source"><option value="">All sources</option>{{range .Sources}}<option>{{.}}</option>{{end}}</select>
+<select id="f-state" aria-label="State"><option value="">All states</option><option value="expired">Expired</option><option value="critical">Critical</option><option value="warning">Warning</option><option value="ok">OK</option><option value="info">Informational</option><option value="unknown">No date</option></select>
+<span class="sub" id="shown"></span>
+</div>
+
+<div class="panel">
+<table id="records">
+<thead><tr>
+<th data-sort="days">State</th><th data-sort="name">Name</th><th data-sort="kind">Kind</th><th class="src" data-sort="source">Source</th>
+<th data-sort="days">Expires</th><th data-sort="owner">Owner</th><th class="checked">Checked</th><th><span class="sub">⋯</span></th>
+</tr></thead>
 <tbody>
-{{range .Records}}
-<tr>
-<td>{{.Record.Source}}</td>
-<td><a href="/history?source={{.Record.Source}}&name={{.Record.Name}}&kind={{.Record.Kind}}">{{.Record.Name}}</a></td>
-<td>{{.Record.Kind}}</td>
-<td>{{.Record.ExpiresAt}}</td>
-<td>{{.Record.ReportedBy}}</td>
-<td>{{.Record.CheckedAt}}</td>
-<td>{{.Record.Status}}</td>
-<td>{{.Muted}}</td>
-<td>{{.Owner}}</td>
+{{$csrf := .CSRF}}{{range .Records}}<tr data-name="{{.Record.Name}}" data-kind="{{.Record.Kind}}" data-source="{{.Record.Source}}" data-state="{{.Severity}}" data-owner="{{.Owner}}" data-days="{{if .ExpiresDate}}{{.Days}}{{end}}"{{if .Muted}} class="muted-row"{{end}}>
+<td class="nowrap"><span class="badge s-{{.Severity}}">{{.Relative}}</span>{{with .Record.Status}}<div class="sub">{{.}}</div>{{end}}</td>
+<td class="name"><a href="/history?source={{.Record.Source}}&amp;name={{.Record.Name}}&amp;kind={{.Record.Kind}}">{{.Record.Name}}</a>{{if .Muted}} <span class="tag" title="No alerts">muted</span>{{end}}</td>
+<td><span class="tag">{{.Record.Kind}}</span></td>
+<td class="src mono">{{.Record.Source}}</td>
+<td class="nowrap"><span title="{{.ExpiresFull}}">{{if .ExpiresDate}}{{.ExpiresDate}}{{else}}—{{end}}</span></td>
+<td>{{if .Owner}}{{.Owner}}{{else}}<span class="sub">—</span>{{end}}</td>
+<td class="checked sub nowrap">{{.CheckedAt}}<br>{{.Record.ReportedBy}}</td>
+<td class="actions"><details class="menu"><summary class="btn icon-btn" title="Mute / owner">⋯</summary>
+<div class="pop"><form class="rowform" method="post" action="/rules">{{if $csrf}}<input type="hidden" name="csrf_token" value="{{$csrf}}">{{end}}
+<input type="hidden" name="source" value="{{.Record.Source}}"><input type="hidden" name="name" value="{{.Record.Name}}"><input type="hidden" name="kind" value="{{.Record.Kind}}">
+<label><input type="checkbox" name="muted"{{if .Muted}} checked{{end}}> Mute alerts / Silenciar</label>
+<label>Owner <input type="text" name="owner" value="{{.Owner}}" placeholder="owner / dono"></label>
+<button type="submit" class="primary">Save / Guardar</button>
+<a class="btn" href="/history?source={{.Record.Source}}&amp;name={{.Record.Name}}&amp;kind={{.Record.Kind}}">History / Histórico</a>
+</form></div></details></td>
 </tr>
-{{end}}
+{{else}}<tr class="empty"><td colspan="8">Nothing reported yet. Start an agent pointing at this collector. / Ainda não há registos.</td></tr>
+{{end}}<tr class="empty" id="no-match" hidden><td colspan="8">No record matches the filters. / Nenhum registo corresponde aos filtros.</td></tr>
 </tbody>
 </table>
-<h2>Mute / assign owner</h2>
+</div>
+
+<h2>Agents &amp; checkers</h2>
+<div class="agents">
+{{range .Agents}}{{$agent := .Agent}}<article class="agent">
+<header><strong>{{.Agent}}</strong><span class="sub" title="Last report">{{.LastSeen}}</span>
+<form method="post" action="/agents/forget">{{if $csrf}}<input type="hidden" name="csrf_token" value="{{$csrf}}">{{end}}<input type="hidden" name="agent_id" value="{{.Agent}}"><button type="submit" class="danger" title="Remove a decommissioned agent and stop its alerts">Forget / Esquecer</button></form></header>
+<ul>{{range $.Checkers}}{{if eq .Agent $agent}}<li>{{if .Failures}}<span class="badge s-expired">{{.Checker}} · {{.Failures}} failures</span>{{else}}<span class="badge s-ok">{{.Checker}}</span>{{end}}<span class="sub">last success {{.LastSuccess}}</span>{{if .LastError}}<span class="err mono">{{.LastError}}</span>{{end}}</li>{{end}}{{end}}</ul>
+</article>
+{{else}}<p class="sub">No agent has reported yet. / Nenhum agente reportou ainda.</p>{{end}}
+</div>
+
+<details class="box"><summary>Rule for an item not listed / Regra para um item não listado</summary>
 <form method="post" action="/rules">
 {{if .CSRF}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
 <input type="text" name="source" placeholder="source" required>
@@ -33,20 +67,8 @@
 <input type="text" name="kind" placeholder="kind" required>
 <label><input type="checkbox" name="muted"> Muted</label>
 <input type="text" name="owner" placeholder="owner">
-<button type="submit">Save</button>
-</form>
-<p><a href="/export.json">Export JSON</a> | <a href="/export.csv">Export CSV</a></p>
-<h2>Agents</h2>
-<table>
-<tr><th>Agent</th><th>Last report</th><th></th></tr>
-{{$csrf := .CSRF}}{{range .Agents}}<tr><td>{{.Agent}}</td><td>{{.LastSeen}}</td><td><form method="post" action="/agents/forget">{{if $csrf}}<input type="hidden" name="csrf_token" value="{{$csrf}}">{{end}}<input type="hidden" name="agent_id" value="{{.Agent}}"><button type="submit" title="Remove a decommissioned agent and stop its alerts">Forget / Esquecer</button></form></td></tr>
-{{else}}<tr><td colspan="3">No agent has reported yet.</td></tr>{{end}}
-</table>
-<h3>Checkers</h3>
-<table>
-<tr><th>Agent</th><th>Checker</th><th>Last seen</th><th>Last success</th><th>Consecutive failures</th><th>Last error</th></tr>
-{{range .Checkers}}<tr><td>{{.Agent}}</td><td>{{.Checker}}</td><td>{{.LastSeen}}</td><td>{{.LastSuccess}}</td><td>{{.Failures}}</td><td>{{.LastError}}</td></tr>
-{{end}}
-</table>
+<button type="submit" class="primary">Save</button>
+</form></details>
+</main>
 </body>
 </html>
