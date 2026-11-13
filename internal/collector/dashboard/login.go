@@ -28,6 +28,16 @@ func clientAddress(r *http.Request) string {
 type loginView struct {
 	Error   string
 	Buttons []sso.Button
+	Theme   string
+}
+
+// renderLogin writes the login page with an optional error message.
+func renderLogin(w http.ResponseWriter, msg string, buttons []sso.Button, theme string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := templates.ExecuteTemplate(w, "login.html", loginView{Error: msg, Buttons: buttons, Theme: themeOrAuto(theme)}); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
 }
 
 // genericLoginError is shown for every failure, so the page never
@@ -40,14 +50,9 @@ const genericLoginError = "Invalid credentials. / Credenciais inválidas."
 // be wrapped in session.Middleware so it is CSRF-protected.
 // buttons are the SSO providers shown on the login page. revokeAll
 // ends every session and, like logout, must sit behind session.Middleware.
-func LoginHandlers(auth *admin.Authenticator, sessions *session.Store, buttons []sso.Button) (get, post, logout, revokeAll http.Handler) {
-	render := func(w http.ResponseWriter, msg string) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		if err := templates.ExecuteTemplate(w, "login.html", loginView{Error: msg, Buttons: buttons}); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-		}
-	}
+func LoginHandlers(auth *admin.Authenticator, sessions *session.Store, buttons []sso.Button, opts ...Options) (get, post, logout, revokeAll http.Handler) {
+	theme := optionsOf(opts).Theme
+	render := func(w http.ResponseWriter, msg string) { renderLogin(w, msg, buttons, theme) }
 
 	throttle := admin.NewThrottle(PerAddressLimit, 15*time.Minute)
 

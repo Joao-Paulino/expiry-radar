@@ -7,6 +7,7 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/export"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/rules"
@@ -17,14 +18,20 @@ import (
 //go:embed templates/*.html
 var templatesFS embed.FS
 
-var templates = template.Must(template.ParseFS(templatesFS, "templates/*.html"))
+var templates = template.Must(template.New("").Funcs(template.FuncMap{"assetVersion": assetVersion}).ParseFS(templatesFS, "templates/*.html"))
 
 // recordView pairs a StoredRecord with its mute/owner rule state for
 // rendering in the list view.
 type recordView struct {
-	Record store.StoredRecord
-	Muted  bool
-	Owner  string
+	Record      store.StoredRecord
+	Muted       bool
+	Owner       string
+	Severity    string // expired, critical, warning, ok, info, unknown
+	Days        int
+	Relative    string
+	ExpiresDate string // 2006-01-02, empty when unknown
+	ExpiresFull string // RFC 3339 UTC, for the tooltip
+	CheckedAt   string
 }
 
 // listView is the list page model: the records plus the CSRF token of
@@ -34,6 +41,10 @@ type listView struct {
 	Agents   []agentView
 	Checkers []checkerView
 	CSRF     string
+	Theme    string
+	Summary  summary
+	Kinds    []string
+	Sources  []string
 }
 
 // agentView is one agent and when it last pushed a batch.
@@ -53,11 +64,14 @@ type historyView struct {
 	Source  string
 	Name    string
 	Kind    string
-	Records []store.StoredRecord
+	Records []recordView
+	Theme   string
+	CSRF    string
 }
 
 // NewMux returns an http.ServeMux serving the Collector's dashboard.
-func NewMux(st store.Store, rs rules.Store) *http.ServeMux {
+func NewMux(st store.Store, rs rules.Store, opts ...Options) *http.ServeMux {
+	theme := themeOrAuto(optionsOf(opts).Theme)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
@@ -68,9 +82,23 @@ func NewMux(st store.Store, rs rules.Store) *http.ServeMux {
 			return
 		}
 
+		now := time.Now()
 		views := make([]recordView, 0, len(records))
+		var sum summary
+		var kinds, sources []string
 		for _, rec := range records {
-			view := recordView{Record: rec}
+			view := newRecordView(rec, now)
+			kinds, sources = append(kinds, rec.Kind), append(sources, rec.Source)
+			switch view.Severity {
+			case "expired":
+				sum.Expired++
+			case "critical":
+				sum.Critical++
+			case "warning":
+				sum.Warning++
+			case "ok":
+				sum.OK++
+			}
 			rule, found, err := rs.Get(ctx, rec.Source, rec.Name, rec.Kind)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -108,7 +136,10 @@ func NewMux(st store.Store, rs rules.Store) *http.ServeMux {
 			checkers = append(checkers, a)
 		}
 
-		if err := templates.ExecuteTemplate(w, "list.html", listView{Records: views, Agents: agents, Checkers: checkers, CSRF: session.CSRFToken(ctx)}); err != nil {
+		sortByExpiry(views)
+		page := listView{Records: views, Agents: agents, Checkers: checkers, CSRF: session.CSRFToken(ctx),
+			Theme: theme, Summary: sum, Kinds: uniqueSorted(kinds), Sources: uniqueSorted(sources)}
+		if err := templates.ExecuteTemplate(w, "list.html", page); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -138,7 +169,12 @@ func NewMux(st store.Store, rs rules.Store) *http.ServeMux {
 			return
 		}
 
-		view := historyView{Source: source, Name: name, Kind: kind, Records: records}
+		now := time.Now()
+		rows := make([]recordView, 0, len(records))
+		for _, r := range records {
+			rows = append(rows, newRecordView(r, now))
+		}
+		view := historyView{Source: source, Name: name, Kind: kind, Records: rows, Theme: theme, CSRF: session.CSRFToken(r.Context())}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := templates.ExecuteTemplate(w, "history.html", view); err != nil {
@@ -198,4 +234,15 @@ func NewMux(st store.Store, rs rules.Store) *http.ServeMux {
 	})
 
 	return mux
+}
+
+// newRecordView fills the display fields of a record.
+func newRecordView(rec store.StoredRecord, now time.Time) recordView {
+	v := recordView{Record: rec, CheckedAt: rec.CheckedAt.UTC().Format("2006-01-02 15:04 UTC")}
+	v.Severity, v.Days, v.Relative = severityOf(rec, now)
+	if !rec.ExpiresAt.IsZero() {
+		v.ExpiresDate = rec.ExpiresAt.UTC().Format("2006-01-02")
+		v.ExpiresFull = rec.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	return v
 }

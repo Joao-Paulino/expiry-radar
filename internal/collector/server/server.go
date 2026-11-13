@@ -62,8 +62,11 @@ type Config struct {
 	SlackWebhookURL string                `json:"slack_webhook_url"`
 	TeamsWebhookURL string                `json:"teams_webhook_url"`
 	Email           notifiers.EmailConfig `json:"email"`
-	TLSCertFile     string                `json:"tls_cert_file"`
-	TLSKeyFile      string                `json:"tls_key_file"`
+	// Theme is the dashboard's default colour scheme: "auto" (follow
+	// the OS, the default), "dark" or "light"; each browser may override it.
+	Theme       string `json:"theme"`
+	TLSCertFile string `json:"tls_cert_file"`
+	TLSKeyFile  string `json:"tls_key_file"`
 
 	// Ready, if non-nil, receives the actual bound address once the
 	// listener starts, letting tests use ListenAddr "host:0".
@@ -129,6 +132,11 @@ func (c Config) Validate() error {
 	}
 	if c.ListenAddr == "" {
 		return fmt.Errorf("server: Config.ListenAddr is required")
+	}
+	switch c.Theme {
+	case "", "auto", "dark", "light":
+	default:
+		return fmt.Errorf("server: theme must be auto, dark or light")
 	}
 	if len(c.AuthTokens) == 0 {
 		return fmt.Errorf("server: Config.AuthTokens must have at least one token")
@@ -281,13 +289,14 @@ func runAlertLoop(engine *alert.Engine, state *alert.StateStore, ns []notifiers.
 	}
 }
 
-// securityHeaders forbids framing (clickjacking), MIME sniffing and,
+// securityHeaders allows only the Collector's own scripts, styles and
+// form targets (CSP), and forbids framing (clickjacking), MIME sniffing and,
 // since the Collector only serves HTTPS, pins browsers to HTTPS.
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Frame-Options", "DENY")
-		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Strict-Transport-Security", "max-age=31536000")
 		h.Set("Referrer-Policy", "no-referrer")
@@ -342,7 +351,7 @@ func Run(cfg Config) error {
 	st := store.NewSQLite(database)
 	rs := rules.NewSQLite(database)
 
-	dashboardMux := dashboard.NewMux(st, rs)
+	dashboardMux := dashboard.NewMux(st, rs, dashboard.Options{Theme: cfg.Theme})
 
 	sessions := &session.Store{DB: database, Now: time.Now}
 	authenticator := &admin.Authenticator{Store: &admin.Store{DB: database}, Now: time.Now}
@@ -351,9 +360,10 @@ func Run(cfg Config) error {
 		Flows: &sso.FlowStore{DB: database, Now: time.Now}, SessionLifetime: cfg.SSOSessionLifetime(),
 		HTTPClient: &http.Client{Timeout: 15 * time.Second}, // discovery, token and signing-key requests
 	}
-	loginGet, loginPost, logout, revokeAll := dashboard.LoginHandlers(authenticator, sessions, ssoHandlers.Buttons())
+	loginGet, loginPost, logout, revokeAll := dashboard.LoginHandlers(authenticator, sessions, ssoHandlers.Buttons(), dashboard.Options{Theme: cfg.Theme})
 
 	mux := http.NewServeMux()
+	mux.Handle("GET /static/", dashboard.StaticHandler())
 	mux.Handle("GET /login", loginGet)
 	mux.Handle("POST /login", loginPost)
 	mux.Handle("POST /logout", session.Middleware(sessions, cfg.AdminTokens, logout))

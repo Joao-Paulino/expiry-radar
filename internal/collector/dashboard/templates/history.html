@@ -1,22 +1,26 @@
 <!DOCTYPE html>
-<html>
-<head><title>Expiry Radar - History</title></head>
+<html lang="en" data-theme="{{.Theme}}">
+<head>{{template "head"}}<title>Expiry Radar · History</title></head>
 <body>
-<h1>History: {{.Source}} / {{.Name}} / {{.Kind}}</h1>
-<p><a href="/">Back</a></p>
+{{template "top" .}}
+<main>
+<p><a href="/">← Back / Voltar</a></p>
+<h1>{{.Name}}</h1>
+<p><span class="tag">{{.Kind}}</span> <span class="mono sub">{{.Source}}</span></p>
+<div class="panel">
 <table>
-<thead>
-<tr><th>Expires At</th><th>Reported By</th><th>Checked At</th></tr>
-</thead>
+<thead><tr><th>State</th><th>Expires</th><th>Reported by</th><th>Checked</th></tr></thead>
 <tbody>
-{{range .Records}}
-<tr>
-<td>{{.ExpiresAt}}</td>
-<td>{{.ReportedBy}}</td>
-<td>{{.CheckedAt}}</td>
+{{range .Records}}<tr>
+<td class="nowrap"><span class="badge s-{{.Severity}}">{{.Relative}}</span></td>
+<td class="nowrap"><span title="{{.ExpiresFull}}">{{if .ExpiresDate}}{{.ExpiresDate}}{{else}}—{{end}}</span></td>
+<td>{{.Record.ReportedBy}}</td>
+<td class="sub nowrap">{{.CheckedAt}}</td>
 </tr>
-{{end}}
+{{else}}<tr class="empty"><td colspan="4">No history. / Sem histórico.</td></tr>{{end}}
 </tbody>
 </table>
+</div>
+</main>
 </body>
 </html>

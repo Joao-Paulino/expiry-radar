@@ -1,0 +1,17 @@
+{{define "head"}}<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="/static/app.css?v={{assetVersion}}">
+<script src="/static/app.js?v={{assetVersion}}"></script>{{end}}
+
+{{define "top"}}<header class="top">
+<a class="brand" href="/"><span class="logo" aria-hidden="true"></span>Expiry Radar</a>
+<button type="button" id="theme-toggle" class="icon-btn js-only" aria-label="Toggle theme / Mudar tema">☾</button>
+<details class="menu"><summary class="btn">Export ▾</summary>
+<div class="pop"><a class="btn" href="/export.csv">CSV</a><a class="btn" href="/export.json">JSON</a></div></details>
+{{if .CSRF}}<details class="menu"><summary class="btn">Account ▾</summary>
+<div class="pop">
+<form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit">Sign out / Sair</button></form>
+<form method="post" action="/sessions/revoke-all"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit" class="danger" title="Ends every open dashboard session, including yours">Sign out all sessions / Terminar todas as sessões</button></form>
+</div></details>{{end}}
+</header>{{end}}
