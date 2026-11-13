@@ -88,6 +88,100 @@ Full example / Exemplo completo: [`deploy/docker-compose.example.yml`](deploy/do
 The images have no `stty`, so `set-admin-password` shows the password while you type (it warns you).
 As imagens não têm `stty`, por isso o `set-admin-password` mostra a password enquanto escreves (e avisa).
 
+### ⚙️ Install as a service / Instalar como serviço
+
+Collector and agent run as a service on both systems: automatic start, restart on failure, least-privileged account. Use one collector and point every agent at it (each collector has its own database).
+O collector e o agente correm como serviço nos dois sistemas: arranque automático, reinício em caso de falha, conta com o mínimo de privilégios. Usa um só collector e aponta todos os agentes para ele (cada collector tem a sua base de dados).
+
+#### 🪟 Windows (PowerShell as Administrator / como Administrador)
+
+```powershell
+$v = "v0.7.0"   # latest release / último release
+$base = "https://github.com/Joao-Paulino/expiry-radar/releases/download/$v"
+New-Item -ItemType Directory C:\ExpiryRadar\collector, C:\ExpiryRadar\agent -Force | Out-Null
+
+# Collector
+cd C:\ExpiryRadar\collector
+Invoke-WebRequest "$base/expiry-radar-collector-$v-windows-amd64.exe" -OutFile collector.exe
+# put collector.json and the TLS certificate here / coloca aqui o collector.json e o certificado TLS
+.\collector.exe install-service collector.json
+icacls C:\ExpiryRadar\collector /grant "NT AUTHORITY\LocalService:(OI)(CI)M"
+Start-Service ExpiryRadarCollector
+New-NetFirewallRule -DisplayName "Expiry Radar 8443" -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow
+
+# Agent / Agente
+cd C:\ExpiryRadar\agent
+Invoke-WebRequest "$base/expiry-radar-agent-$v-windows-amd64.exe" -OutFile agent.exe
+# put agent.json here / coloca aqui o agent.json
+.\agent.exe install-service agent.json
+icacls C:\ExpiryRadar\agent /grant "NT AUTHORITY\LocalService:(OI)(CI)RX"
+Start-Service ExpiryRadarAgent
+
+Get-Service ExpiryRadar*
+```
+
+| | EN | PT |
+|---|---|---|
+| Account | `NT AUTHORITY\LocalService` by default. `install-service <config> --account NAME` takes `LocalSystem`, `NT AUTHORITY\NetworkService` or a gMSA (`DOMAIN\name$`); accounts with a password are refused | `NT AUTHORITY\LocalService` por omissão. `install-service <config> --account NOME` aceita `LocalSystem`, `NT AUTHORITY\NetworkService` ou uma gMSA (`DOMÍNIO\nome$`); contas com password são recusadas |
+| Paths | The config is checked before installing; relative paths in it are read from its folder | A config é validada antes de instalar; caminhos relativos contam a partir da sua pasta |
+| Logs | Event Viewer → Windows Logs → Application, source `ExpiryRadarCollector` / `ExpiryRadarAgent` | Visualizador de Eventos → Registos do Windows → Aplicação, origem `ExpiryRadarCollector` / `ExpiryRadarAgent` |
+| Restart | After 1 min on failure (3 times, counter reset daily) | Após 1 min em caso de falha (3 vezes, contador reiniciado diariamente) |
+| Upgrade | `Stop-Service`, replace the `.exe` (same file name), `Start-Service` | `Stop-Service`, substituir o `.exe` (mesmo nome), `Start-Service` |
+| Remove | `.\collector.exe uninstall-service` / `.\agent.exe uninstall-service` | Idem |
+
+#### 🐧 Linux (systemd)
+
+```bash
+v=v0.7.0   # latest release / último release
+base=https://github.com/Joao-Paulino/expiry-radar/releases/download/$v
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin expiry-radar
+sudo install -d /opt/expiry-radar /etc/expiry-radar
+sudo install -d -o expiry-radar -m 700 /var/lib/expiry-radar      # db_path goes here / o db_path fica aqui
+
+cd "$(mktemp -d)"
+curl -fLO $base/expiry-radar-collector-$v-linux-amd64
+curl -fLO $base/expiry-radar-agent-$v-linux-amd64
+curl -fLO $base/SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing                            # both must say OK / os dois têm de dar OK
+sudo install -m 755 expiry-radar-collector-$v-linux-amd64 /opt/expiry-radar/expiry-radar-collector
+sudo install -m 755 expiry-radar-agent-$v-linux-amd64 /opt/expiry-radar/expiry-radar-agent
+
+# configs: /etc/expiry-radar/collector.json and/e agent.json
+sudo chown root:expiry-radar /etc/expiry-radar/*.json && sudo chmod 640 /etc/expiry-radar/*.json
+
+for svc in collector agent; do
+sudo tee /etc/systemd/system/expiry-radar-$svc.service >/dev/null <<EOF
+[Unit]
+Description=Expiry Radar $svc
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=expiry-radar
+ExecStart=/opt/expiry-radar/expiry-radar-$svc /etc/expiry-radar/$svc.json
+WorkingDirectory=/var/lib/expiry-radar
+Restart=on-failure
+RestartSec=60
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/expiry-radar
+
+[Install]
+WantedBy=multi-user.target
+EOF
+done
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now expiry-radar-collector expiry-radar-agent
+systemctl status expiry-radar-collector expiry-radar-agent
+journalctl -u expiry-radar-agent -f
+```
+
+Only the services you need: on an agent-only host enable just `expiry-radar-agent`. Files the agent checks must be readable by the service account (`LocalService` / `expiry-radar`). On arm64 use the `-linux-arm64` binaries.
+Só os serviços de que precisas: numa máquina só com agente ativa apenas o `expiry-radar-agent`. Os ficheiros que o agente verifica têm de ser legíveis pela conta do serviço (`LocalService` / `expiry-radar`). Em arm64 usa os binários `-linux-arm64`.
+
 ## 🚀 Quick start / Início rápido
 
 Requires Go 1.25 or newer (releases are built with Go 1.26) · Requer Go 1.25 ou mais recente (as releases são compiladas com Go 1.26)
@@ -633,58 +727,6 @@ Certificados TLS e de **assinatura STS** do vCenter (quando expira, nenhum login
 
 ESXi certificates are read even when not trusted (only the date; `verified` in metadata says whether they chain to `ca_file`); hosts vCenter knows but the agent cannot reach are reported as errors. vSphere has no password-less API login: use a dedicated **read-only** account (global Read-only role; certificate reads may also need *Certificate Management* read privileges), password file `chmod 600`. `ca_file` = the VMCA root (download from `https://<vcenter>/certs/download.zip`).
 Os certificados ESXi são lidos mesmo sem confiança (só a data; `verified` nos metadados diz se encadeiam na `ca_file`); hosts que o vCenter conhece mas o agente não alcança aparecem como erro. O vSphere não tem login de API sem password: usa uma conta **só de leitura** dedicada (role global Read-only; ler certificados pode precisar também de privilégios de leitura de *Certificate Management*), ficheiro da password `chmod 600`. `ca_file` = a raiz VMCA (descarrega de `https://<vcenter>/certs/download.zip`).
-
-### ⚙️ Run as a service / Correr como serviço
-
-**Windows** (PowerShell as Administrator / como Administrador). The installer checks the config, registers the service (automatic start, restart after 1 min on failure, Event Log source) and runs it as `NT AUTHORITY\LocalService`. Relative paths in the config are read from the config file's folder.
-O instalador valida a config, regista o serviço (arranque automático, reinício após 1 min em caso de falha, origem no Event Log) e corre-o como `NT AUTHORITY\LocalService`. Caminhos relativos na config contam a partir da pasta do ficheiro.
-
-```powershell
-cd C:\ExpiryRadar
-.\expiry-radar-collector-<version>-windows-amd64.exe install-service collector.json
-icacls C:\ExpiryRadar /grant "NT AUTHORITY\LocalService:(OI)(CI)M"
-Start-Service ExpiryRadarCollector
-# agent / agente: same, with install-service agent.json and service ExpiryRadarAgent
-.\expiry-radar-collector-<version>-windows-amd64.exe uninstall-service   # remove / remover
-```
-
-| | EN | PT |
-|---|---|---|
-| `--account` | `LocalSystem`, `NT AUTHORITY\NetworkService` or a gMSA (`DOMAIN\name$`) instead of LocalService; accounts with a password are refused. Use LocalSystem only when the agent must read files LocalService cannot | `LocalSystem`, `NT AUTHORITY\NetworkService` ou uma gMSA (`DOMÍNIO\nome$`) em vez de LocalService; contas com password são recusadas. Usa LocalSystem só se o agente tiver de ler ficheiros a que LocalService não chega |
-| Logs | Event Viewer → Windows Logs → Application, source `ExpiryRadarCollector` / `ExpiryRadarAgent` | Visualizador de Eventos → Registos do Windows → Aplicação, origem `ExpiryRadarCollector` / `ExpiryRadarAgent` |
-| Upgrade | `Stop-Service`, replace the `.exe` (keep the same file name or reinstall), `Start-Service` | `Stop-Service`, substituir o `.exe` (mesmo nome de ficheiro ou reinstalar), `Start-Service` |
-| Port | Agents on other machines need TCP 8443 open: `New-NetFirewallRule -DisplayName "Expiry Radar" -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow` | Agentes noutras máquinas precisam da porta TCP 8443 aberta (comando ao lado) |
-
-**Linux (systemd)**: `/etc/systemd/system/expiry-radar-collector.service` (agent: same with the agent binary and config / agente: igual com o binário e a config do agente):
-
-```ini
-[Unit]
-Description=Expiry Radar collector
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=expiry-radar
-ExecStart=/opt/expiry-radar/expiry-radar-collector /etc/expiry-radar/collector.json
-WorkingDirectory=/var/lib/expiry-radar
-Restart=on-failure
-RestartSec=60
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-ReadWritePaths=/var/lib/expiry-radar
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin expiry-radar
-sudo install -d -o expiry-radar -m 700 /var/lib/expiry-radar      # db_path goes here / o db_path fica aqui
-sudo systemctl daemon-reload && sudo systemctl enable --now expiry-radar-collector
-journalctl -u expiry-radar-collector -f
-```
 
 ## ⚠️ Known limitations / Limitações conhecidas
 
