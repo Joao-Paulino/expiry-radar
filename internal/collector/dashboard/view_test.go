@@ -146,3 +146,22 @@ func TestStaticHandler(t *testing.T) {
 		t.Error("css content type")
 	}
 }
+
+// A checker whose agent has no agents row (TouchAgent failed, or an old
+// database) must still show, with its failures and the Forget button.
+func TestMux_List_OrphanCheckerShown(t *testing.T) {
+	st := &fakeStore{health: []store.CheckerHealth{{ReportedBy: "lost-agent", CheckerName: "aws", ConsecutiveFailures: 4, LastError: "denied", LastSeenAt: time.Now()}}}
+	body := get(t, NewMux(st, &fakeRulesStore{}), "/")
+	for _, want := range []string{"lost-agent", "aws · 4 failures", `name="agent_id" value="lost-agent"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+}
+
+func TestMux_List_FilterOptionsHaveValues(t *testing.T) {
+	st := &fakeStore{current: []store.StoredRecord{rec("a", "certificate", time.Now().Add(time.Hour), nil)}}
+	if body := get(t, NewMux(st, &fakeRulesStore{}), "/"); !strings.Contains(body, `<option value="certificate">`) || !strings.Contains(body, `<option value="src">`) {
+		t.Error("filter options need explicit values")
+	}
+}
