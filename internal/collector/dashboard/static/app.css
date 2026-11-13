@@ -89,6 +89,8 @@ details.menu > .pop .btn, details.menu > .pop button { width: 100%; justify-cont
   text-align: left; display: block; padding: 14px 16px; border-radius: 12px; background: var(--panel);
   border: 1px solid var(--border); box-shadow: var(--shadow); border-left: 5px solid var(--c);
 }
+.has-js .card { cursor: pointer; }
+.card { cursor: default; font: inherit; color: inherit; }
 .card .n { display: block; font-size: 28px; font-weight: 700; line-height: 1.1; color: var(--c); }
 .card .l { color: var(--muted); font-size: 13px; }
 .card.active { outline: 2px solid var(--c); }
@@ -96,11 +98,12 @@ details.menu > .pop .btn, details.menu > .pop button { width: 100%; justify-cont
 .card.warning { --c: var(--warning); } .card.ok { --c: var(--ok); }
 
 /* Toolbar */
-.toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.toolbar { display: none; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.has-js .toolbar { display: flex; }
 .toolbar input[type="search"] { flex: 1 1 260px; }
 
 /* Tables */
-.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); overflow-x: auto; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
 th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; background: var(--panel-2); white-space: nowrap; }

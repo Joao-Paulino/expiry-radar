@@ -11,10 +11,10 @@
 <button type="button" class="card ok" data-state="ok"><span class="n" data-count="ok">{{.Summary.OK}}</span><span class="l">OK</span></button>
 </section>
 
-<div class="toolbar js-only">
+<div class="toolbar">
 <input type="search" id="f-q" placeholder="Search name, source, owner… / Pesquisar…" aria-label="Search">
-<select id="f-kind" aria-label="Kind"><option value="">All kinds</option>{{range .Kinds}}<option>{{.}}</option>{{end}}</select>
-<select id="f-source" aria-label="Source"><option value="">All sources</option>{{range .Sources}}<option>{{.}}</option>{{end}}</select>
+<select id="f-kind" aria-label="Kind"><option value="">All kinds</option>{{range .Kinds}}<option value="{{.}}">{{.}}</option>{{end}}</select>
+<select id="f-source" aria-label="Source"><option value="">All sources</option>{{range .Sources}}<option value="{{.}}">{{.}}</option>{{end}}</select>
 <select id="f-state" aria-label="State"><option value="">All states</option><option value="expired">Expired</option><option value="critical">Critical</option><option value="warning">Warning</option><option value="ok">OK</option><option value="info">Informational</option><option value="unknown">No date</option></select>
 <span class="sub" id="shown"></span>
 </div>
@@ -54,7 +54,7 @@
 {{range .Agents}}{{$agent := .Agent}}<article class="agent">
 <header><strong>{{.Agent}}</strong><span class="sub" title="Last report">{{.LastSeen}}</span>
 <form method="post" action="/agents/forget">{{if $csrf}}<input type="hidden" name="csrf_token" value="{{$csrf}}">{{end}}<input type="hidden" name="agent_id" value="{{.Agent}}"><button type="submit" class="danger" title="Remove a decommissioned agent and stop its alerts">Forget / Esquecer</button></form></header>
-<ul>{{range $.Checkers}}{{if eq .Agent $agent}}<li>{{if .Failures}}<span class="badge s-expired">{{.Checker}} · {{.Failures}} failures</span>{{else}}<span class="badge s-ok">{{.Checker}}</span>{{end}}<span class="sub">last success {{.LastSuccess}}</span>{{if .LastError}}<span class="err mono">{{.LastError}}</span>{{end}}</li>{{end}}{{end}}</ul>
+<ul>{{range $.Checkers}}{{if eq .Agent $agent}}<li>{{if .Failures}}<span class="badge s-expired">{{.Checker}} · {{.Failures}} failures</span>{{else}}<span class="badge s-ok">{{.Checker}}</span>{{end}}<span class="sub">seen {{.LastSeen}} · last success {{.LastSuccess}}</span>{{if .LastError}}<span class="err mono">{{.LastError}}</span>{{end}}</li>{{end}}{{end}}</ul>
 </article>
 {{else}}<p class="sub">No agent has reported yet. / Nenhum agente reportou ainda.</p>{{end}}
 </div>

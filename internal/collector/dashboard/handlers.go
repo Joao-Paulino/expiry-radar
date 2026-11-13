@@ -123,8 +123,18 @@ func NewMux(st store.Store, rs rules.Store, opts ...Options) *http.ServeMux {
 			return
 		}
 		var agents []agentView
+		known := map[string]bool{}
 		for _, a := range seen {
+			known[a.AgentID] = true
 			agents = append(agents, agentView{Agent: a.AgentID, LastSeen: a.LastSeenAt.UTC().Format("2006-01-02 15:04 UTC")})
+		}
+		// Checker health whose agent has no agents row (an old database,
+		// or a failed agent update) still gets a card.
+		for _, h := range health {
+			if !known[h.ReportedBy] {
+				known[h.ReportedBy] = true
+				agents = append(agents, agentView{Agent: h.ReportedBy, LastSeen: "unknown"})
+			}
 		}
 		var checkers []checkerView
 		for _, h := range health {
