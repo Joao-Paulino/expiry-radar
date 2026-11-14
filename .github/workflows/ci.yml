@@ -52,6 +52,19 @@ jobs:
           go-version-file: go.mod
       - run: scripts/ci/vault-smoke.sh
 
+  sso:
+    # Signs in to the dashboard through a real OpenID Connect provider
+    # (Keycloak, TLS): allowed by email, group and role; refused for an
+    # unverified email and for a user with no access.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: scripts/ci/sso-keycloak-e2e.sh
+
   azure:
     # Runs the Azure checker against a real Key Vault. GitHub Actions is
     # the workload identity (federated credential, no stored secret).

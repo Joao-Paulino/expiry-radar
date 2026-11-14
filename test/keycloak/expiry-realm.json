@@ -1,0 +1,159 @@
+{
+  "realm": "expiry",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "roles": {
+    "client": {
+      "expiry-radar": [
+        {
+          "name": "ExpiryRadar.Admin"
+        }
+      ]
+    }
+  },
+  "groups": [
+    {
+      "name": "radar-admins",
+      "path": "/radar-admins"
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "expiry-radar",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "kc-e2e-secret-not-for-production",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "https://localhost:18443/auth/keycloak/callback"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "expiry-radar",
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Test",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Passw0rd-alice",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@example.com",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Test",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Passw0rd-bob",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/radar-admins"
+      ]
+    },
+    {
+      "username": "carol",
+      "enabled": true,
+      "email": "carol@example.com",
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "Test",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Passw0rd-carol",
+          "temporary": false
+        }
+      ],
+      "clientRoles": {
+        "expiry-radar": [
+          "ExpiryRadar.Admin"
+        ]
+      }
+    },
+    {
+      "username": "eve",
+      "enabled": true,
+      "email": "eve@example.com",
+      "emailVerified": false,
+      "firstName": "Eve",
+      "lastName": "Test",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Passw0rd-eve",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "mallory",
+      "enabled": true,
+      "email": "mallory@example.com",
+      "emailVerified": true,
+      "firstName": "Mallory",
+      "lastName": "Test",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Passw0rd-mallory",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}
