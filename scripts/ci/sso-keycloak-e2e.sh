@@ -8,7 +8,10 @@ trap 'docker logs kc 2>&1 | tail -40 || true; docker rm -f kc >/dev/null 2>&1 ||
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=localhost \
   -addext subjectAltName=DNS:localhost -addext basicConstraints=critical,CA:FALSE \
   -keyout "$work/kc.key" -out "$work/kc.crt" 2>/dev/null
-chmod 644 "$work/kc.key" "$work/kc.crt"   # read by the container's user; test-only key
+# mktemp makes the directory 0700; the container's user must traverse it
+# and read the test-only key.
+chmod 755 "$work"
+chmod 644 "$work/kc.key" "$work/kc.crt"
 
 docker run -d --name kc -p 8543:8443 \
   -v "$PWD/test/keycloak:/opt/keycloak/data/import:ro" -v "$work:/certs:ro" \
