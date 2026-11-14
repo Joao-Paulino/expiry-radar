@@ -106,6 +106,16 @@ func signIn(t *testing.T, public, user string) (int, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	body := readAll(t, resp)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Signed in") {
+		return resp.StatusCode, body
+	}
+	// The callback lands on a "Signed in" page that refreshes to the
+	// dashboard; follow it with the session cookie, as a browser would.
+	resp, err = browser.Get(public + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
 	return resp.StatusCode, readAll(t, resp)
 }
 
