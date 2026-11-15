@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -58,6 +59,8 @@ func loadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	// Editors and PowerShell's Out-File often prepend a UTF-8 BOM.
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {

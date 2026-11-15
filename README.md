@@ -280,20 +280,15 @@ sudo certbot certonly --standalone -d collector.example.com
 # tls_key_file:  /etc/letsencrypt/live/collector.example.com/privkey.pem
 ```
 
-**C. Self-signed / Autoassinado** (OpenSSL 1.1.1+; on Windows use the `openssl` bundled with Git for Windows)
+**C. Self-signed / Autoassinado** (no OpenSSL needed: the collector generates it / sem OpenSSL: o collector gera-o)
 
 ```bash
 sudo mkdir -p /etc/expiry-radar
-sudo openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 \
-  -days 365 -nodes \
-  -keyout /etc/expiry-radar/collector.key \
-  -out    /etc/expiry-radar/collector.crt \
-  -subj   "/CN=collector.example.com" \
-  -addext "subjectAltName=DNS:collector.example.com,IP:10.0.0.10"
-sudo chmod 600 /etc/expiry-radar/collector.key
+sudo expiry-radar-collector gen-cert /etc/expiry-radar --host collector.example.com,10.0.0.10
+# Windows: .\collector.exe gen-cert C:\ExpiryRadar\collector --host 192.168.1.10
 ```
 
-Replace the DNS name and IP with the ones agents will use. Then copy
+ECDSA P-256, 365 days (`--days N`), `localhost` and `127.0.0.1` always included; it never overwrites an existing key. Replace the DNS name and IP with the ones agents will use. Then copy
 `collector.crt` (never the `.key`) to each agent and point `collector_ca_file` to it.
 
 Substitui o nome DNS e o IP pelos que os agentes vão usar. Depois copia o
