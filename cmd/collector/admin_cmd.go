@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -25,6 +25,8 @@ func loadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("reading config: %w", err)
 	}
+	// Editors and PowerShell's Out-File often prepend a UTF-8 BOM.
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parsing config: %w", err)
@@ -36,21 +38,18 @@ func loadConfig(path string) (Config, error) {
 }
 
 // sttyCommand and isTerminal are variables so tests can simulate a
-// terminal without stty (stdlib only: no golang.org/x/term).
+// terminal without stty (stdlib only: no golang.org/x/term). The
+// Windows console has its own implementation in console_windows.go.
 var (
 	sttyCommand = "stty"
-	isTerminal  = func(in io.Reader) bool {
-		f, ok := in.(*os.File)
-		if !ok || runtime.GOOS == "windows" {
-			return false
-		}
-		fi, err := f.Stat()
-		return err == nil && fi.Mode()&os.ModeCharDevice != 0
-	}
+	isTerminal  = platformIsTerminal
 )
 
 // setEcho turns terminal echo on or off for in.
 func setEcho(in io.Reader, on bool) error {
+	if consoleSetEcho != nil {
+		return consoleSetEcho(in, on)
+	}
 	arg := "-echo"
 	if on {
 		arg = "echo"
@@ -62,7 +61,15 @@ func setEcho(in io.Reader, on bool) error {
 	return cmd.Run()
 }
 
-func readLine(r *bufio.Reader) (string, error) {
+// readLine reads one line. On a Windows console it reads UTF-16 through
+// ReadConsoleW, because ReadFile on a console mangles non-ASCII input
+// (an accented password would never match its confirmation).
+func readLine(in io.Reader, r *bufio.Reader) (string, error) {
+	if consoleReadLine != nil && isTerminal(in) {
+		if line, ok, err := consoleReadLine(in); ok {
+			return line, err
+		}
+	}
 	line, err := r.ReadString('\n')
 	if err != nil && (err != io.EOF || line == "") {
 		return "", err
@@ -73,7 +80,7 @@ func readLine(r *bufio.Reader) (string, error) {
 func readSecret(in io.Reader, r *bufio.Reader, out io.Writer, prompt string) (string, error) {
 	if !isTerminal(in) {
 		fmt.Fprint(out, prompt)
-		return readLine(r)
+		return readLine(in, r)
 	}
 	if err := setEcho(in, false); err != nil {
 		fmt.Fprintln(out, "Warning: could not hide input (stty unavailable); what you type will be visible.")
@@ -99,7 +106,7 @@ func readSecret(in io.Reader, r *bufio.Reader, out io.Writer, prompt string) (st
 		}()
 	}
 	fmt.Fprint(out, prompt)
-	return readLine(r)
+	return readLine(in, r)
 }
 
 func openAdminStores(cfgPath string) (*admin.Store, *session.Store, func(), error) {
@@ -170,7 +177,7 @@ func runSetAdminTOTP(cfgPath string, in io.Reader, out io.Writer, now func() tim
 	fmt.Fprintf(out, "Tip: qrencode -t ansiutf8 '%s'\n\n", uri)
 	fmt.Fprint(out, "Enter the 6-digit code from the app: ")
 
-	code, err := readLine(bufio.NewReader(in))
+	code, err := readLine(in, bufio.NewReader(in))
 	if err != nil {
 		return err
 	}

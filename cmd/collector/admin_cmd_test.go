@@ -158,3 +158,12 @@ func TestReadSecret_WarnsWhenEchoCannotBeHidden(t *testing.T) {
 		t.Fatalf("no warning that input is visible: %q", out.String())
 	}
 }
+
+func TestLoadConfig_AcceptsUTF8BOM(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.json")
+	os.WriteFile(p, []byte("\xef\xbb\xbf{\"db_path\":\"x.db\"}"), 0o600)
+	cfg, err := loadConfig(p)
+	if err != nil || cfg.DBPath != "x.db" {
+		t.Fatalf("BOM config: %+v %v", cfg, err)
+	}
+}
