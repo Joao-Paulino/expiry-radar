@@ -7,6 +7,7 @@ import (
 	awscheck "github.com/Joao-Paulino/expiry-radar/internal/checker/aws"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/gcp"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/local"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"net/http"
 	"net/http/httptest"
@@ -221,6 +222,21 @@ func TestCheckers_IncludesGCP(t *testing.T) {
 	}
 	if names := checkerNames(checkers(cfg)); names != "tls-checker,gcp,gcp-secrets" {
 		t.Fatalf("got %q", names)
+	}
+}
+
+func TestCheckers_IncludesLocal(t *testing.T) {
+	cfg := Config{CollectorURL: "https://c", Token: "t", AgentID: "a", QueuePath: "/q", IntervalSeconds: 60,
+		Local: &local.Config{CertPaths: []string{t.TempDir()}, WindowsCertStores: []string{}}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if names := checkerNames(checkers(cfg)); names != "tls-checker,local-certs" {
+		t.Fatalf("got %q", names)
+	}
+	cfg.Local = &local.Config{CertPaths: []string{""}}
+	if cfg.Validate() == nil {
+		t.Fatal("empty cert path accepted")
 	}
 }
 
