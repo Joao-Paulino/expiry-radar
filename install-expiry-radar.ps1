@@ -5,7 +5,7 @@ if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]:
     exit
 }
 
-$VERSION = "v0.7.1"
+$VERSION = "v0.8.0"
 $REPO = "Joao-Paulino/expiry-radar"
 $BASE_URL = "https://github.com/$REPO/releases/download/$VERSION"
 $DEFAULT_COL_DIR = "C:\ExpiryRadar\collector"
@@ -250,6 +250,7 @@ if ($OPTION -eq "2" -or $OPTION -eq "3") {
   "agent_id": "$AGENT_ID",
   "queue_path": "$agentDirJson\\queue.jsonl",
   "interval_seconds": 300,
+  "local": { "windows_cert_stores": ["My", "WebHosting"] },
   "tls_targets": [
     { "host": "www.google.com", "port": 443 },
     { "host": "github.com", "port": 443 },
