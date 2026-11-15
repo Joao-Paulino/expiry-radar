@@ -33,9 +33,13 @@ function Check-And-Clean-Install {
                 $svcExe = Get-ChildItem -Path $Dir -Filter "*.exe" | Select-Object -First 1
                 if ($svcExe) { & $svcExe.FullName uninstall-service }
             }
-            Remove-Item -Path $Dir -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "[PT] Instalação antiga removida." -ForegroundColor Green
-            Write-Host "[EN] Old installation removed." -ForegroundColor Green
+            if (Test-Path $Dir) {
+                # Nunca apagar: a base de dados e a config ficam numa cópia / Never delete: database and config are kept in a backup
+                $backup = "$Dir.bak-$(Get-Date -Format yyyyMMdd-HHmmss)"
+                Move-Item -Path $Dir -Destination $backup
+                Write-Host "[PT] Instalação antiga guardada em $backup" -ForegroundColor Green
+                Write-Host "[EN] Old installation kept in $backup" -ForegroundColor Green
+            }
         } else {
             Write-Host "[PT] Instalação cancelada." -ForegroundColor Red
             Write-Host "[EN] Installation cancelled." -ForegroundColor Red
@@ -57,14 +61,35 @@ function Download-Binary {
     try {
         Invoke-WebRequest -Uri $url -OutFile $destFile -UseBasicParsing
         if (-not (Test-Path $destFile)) { throw "Ficheiro não criado" }
-        Write-Host "[PT] Download verificado: $destFile" -ForegroundColor Green
-        Write-Host "[EN] Download verified: $destFile" -ForegroundColor Green
+        # Verificar a soma SHA-256 publicada no release / Verify against the release's SHA256SUMS
+        $sums = (Invoke-WebRequest -Uri "$BASE_URL/SHA256SUMS" -UseBasicParsing).Content
+        $expected = ($sums -split "`n" | Where-Object { $_ -match "\s\*?$BinName-$VERSION-windows-amd64\.exe\s*$" }) -replace '\s.*$', ''
+        $actual = (Get-FileHash -Algorithm SHA256 $destFile).Hash.ToLower()
+        if (-not $expected -or $expected.ToLower() -ne $actual) {
+            Remove-Item $destFile -Force
+            throw "SHA-256 mismatch"
+        }
+        Write-Host "[PT] Download verificado (SHA-256): $destFile" -ForegroundColor Green
+        Write-Host "[EN] Download verified (SHA-256): $destFile" -ForegroundColor Green
     } catch {
         Write-Host "[PT] Erro: Falha ao descarregar o binário." -ForegroundColor Red
         Write-Host "[EN] Error: Failed to download binary." -ForegroundColor Red
         exit
     }
     return $destFile
+}
+
+function New-Token {
+    # 32 bytes aleatórios em hex, sem depender do OpenSSL / 32 random bytes as hex, no OpenSSL needed
+    $bytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    return (($bytes | ForEach-Object { $_.ToString("x2") }) -join "")
+}
+
+function Write-Utf8NoBom {
+    # Out-File -Encoding utf8 escreve BOM no Windows PowerShell 5.1 e o JSON deixa de ser lido / Out-File writes a BOM on PowerShell 5.1, which breaks JSON parsing
+    param([string]$Path, [string]$Content)
+    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding $false))
 }
 
 function Generate-Certs {
@@ -74,8 +99,9 @@ function Generate-Certs {
     
     $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.PrefixOrigin -eq 'Dhcp' -or $_.PrefixOrigin -eq 'Manual' -and $_.IPAddress -ne '127.0.0.1'} | Select-Object -First 1).IPAddress
     $openssl = "C:\Program Files\Git\usr\bin\openssl.exe"
+    if (-Not (Test-Path $openssl)) { $openssl = (Get-Command openssl -ErrorAction SilentlyContinue).Source }
     
-    if (-Not (Test-Path $openssl)) {
+    if (-Not $openssl -or -Not (Test-Path $openssl)) {
         Write-Host "[PT] Erro: OpenSSL não encontrado. Instala o Git para Windows." -ForegroundColor Red
         Write-Host "[EN] Error: OpenSSL not found. Install Git for Windows." -ForegroundColor Red
         exit
@@ -83,8 +109,8 @@ function Generate-Certs {
 
     & $openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -days 365 -nodes -keyout "$Dir\collector.key" -out "$Dir\collector.crt" -subj "/CN=expiry-radar" -addext "subjectAltName=IP:$ip" 2>$null
     
-    $global:TOKEN_AGENT = (& $openssl rand -hex 32).Trim()
-    $global:TOKEN_ADMIN = (& $openssl rand -hex 32).Trim()
+    $global:TOKEN_AGENT = New-Token
+    $global:TOKEN_ADMIN = New-Token
     
     Write-Host "[PT] IP detetado: $ip" -ForegroundColor Green
     Write-Host "[EN] Detected IP: $ip" -ForegroundColor Green
@@ -138,7 +164,7 @@ if ($OPTION -eq "1" -or $OPTION -eq "3") {
   "theme": "dark"
 }
 "@
-    $json | Out-File "$COL_DIR\collector.json" -Encoding utf8
+    Write-Utf8NoBom -Path "$COL_DIR\collector.json" -Content $json
 
     Define-AdminPassword -Bin $COL_BIN -Json "$COL_DIR\collector.json"
     
@@ -149,6 +175,10 @@ if ($OPTION -eq "1" -or $OPTION -eq "3") {
     Set-Location $COL_DIR
     .\expiry-radar-collector.exe install-service collector.json
     icacls $COL_DIR /grant "NT AUTHORITY\LocalService:(OI)(CI)M" | Out-Null
+    # Chave privada e config com tokens: só Administradores e o serviço / Private key and config with tokens: Administrators and the service only
+    foreach ($f in "collector.key", "collector.json") {
+        icacls "$COL_DIR\$f" /inheritance:r /grant "NT AUTHORITY\LocalService:R" /grant "BUILTIN\Administrators:F" | Out-Null
+    }
     Start-Service ExpiryRadarCollector
     New-NetFirewallRule -DisplayName "Expiry Radar 8443" -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow -ErrorAction SilentlyContinue | Out-Null
     
@@ -222,11 +252,12 @@ if ($OPTION -eq "2" -or $OPTION -eq "3") {
   ]
 }
 "@
-    $agentJson | Out-File "$AGENT_DIR\agent.json" -Encoding utf8
+    Write-Utf8NoBom -Path "$AGENT_DIR\agent.json" -Content $agentJson
 
     Set-Location $AGENT_DIR
     .\expiry-radar-agent.exe install-service agent.json
-    icacls $AGENT_DIR /grant "NT AUTHORITY\LocalService:(OI)(CI)RX" | Out-Null
+    icacls $AGENT_DIR /grant "NT AUTHORITY\LocalService:(OI)(CI)M" | Out-Null
+    icacls "$AGENT_DIR\agent.json" /inheritance:r /grant "NT AUTHORITY\LocalService:R" /grant "BUILTIN\Administrators:F" | Out-Null
     Start-Service ExpiryRadarAgent
     
     Write-Host "[PT] Agent instalado e a correr em $AGENT_DIR" -ForegroundColor Green
