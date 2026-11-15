@@ -1,11 +1,11 @@
-# Verificar se é Administrador / Check if Administrator
+﻿# Verificar se é Administrador / Check if Administrator
 if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "[PT] Por favor, corre este script como Administrador." -ForegroundColor Red
     Write-Host "[EN] Please run this script as Administrator." -ForegroundColor Red
     exit
 }
 
-$VERSION = "v0.7.0"
+$VERSION = "v0.7.1"
 $REPO = "Joao-Paulino/expiry-radar"
 $BASE_URL = "https://github.com/$REPO/releases/download/$VERSION"
 $DEFAULT_COL_DIR = "C:\ExpiryRadar\collector"
@@ -80,7 +80,7 @@ function Download-Binary {
 }
 
 function New-Token {
-    # 32 bytes aleatórios em hex, sem depender do OpenSSL / 32 random bytes as hex, no OpenSSL needed
+    # 32 bytes aleatórios em hex / 32 random bytes as hex
     $bytes = New-Object byte[] 32
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
     return (($bytes | ForEach-Object { $_.ToString("x2") }) -join "")
@@ -93,50 +93,51 @@ function Write-Utf8NoBom {
 }
 
 function Generate-Certs {
-    param([string]$Dir)
-    Write-Host "[PT] A gerar certificados e tokens..." -ForegroundColor Yellow
-    Write-Host "[EN] Generating certificates and tokens..." -ForegroundColor Yellow
-    
-    $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.PrefixOrigin -eq 'Dhcp' -or $_.PrefixOrigin -eq 'Manual' -and $_.IPAddress -ne '127.0.0.1'} | Select-Object -First 1).IPAddress
-    $openssl = "C:\Program Files\Git\usr\bin\openssl.exe"
-    if (-Not (Test-Path $openssl)) { $openssl = (Get-Command openssl -ErrorAction SilentlyContinue).Source }
-    
-    if (-Not $openssl -or -Not (Test-Path $openssl)) {
-        Write-Host "[PT] Erro: OpenSSL não encontrado. Instala o Git para Windows." -ForegroundColor Red
-        Write-Host "[EN] Error: OpenSSL not found. Install Git for Windows." -ForegroundColor Red
-        exit
+    param([string]$Dir, [string]$Bin)
+    Write-Host "[PT] A gerar certificado TLS e tokens..." -ForegroundColor Yellow
+    Write-Host "[EN] Generating TLS certificate and tokens..." -ForegroundColor Yellow
+
+    $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { ($_.PrefixOrigin -eq 'Dhcp' -or $_.PrefixOrigin -eq 'Manual') -and $_.IPAddress -ne '127.0.0.1' } | Select-Object -First 1).IPAddress
+    $answer = Read-Host "[PT] IP/nome que os agentes usam [Enter para $ip] / [EN] IP/name agents will use [Enter for $ip]"
+    if (-not [string]::IsNullOrWhiteSpace($answer)) { $ip = $answer.Trim() }
+
+    # O próprio collector gera o certificado / The collector generates the certificate itself
+    & $Bin gen-cert $Dir --host $ip
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[PT] Erro ao gerar o certificado." -ForegroundColor Red
+        Write-Host "[EN] Error generating the certificate." -ForegroundColor Red
+        exit 1
     }
 
-    & $openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -days 365 -nodes -keyout "$Dir\collector.key" -out "$Dir\collector.crt" -subj "/CN=expiry-radar" -addext "subjectAltName=IP:$ip" 2>$null
-    
     $global:TOKEN_AGENT = New-Token
     $global:TOKEN_ADMIN = New-Token
-    
-    Write-Host "[PT] IP detetado: $ip" -ForegroundColor Green
-    Write-Host "[EN] Detected IP: $ip" -ForegroundColor Green
+    $global:COL_HOST = $ip
+
+    Write-Host "[PT] Certificado emitido para: $ip" -ForegroundColor Green
+    Write-Host "[EN] Certificate issued for: $ip" -ForegroundColor Green
 }
 
 function Define-AdminPassword {
     param([string]$Bin, [string]$Json)
     
-    Write-Host "[PT] A password de administrador tem de ter no mínimo 12 caracteres." -ForegroundColor Yellow
-    Write-Host "[EN] The administrator password must be at least 12 characters." -ForegroundColor Yellow
-    Write-Host "[PT] O binário vai pedir a password duas vezes (confirmação). Ctrl+C para sair." -ForegroundColor Yellow
-    Write-Host "[EN] The binary will ask for the password twice (confirmation). Ctrl+C to exit." -ForegroundColor Yellow
+    Write-Host "[PT] Password de administrador: mínimo 12 caracteres, pedida duas vezes, não aparece no ecrã." -ForegroundColor Yellow
+    Write-Host "[EN] Administrator password: at least 12 characters, asked twice, not shown on screen." -ForegroundColor Yellow
     Write-Host ""
-    
-    while ($true) {
+
+    for ($try = 1; $try -le 5; $try++) {
         & $Bin set-admin-password $Json
         if ($LASTEXITCODE -eq 0) {
             Write-Host "[PT] Password definida com sucesso." -ForegroundColor Green
             Write-Host "[EN] Password set successfully." -ForegroundColor Green
-            break
-        } else {
-            Write-Host "[PT] A password não cumpre os requisitos (mínimo 12 caracteres). Tenta novamente." -ForegroundColor Red
-            Write-Host "[EN] Password does not meet requirements (min 12 characters). Try again." -ForegroundColor Red
-            Write-Host ""
+            return
         }
+        # O binário já explicou o erro acima / The binary printed the reason above
+        $again = Read-Host "[PT] Tentar de novo? (s/n) / [EN] Try again? (y/n)"
+        if ($again -notmatch "^[sSyY]$") { break }
     }
+    Write-Host "[PT] Password não definida. Podes defini-la depois com: $Bin set-admin-password $Json" -ForegroundColor Red
+    Write-Host "[EN] Password not set. You can set it later with: $Bin set-admin-password $Json" -ForegroundColor Red
+    exit 1
 }
 
 # --- INSTALAR COLLECTOR ---
@@ -147,8 +148,8 @@ if ($OPTION -eq "1" -or $OPTION -eq "3") {
     Check-And-Clean-Install -Dir $COL_DIR -ServiceName "ExpiryRadarCollector" -Name "Collector"
     New-Item -ItemType Directory -Path $COL_DIR -Force | Out-Null
 
-    Generate-Certs -Dir $COL_DIR
     $COL_BIN = Download-Binary -BinName "expiry-radar-collector" -DestDir $COL_DIR
+    Generate-Certs -Dir $COL_DIR -Bin $COL_BIN
     
     $colDirJson = $COL_DIR -replace '\\', '\\\\'
 
@@ -171,6 +172,11 @@ if ($OPTION -eq "1" -or $OPTION -eq "3") {
     Write-Host "[PT] A definir TOTP do admin..." -ForegroundColor Yellow
     Write-Host "[EN] Setting admin TOTP..." -ForegroundColor Yellow
     & $COL_BIN set-admin-totp "$COL_DIR\collector.json"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[PT] TOTP não configurado. Podes fazê-lo depois com: $COL_BIN set-admin-totp $COL_DIR\collector.json" -ForegroundColor Red
+        Write-Host "[EN] TOTP not configured. You can do it later with: $COL_BIN set-admin-totp $COL_DIR\collector.json" -ForegroundColor Red
+        exit 1
+    }
 
     Set-Location $COL_DIR
     .\expiry-radar-collector.exe install-service collector.json
@@ -219,7 +225,7 @@ if ($OPTION -eq "2" -or $OPTION -eq "3") {
 
         $COL_CRT = "$AGENT_DIR\collector.crt"
         $AGENT_ID = "win-agent-$env:COMPUTERNAME"
-        $COL_IP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.PrefixOrigin -eq 'Dhcp' -or $_.PrefixOrigin -eq 'Manual' -and $_.IPAddress -ne '127.0.0.1'} | Select-Object -First 1).IPAddress
+        $COL_IP = if ($global:COL_HOST) { $global:COL_HOST } else { "localhost" }
     } else {
         Write-Host "[PT] O Collector não foi encontrado localmente. Assume-se máquina remota." -ForegroundColor Yellow
         Write-Host "[EN] Collector not found locally. Assuming remote machine." -ForegroundColor Yellow
