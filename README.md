@@ -726,6 +726,26 @@ Certificados TLS e de **assinatura STS** do vCenter (quando expira, nenhum login
 ESXi certificates are read even when not trusted (only the date; `verified` in metadata says whether they chain to `ca_file`); hosts vCenter knows but the agent cannot reach are reported as errors. vSphere has no password-less API login: use a dedicated **read-only** account (global Read-only role; certificate reads may also need *Certificate Management* read privileges), password file `chmod 600`. `ca_file` = the VMCA root (download from `https://<vcenter>/certs/download.zip`).
 Os certificados ESXi são lidos mesmo sem confiança (só a data; `verified` nos metadados diz se encadeiam na `ca_file`); hosts que o vCenter conhece mas o agente não alcança aparecem como erro. O vSphere não tem login de API sem password: usa uma conta **só de leitura** dedicada (role global Read-only; ler certificados pode precisar também de privilégios de leitura de *Certificate Management*), ficheiro da password `chmod 600`. `ca_file` = a raiz VMCA (descarrega de `https://<vcenter>/certs/download.zip`).
 
+### 💻 Local certificates (files, Windows certificate store) / Certificados locais
+
+The agent can report the certificates already installed on the machine it runs on. Read only; private keys are never opened.
+O agente pode reportar os certificados instalados na máquina onde corre. Só leitura; as chaves privadas nunca são abertas.
+
+```json
+"local": {
+  "cert_paths": ["/etc/ssl/certs/myapp", "/etc/letsencrypt/live", "C:\\inetpub\\certs"],
+  "windows_cert_stores": ["My", "WebHosting"]
+}
+```
+
+| | EN | PT |
+|---|---|---|
+| `cert_paths` | Files or directories (recursive). `.pem` `.crt` `.cer` `.der`; every certificate in a PEM chain is reported; keys and CSRs are skipped; a broken `.crt` is an error. Source `file://<path>` | Ficheiros ou pastas (recursivo). Cada certificado de uma cadeia PEM é reportado; chaves e CSRs são ignorados; um `.crt` inválido é erro |
+| `windows_cert_stores` | Windows only: LocalMachine stores, default `["My", "WebHosting"]` (IIS, RDP, Exchange, SQL Server). `[]` disables. Source `certstore://LocalMachine/<store>`. The service account needs read access, which `LocalService` has | Só Windows: lojas LocalMachine, por omissão `["My", "WebHosting"]`. `[]` desativa |
+| Metadata | issuer, thumbprint (SHA-1), serial, SANs, `ca=true` for CA certificates | issuer, thumbprint, serial, SANs, `ca=true` em certificados de CA |
+
+Checkers: `local-certs` (files) and `windows-certstore`, kept separate so one failing does not mark the other incomplete.
+
 ## ⚠️ Known limitations / Limitações conhecidas
 
 | EN | PT |

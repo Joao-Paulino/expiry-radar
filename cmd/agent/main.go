@@ -15,6 +15,7 @@ import (
 	awscheck "github.com/Joao-Paulino/expiry-radar/internal/checker/aws"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/gcp"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/local"
 	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vmware"
@@ -49,8 +50,11 @@ type Config struct {
 	// GCP, if set, also checks Google Cloud (see README).
 	GCP *gcp.Config `json:"gcp"`
 	// VMware, if set, also checks vCenter / ESXi (see README).
-	VMware          *vmware.Config `json:"vmware"`
-	IntervalSeconds int            `json:"interval_seconds"`
+	VMware *vmware.Config `json:"vmware"`
+	// Local reports certificates installed on this machine (files and,
+	// on Windows, the LocalMachine certificate stores).
+	Local           *local.Config `json:"local"`
+	IntervalSeconds int           `json:"interval_seconds"`
 }
 
 // loadConfig reads and decodes the JSON config file at path.
@@ -117,6 +121,9 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
+	if err := c.Local.Validate(); err != nil {
+		return err
+	}
 	if c.IntervalSeconds <= 0 {
 		return fmt.Errorf("agent: interval_seconds must be a positive number of seconds")
 	}
@@ -171,6 +178,7 @@ func checkers(cfg Config) []checker.Checker {
 			cs = append(cs, vc)
 		}
 	}
+	cs = append(cs, local.Checkers(cfg.Local)...)
 	return cs
 }
 
