@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -25,7 +26,8 @@ func TestGenCert(t *testing.T) {
 			t.Errorf("%s: %v", h, err)
 		}
 	}
-	if fi, _ := os.Stat(filepath.Join(dir, "collector.key")); fi.Mode().Perm()&0o077 != 0 {
+	// Unix permissions only; on Windows the installer applies ACLs.
+	if fi, _ := os.Stat(filepath.Join(dir, "collector.key")); runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0 {
 		t.Errorf("key is readable by others: %v", fi.Mode())
 	}
 	// Never silently replaces a key agents may already trust.
