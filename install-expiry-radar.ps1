@@ -62,7 +62,10 @@ function Download-Binary {
         Invoke-WebRequest -Uri $url -OutFile $destFile -UseBasicParsing
         if (-not (Test-Path $destFile)) { throw "Ficheiro não criado" }
         # Verificar a soma SHA-256 publicada no release / Verify against the release's SHA256SUMS
-        $sums = (Invoke-WebRequest -Uri "$BASE_URL/SHA256SUMS" -UseBasicParsing).Content
+        # O GitHub serve o SHA256SUMS como octet-stream: .Content vem em bytes / GitHub serves it as octet-stream: .Content is bytes
+        $sumsFile = "$DestDir\SHA256SUMS"
+        Invoke-WebRequest -Uri "$BASE_URL/SHA256SUMS" -OutFile $sumsFile -UseBasicParsing
+        $sums = [System.IO.File]::ReadAllText($sumsFile)
         $expected = ($sums -split "`n" | Where-Object { $_ -match "\s\*?$BinName-$VERSION-windows-amd64\.exe\s*$" }) -replace '\s.*$', ''
         $actual = (Get-FileHash -Algorithm SHA256 $destFile).Hash.ToLower()
         if (-not $expected -or $expected.ToLower() -ne $actual) {
@@ -72,9 +75,9 @@ function Download-Binary {
         Write-Host "[PT] Download verificado (SHA-256): $destFile" -ForegroundColor Green
         Write-Host "[EN] Download verified (SHA-256): $destFile" -ForegroundColor Green
     } catch {
-        Write-Host "[PT] Erro: Falha ao descarregar o binário." -ForegroundColor Red
-        Write-Host "[EN] Error: Failed to download binary." -ForegroundColor Red
-        exit
+        Write-Host "[PT] Erro: Falha ao descarregar ou verificar o binário: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[EN] Error: Failed to download or verify the binary: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
     }
     return $destFile
 }
