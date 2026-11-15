@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -47,7 +48,7 @@ func platformIsTerminal(in io.Reader) bool {
 func windowsSetEcho(in io.Reader, on bool) error {
 	h, ok := consoleHandle(in)
 	if !ok {
-		return nil
+		return errors.New("not a console")
 	}
 	var mode uint32
 	if err := windows.GetConsoleMode(h, &mode); err != nil {
