@@ -767,6 +767,42 @@ O agente pode reportar os certificados instalados na máquina onde corre. Só le
 
 Checkers: `local-certs` (files) and `windows-certstore`, kept separate so one failing does not mark the other incomplete.
 
+### 🏭 ICS/OT and IIoT: OPC UA, MQTT, AMQP / ICS/OT e IIoT
+
+**OPC UA servers.** The agent asks each server for its endpoints (GetEndpoints) over the unsecured discovery channel every OPC UA server offers, and reports the application instance certificate. It **never creates a session and never reads or writes node values**: safe to point at production PLCs, SCADA and MES servers. Servers are checked one at a time.
+**Servidores OPC UA.** O agente pede a cada servidor a lista de endpoints (GetEndpoints) pelo canal de descoberta sem segurança que todos os servidores OPC UA oferecem, e reporta o certificado da aplicação. **Nunca abre sessão nem lê ou escreve variáveis**: seguro em PLC, SCADA e MES em produção. Os servidores são verificados um de cada vez.
+
+```json
+"opcua": {
+  "targets": [{"endpoint": "opc.tcp://plc-01:4840"}, {"endpoint": "opc.tcp://scada-01:4840/UA/Server"}],
+  "timeout_seconds": 10,
+  "pause_seconds": 2
+}
+```
+
+| | EN | PT |
+|---|---|---|
+| `targets[].endpoint` | Discovery URL, `opc.tcp://host[:port][/path]` (port 4840 by default). Source is the URL | URL de descoberta (porta 4840 por omissão) |
+| `timeout_seconds` | Per server, default 10 | Por servidor, 10 por omissão |
+| `pause_seconds` | Wait between servers so fragile devices are not hit back to back, default 0 | Pausa entre servidores para não sobrecarregar equipamento frágil, 0 por omissão |
+| Metadata | issuer, serial, sha256, `application_uri`, `security_policies` (e.g. `Basic256Sha256`), `self_signed` | Idem |
+
+One record per distinct certificate (servers repeat the same certificate on every secured endpoint). / Um registo por certificado distinto.
+
+**OPC UA certificate stores on disk** (`pki/own/certs`, `pki/trusted/certs`, `pki/issuer/certs`): point the `local` checker at them; `.der` and `.pem` are read recursively. / **Stores de certificados OPC UA em disco:** aponta o checker `local` para eles.
+
+```json
+"local": { "cert_paths": ["C:\\ProgramData\\MyOpcServer\\pki"] }
+```
+
+**MQTT and AMQP brokers** (Mosquitto, HiveMQ, EMQX, RabbitMQ, IoT gateways) speak plain TLS: add them to `tls_targets`. / **Brokers MQTT e AMQP** falam TLS normal: junta-os a `tls_targets`.
+
+```json
+"tls_targets": [{"host": "mqtt.plant.local", "port": 8883}, {"host": "rabbit.plant.local", "port": 5671}]
+```
+
+**Placement (ISA/IEC 62443).** Run the agent inside the OT zone or the DMZ: it only opens outbound connections to the collector, so no inbound firewall rule into the OT zone is needed. / **Colocação:** o agente fica na zona OT ou na DMZ e só faz ligações de saída para o coletor; não é preciso abrir regras de entrada na zona OT.
+
 ## ⚠️ Known limitations / Limitações conhecidas
 
 | EN | PT |
@@ -785,7 +821,7 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 | ✅ | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
 | ✅ | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
 | ✅ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
-| ⚪ | **M7** | ICS/OT and IIoT on the plant floor: OPC UA certificates (GetEndpoints, no session) and local OPC UA PKI stores; MQTT/AMQP brokers over TLS (8883, 5671); HTTPS on PLCs, HMIs and edge gateways with an OT-safe mode (few connections, long intervals, short timeouts) | ICS/OT e IIoT na fábrica: certificados OPC UA (GetEndpoints, sem sessão) e stores PKI locais do OPC UA; brokers MQTT/AMQP sobre TLS (8883, 5671); HTTPS em PLC, HMI e gateways edge com modo OT-safe (poucas ligações, intervalos longos, timeouts curtos) |
+| 🟡 | **M7** | ICS/OT and IIoT on the plant floor: OPC UA certificates (GetEndpoints, no session) and local OPC UA PKI stores; MQTT/AMQP brokers over TLS (8883, 5671); HTTPS on PLCs, HMIs and edge gateways with an OT-safe mode (few connections, long intervals, short timeouts) | ICS/OT e IIoT na fábrica: certificados OPC UA (GetEndpoints, sem sessão) e stores PKI locais do OPC UA; brokers MQTT/AMQP sobre TLS (8883, 5671); HTTPS em PLC, HMI e gateways edge com modo OT-safe (poucas ligações, intervalos longos, timeouts curtos) |
 | ⚪ | **M8** | Cloud IoT: AWS IoT Core device certificates and registered CAs; Azure IoT Hub and DPS X.509 certificates | IoT na cloud: certificados de dispositivo e CAs registadas no AWS IoT Core; certificados X.509 do Azure IoT Hub e DPS |
 | ⚪ | **M9** | SCADA and industrial software licences (vendor by vendor), then other software licences and SaaS subscriptions | Licenças de SCADA e software industrial (fabricante a fabricante), depois outras licenças de software e subscrições SaaS |
 

@@ -8,6 +8,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/gcp"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/local"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/opcua"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"net/http"
 	"net/http/httptest"
@@ -246,4 +247,21 @@ func checkerNames(cs []checker.Checker) string {
 		n = append(n, c.Name())
 	}
 	return strings.Join(n, ",")
+}
+
+// TestCheckers_IncludesOPCUAWhenConfigured proves the opcua section turns
+// on the OPC UA checker, and a non opc.tcp endpoint stops the agent.
+func TestCheckers_IncludesOPCUAWhenConfigured(t *testing.T) {
+	cfg := Config{CollectorURL: "https://c", Token: "t", AgentID: "a", QueuePath: "/q", IntervalSeconds: 60,
+		OPCUA: &opcua.Config{Targets: []opcua.Target{{Endpoint: "opc.tcp://plc-01:4840"}}}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid opcua config rejected: %v", err)
+	}
+	if names := checkerNames(checkers(cfg)); names != "tls-checker,opcua" {
+		t.Fatalf("with opcua: %q", names)
+	}
+	cfg.OPCUA.Targets[0].Endpoint = "http://plc-01"
+	if cfg.Validate() == nil {
+		t.Fatal("non opc.tcp endpoint accepted")
+	}
 }

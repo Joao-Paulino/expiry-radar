@@ -16,6 +16,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/gcp"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/local"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/opcua"
 	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vmware"
@@ -53,6 +54,9 @@ type Config struct {
 	VMware *vmware.Config `json:"vmware"`
 	// Local reports certificates installed on this machine (files and,
 	// on Windows, the LocalMachine certificate stores).
+	// OPCUA, when set, reports OPC UA server certificates (discovery
+	// only: no session, no reads or writes).
+	OPCUA           *opcua.Config `json:"opcua"`
 	Local           *local.Config `json:"local"`
 	IntervalSeconds int           `json:"interval_seconds"`
 }
@@ -110,6 +114,11 @@ func (c Config) Validate() error {
 	}
 	if c.GCP != nil {
 		if err := c.GCP.Validate(); err != nil {
+			return err
+		}
+	}
+	if c.OPCUA != nil {
+		if err := c.OPCUA.Validate(); err != nil {
 			return err
 		}
 	}
@@ -177,6 +186,9 @@ func checkers(cfg Config) []checker.Checker {
 		if vc, err := vmware.New(*cfg.VMware); err == nil { // validated at start-up
 			cs = append(cs, vc)
 		}
+	}
+	if cfg.OPCUA != nil {
+		cs = append(cs, opcua.New(*cfg.OPCUA))
 	}
 	cs = append(cs, local.Checkers(cfg.Local)...)
 	return cs
