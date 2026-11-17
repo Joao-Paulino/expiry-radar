@@ -58,7 +58,7 @@ jobs:
             govulncheck -mode=binary -format=openvex "$f" > "$f.vex.json"
           done
           (cd dist && sha256sum expiry-radar-* > SHA256SUMS)
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           subject-path: dist/expiry-radar-*
