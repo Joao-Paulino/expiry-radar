@@ -131,7 +131,11 @@ type Checker struct {
 // New returns a Vault checker for cfg.
 func New(cfg Config) *Checker { return &Checker{cfg: cfg} }
 
+// Name is the checker name reported to the collector.
 func (c *Checker) Name() string { return "vault" }
+
+// Kind is the checker's main record kind; KV secrets, AppRole secret
+// IDs, tokens and leases carry their own kind on each record.
 func (c *Checker) Kind() string { return "certificate" }
 
 func readTrimmed(path string) (string, error) {
@@ -219,6 +223,8 @@ type apiError struct {
 	errors  []string
 }
 
+// Error describes the failed Vault request with its HTTP status and the
+// errors Vault returned.
 func (e *apiError) Error() string {
 	return fmt.Sprintf("%s: HTTP %d %s", e.request, e.status, strings.Join(e.errors, "; "))
 }

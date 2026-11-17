@@ -171,3 +171,18 @@ func TestHandler_FutureCheckedAtClamped(t *testing.T) {
 		t.Fatalf("future checked_at stored: %v", fs.checked)
 	}
 }
+
+// TestHandler_OversizedBodyRejected: an authenticated but faulty or
+// hostile agent must not make the collector buffer an unbounded body.
+func TestHandler_OversizedBodyRejected(t *testing.T) {
+	st := &fakeStore{}
+	big := `{"agent_id":"a","results":[{"checker_name":"x","records":[],"error":"` + strings.Repeat("x", MaxBodyBytes) + `"}]}`
+	rec := httptest.NewRecorder()
+	Handler(st)(rec, httptest.NewRequest("POST", "/ingest", strings.NewReader(big)))
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("got %d, want 413", rec.Code)
+	}
+	if len(st.touched) != 0 {
+		t.Fatal("nothing may be stored from a rejected body")
+	}
+}

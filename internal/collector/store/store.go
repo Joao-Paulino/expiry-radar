@@ -47,12 +47,20 @@ type Store interface {
 	// report is gone and stops being current. A failing run may be
 	// partial, so absence in it proves nothing.
 	SaveResult(ctx context.Context, agentID, checkerName string, records []checker.ExpiryRecord, checkedAt time.Time, complete bool) error
+	// RecordCheckerHealth notes one run of a checker on an agent: a nil
+	// checkErr resets the failure count, an error increments it and
+	// keeps the message for the dashboard and the failing-checker alert.
 	RecordCheckerHealth(ctx context.Context, checkerName, reportedBy string, checkErr error) error
+	// ListCurrent returns the latest state of every item still reported
+	// (see SQLite.ListCurrent for when an item counts as gone).
 	ListCurrent(ctx context.Context) ([]StoredRecord, error)
+	// History returns every stored report of one item, oldest first.
 	History(ctx context.Context, source, name, kind string) ([]StoredRecord, error)
+	// CheckerHealth returns the state of every checker on every agent.
 	CheckerHealth(ctx context.Context) ([]CheckerHealth, error)
 	// TouchAgent marks agentID as seen now (every batch, even empty).
 	TouchAgent(ctx context.Context, agentID string) error
+	// Agents returns every known agent with its last report time.
 	Agents(ctx context.Context) ([]AgentSeen, error)
 	// ForgetAgent removes a decommissioned agent's health and alert
 	// state, so it stops alerting; it reappears if it reports again.
@@ -69,10 +77,12 @@ func NewSQLite(database *sql.DB) *SQLite {
 	return &SQLite{db: database}
 }
 
+// SaveRecords implements Store.
 func (s *SQLite) SaveRecords(ctx context.Context, agentID string, records []checker.ExpiryRecord, checkedAt time.Time) error {
 	return s.SaveResult(ctx, agentID, "", records, checkedAt, false)
 }
 
+// SaveResult implements Store.
 func (s *SQLite) SaveResult(ctx context.Context, agentID, checkerName string, records []checker.ExpiryRecord, checkedAt time.Time, complete bool) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -117,6 +127,7 @@ func (s *SQLite) SaveResult(ctx context.Context, agentID, checkerName string, re
 	return tx.Commit()
 }
 
+// RecordCheckerHealth implements Store.
 func (s *SQLite) RecordCheckerHealth(ctx context.Context, checkerName, reportedBy string, checkErr error) error {
 	now := time.Now().Unix()
 	if checkErr == nil {
@@ -206,6 +217,7 @@ func (s *SQLite) ListCurrent(ctx context.Context) ([]StoredRecord, error) {
 	return scanStoredRecords(rows)
 }
 
+// History implements Store.
 func (s *SQLite) History(ctx context.Context, source, name, kind string) ([]StoredRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT source, name, kind, expires_at, metadata_json, reported_by, checked_at
@@ -240,6 +252,7 @@ func scanStoredRecords(rows *sql.Rows) ([]StoredRecord, error) {
 	return records, rows.Err()
 }
 
+// CheckerHealth implements Store.
 func (s *SQLite) CheckerHealth(ctx context.Context) ([]CheckerHealth, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT checker_name, agent_id, last_seen_at, last_success_at, consecutive_failures, last_error
 		FROM agent_checker_health ORDER BY agent_id, checker_name`)
@@ -264,12 +277,14 @@ func (s *SQLite) CheckerHealth(ctx context.Context) ([]CheckerHealth, error) {
 	return results, rows.Err()
 }
 
+// TouchAgent implements Store.
 func (s *SQLite) TouchAgent(ctx context.Context, agentID string) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO agents (agent_id, last_seen_at) VALUES (?, ?)
 		ON CONFLICT(agent_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`, agentID, time.Now().Unix())
 	return err
 }
 
+// Agents implements Store.
 func (s *SQLite) Agents(ctx context.Context) ([]AgentSeen, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT agent_id, last_seen_at FROM agents ORDER BY agent_id`)
 	if err != nil {
@@ -289,6 +304,7 @@ func (s *SQLite) Agents(ctx context.Context) ([]AgentSeen, error) {
 	return out, rows.Err()
 }
 
+// ForgetAgent implements Store.
 func (s *SQLite) ForgetAgent(ctx context.Context, agentID string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

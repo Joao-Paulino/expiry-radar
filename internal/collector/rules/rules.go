@@ -18,8 +18,11 @@ type Rule struct {
 
 // Store is the rules persistence interface.
 type Store interface {
+	// Get returns the rule for one item; found is false when it has none.
 	Get(ctx context.Context, source, name, kind string) (Rule, bool, error)
+	// Upsert creates or replaces the rule for r's source, name and kind.
 	Upsert(ctx context.Context, r Rule) error
+	// List returns every rule.
 	List(ctx context.Context) ([]Rule, error)
 }
 
@@ -33,6 +36,7 @@ func NewSQLite(database *sql.DB) *SQLite {
 	return &SQLite{db: database}
 }
 
+// Upsert implements Store.
 func (s *SQLite) Upsert(ctx context.Context, r Rule) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO rules (source, name, kind, muted, owner)
@@ -42,6 +46,7 @@ func (s *SQLite) Upsert(ctx context.Context, r Rule) error {
 	return err
 }
 
+// Get implements Store.
 func (s *SQLite) Get(ctx context.Context, source, name, kind string) (Rule, bool, error) {
 	var muted bool
 	var owner string
@@ -55,6 +60,7 @@ func (s *SQLite) Get(ctx context.Context, source, name, kind string) (Rule, bool
 	return Rule{Source: source, Name: name, Kind: kind, Muted: muted, Owner: owner}, true, nil
 }
 
+// List implements Store.
 func (s *SQLite) List(ctx context.Context) ([]Rule, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT source, name, kind, muted, owner FROM rules`)
 	if err != nil {

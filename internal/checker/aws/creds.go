@@ -101,6 +101,7 @@ type apiError struct {
 	msg    string
 }
 
+// Error describes the failed AWS call with its HTTP status and message.
 func (e *apiError) Error() string { return fmt.Sprintf("%s: HTTP %d %s", e.what, e.status, e.msg) }
 
 func (e *apiError) retryable() bool {

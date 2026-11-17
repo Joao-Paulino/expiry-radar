@@ -84,6 +84,7 @@ func subjectFor(n alert.Notification) string {
 	return sanitizeHeaderValue(prefix + subject)
 }
 
+// Send delivers n as an email over SMTP (STARTTLS or implicit TLS). It implements alert.Notifier.
 func (e *Email) Send(ctx context.Context, n alert.Notification) error {
 	if err := e.cfg.Validate(); err != nil {
 		return err

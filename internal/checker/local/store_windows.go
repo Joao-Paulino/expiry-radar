@@ -16,7 +16,10 @@ import (
 
 type storeChecker struct{ stores []string }
 
+// Name is the checker name reported to the collector.
 func (s *storeChecker) Name() string { return "windows-certstore" }
+
+// Kind is the record kind this checker produces.
 func (s *storeChecker) Kind() string { return "certificate" }
 
 // Check enumerates the LocalMachine stores read-only. Source is

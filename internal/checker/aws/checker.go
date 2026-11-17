@@ -79,7 +79,12 @@ func Checkers(cfg Config) []checker.Checker {
 	return out
 }
 
+// Name is the checker name reported to the collector: "aws",
+// "aws-access-keys" or "aws-secrets" (see Checkers).
 func (c *Checker) Name() string { return c.name }
+
+// Kind is the checker's main record kind; individual records carry
+// their own kind (certificate, access_key, secret).
 func (c *Checker) Kind() string { return "certificate" }
 
 type target struct {

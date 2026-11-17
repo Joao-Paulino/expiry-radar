@@ -51,6 +51,9 @@ func (c *Config) scopes() []string {
 	return s
 }
 
+// Validate checks the GCP section of the agent configuration: the auth
+// method and its fields, the scope (organization, folders or projects)
+// and the service list. It reads no files and makes no network calls.
 func (c *Config) Validate() error {
 	switch c.Auth {
 	case "metadata":

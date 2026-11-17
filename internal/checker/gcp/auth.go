@@ -78,6 +78,7 @@ type apiError struct {
 	msg    string
 }
 
+// Error describes the failed Google API call with its HTTP status and message.
 func (e *apiError) Error() string { return fmt.Sprintf("%s: HTTP %d %s", e.what, e.status, e.msg) }
 
 // disabled: the API is not enabled in that project (nothing of that

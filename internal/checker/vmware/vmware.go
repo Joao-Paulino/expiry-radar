@@ -43,6 +43,9 @@ type Config struct {
 
 func (c *Config) on(b *bool) bool { return b == nil || *b }
 
+// Validate checks the VMware section of the agent configuration: an
+// https vCenter URL without path or credentials, a username and a
+// password file. It does not read the password file.
 func (c *Config) Validate() error {
 	u, err := url.Parse(c.URL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") {
@@ -54,12 +57,17 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// Checker reports vCenter and ESXi certificates and vSphere licences
+// through the vCenter REST and SOAP APIs, read only.
 type Checker struct {
 	cfg  Config
 	http *http.Client
 	tls  *tls.Config
 }
 
+// New returns a VMware checker for cfg. It loads ca_file (if set) as
+// the only trusted roots for vCenter, so a bad file fails at start-up
+// rather than on the first run. Redirects are never followed.
 func New(cfg Config) (*Checker, error) {
 	tc := &tls.Config{MinVersion: tls.VersionTLS12}
 	if cfg.CAFile != "" {
@@ -80,7 +88,11 @@ func New(cfg Config) (*Checker, error) {
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
+// Name is the checker name reported to the collector.
 func (c *Checker) Name() string { return "vmware" }
+
+// Kind is the checker's main record kind; licences carry kind
+// "license" on each record.
 func (c *Checker) Kind() string { return "certificate" }
 
 func (c *Checker) host() string { u, _ := url.Parse(c.cfg.URL); return u.Host }

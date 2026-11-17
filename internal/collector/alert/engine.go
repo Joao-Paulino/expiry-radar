@@ -13,11 +13,12 @@ import (
 // Severity is how urgently a record needs attention.
 type Severity string
 
+// Severities, from the record's days left against Thresholds.
 const (
-	SeverityOK       Severity = "ok"
-	SeverityWarning  Severity = "warning"
-	SeverityCritical Severity = "critical"
-	SeverityUnknown  Severity = "unknown"
+	SeverityOK       Severity = "ok"       // more days left than the warning threshold
+	SeverityWarning  Severity = "warning"  // within the warning threshold
+	SeverityCritical Severity = "critical" // within the critical threshold, or expired
+	SeverityUnknown  Severity = "unknown"  // no expiry date to judge
 )
 
 // Threshold is the warn/critical boundary, in days remaining, for one Kind.
