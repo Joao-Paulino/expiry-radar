@@ -53,6 +53,10 @@ type handler struct {
 	err error
 }
 
+// Execute is called by the Service Control Manager: it starts fn,
+// reports Running, and on Stop or Shutdown cancels fn's context and
+// waits up to stopTimeout. An error from fn exits with code 1 so the
+// SCM applies the recovery actions. It implements svc.Handler.
 func (h *handler) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
 	status <- svc.Status{State: svc.StartPending}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -94,6 +98,7 @@ func (h *handler) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<
 // reads like one.
 type eventWriter struct{ el *eventlog.Log }
 
+// Write implements io.Writer for the standard logger.
 func (w eventWriter) Write(p []byte) (int, error) {
 	msg := strings.TrimRight(string(p), "\r\n")
 	lower := strings.ToLower(msg)

@@ -69,7 +69,12 @@ func Checkers(cfg Config) []checker.Checker {
 	return out
 }
 
+// Name is the checker name reported to the collector: "gcp",
+// "gcp-service-account-keys" or "gcp-secrets" (see Checkers).
 func (c *Checker) Name() string { return c.name }
+
+// Kind is the checker's main record kind; individual records carry
+// their own kind (certificate, service_account_key, secret).
 func (c *Checker) Kind() string { return "certificate" }
 
 func (c *Checker) get(ctx context.Context, tok, u string, out any) error {

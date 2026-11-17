@@ -10,6 +10,8 @@ import (
 // providers send "true").
 type flexBool bool
 
+// UnmarshalJSON accepts true, false, "true" and "false"; anything else
+// is false.
 func (b *flexBool) UnmarshalJSON(data []byte) error {
 	var v any
 	if err := json.Unmarshal(data, &v); err != nil {

@@ -13,14 +13,24 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 )
 
+// MaxBodyBytes caps one pushed batch. A large estate is a few thousand
+// records of a few hundred bytes each, so 16 MiB leaves ample headroom
+// while stopping a faulty or hostile agent from exhausting memory.
+const MaxBodyBytes = 16 << 20
+
 // Handler decodes a pushed checker.Batch and persists its results.
 func Handler(st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
 		var batch checker.Batch
-		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxBodyBytes)).Decode(&batch); err != nil {
 			log.Printf("ingest: decode error: %s", logging.Sanitize(err.Error()))
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				return
+			}
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}

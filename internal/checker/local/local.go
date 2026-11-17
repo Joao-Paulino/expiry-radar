@@ -80,7 +80,10 @@ func Checkers(c *Config) []checker.Checker {
 
 type fileChecker struct{ paths []string }
 
+// Name is the checker name reported to the collector.
 func (f *fileChecker) Name() string { return "local-certs" }
+
+// Kind is the record kind this checker produces.
 func (f *fileChecker) Kind() string { return "certificate" }
 
 // Check parses every certificate file under the configured paths. A

@@ -23,6 +23,7 @@ func NewTeams(webhookURL string) *Teams {
 	return &Teams{webhookURL: webhookURL, client: &http.Client{Timeout: 15 * time.Second}}
 }
 
+// Send delivers n as a message to the Microsoft Teams webhook. It implements alert.Notifier.
 func (tm *Teams) Send(ctx context.Context, n alert.Notification) error {
 	body, err := json.Marshal(map[string]string{"text": messageFor(n)})
 	if err != nil {

@@ -51,6 +51,7 @@ func messageFor(n alert.Notification) string {
 	}
 }
 
+// Send delivers n as a message to the Slack incoming webhook. It implements alert.Notifier.
 func (s *Slack) Send(ctx context.Context, n alert.Notification) error {
 	body, err := json.Marshal(map[string]string{"text": messageFor(n)})
 	if err != nil {

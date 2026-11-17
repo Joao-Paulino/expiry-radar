@@ -110,7 +110,11 @@ func sameOrigin(first, next string) error {
 	return nil
 }
 
+// Name is the checker name reported to the collector.
 func (c *Checker) Name() string { return "azure" }
+
+// Kind is the checker's main record kind; Key Vault secrets, keys and
+// app credentials carry their own kind on each record.
 func (c *Checker) Kind() string { return "certificate" }
 
 type vaultTarget struct {

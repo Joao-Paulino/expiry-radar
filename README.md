@@ -185,6 +185,8 @@ journalctl -u expiry-radar-agent -f
 Only the services you need: on an agent-only host enable just `expiry-radar-agent`. Files the agent checks must be readable by the service account (`LocalService` / `expiry-radar`). On arm64 use the `-linux-arm64` binaries.
 Só os serviços de que precisas: numa máquina só com agente ativa apenas o `expiry-radar-agent`. Os ficheiros que o agente verifica têm de ser legíveis pela conta do serviço (`LocalService` / `expiry-radar`). Em arm64 usa os binários `-linux-arm64`.
 
+> 🏗️ How it is built (components, data flow, security model): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) / Como está construído: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 ## 🚀 Quick start / Início rápido
 
 Requires Go 1.25 or newer (releases are built with Go 1.26) · Requer Go 1.25 ou mais recente (as releases são compiladas com Go 1.26)
