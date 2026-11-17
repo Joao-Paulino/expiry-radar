@@ -1,0 +1,95 @@
+openapi: 3.0.3
+info:
+  title: Expiry Radar collector ingest API
+  version: "1"
+  description: |
+    The only endpoint agents call. Agents authenticate with a bearer token
+    listed in the collector's auth_tokens. Bodies above 16 MiB are refused
+    with 413. checked_at values more than 5 minutes in the future are
+    clamped to the receive time.
+servers:
+  - url: https://127.0.0.1:18443
+paths:
+  /ingest:
+    post:
+      summary: Push one batch of checker results
+      security:
+        - agentToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Batch"
+            example:
+              agent_id: agent-01
+              results:
+                - checker_name: tls-checker
+                  checked_at: "2026-11-17T09:00:00Z"
+                  records:
+                    - source: tls://example.com:443
+                      name: example.com
+                      kind: certificate
+                      expires_at: "2027-01-01T00:00:00Z"
+                      metadata:
+                        issuer: Example CA
+      responses:
+        "204":
+          description: Stored
+        "400":
+          description: Body is not a valid batch
+        "401":
+          description: Missing or unknown bearer token
+        "413":
+          description: Body larger than 16 MiB
+        "500":
+          description: Storage error
+components:
+  securitySchemes:
+    agentToken:
+      type: http
+      scheme: bearer
+  schemas:
+    Batch:
+      type: object
+      required: [results]
+      properties:
+        agent_id:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/Result"
+    Result:
+      type: object
+      required: [checker_name, checked_at]
+      properties:
+        checker_name:
+          type: string
+        checked_at:
+          type: string
+          format: date-time
+        err_msg:
+          type: string
+          description: Set when the checker failed; the run is then incomplete
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExpiryRecord"
+    ExpiryRecord:
+      type: object
+      required: [source, name, kind, expires_at]
+      properties:
+        source:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties:
+            type: string

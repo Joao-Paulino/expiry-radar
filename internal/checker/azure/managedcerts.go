@@ -160,8 +160,12 @@ func (c *Checker) checkManagedCerts(ctx context.Context, src tokenSource) ([]che
 		var out []armResource
 		for _, raw := range items {
 			var r armResource
-			if err := json.Unmarshal(raw, &r); err != nil || r.ID == "" {
+			if err := json.Unmarshal(raw, &r); err != nil {
 				errs = append(errs, fmt.Errorf("%s: unreadable item: %v", path, err))
+				continue
+			}
+			if r.ID == "" {
+				errs = append(errs, fmt.Errorf("%s: item without an id", path))
 				continue
 			}
 			out = append(out, r)

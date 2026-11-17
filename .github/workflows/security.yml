@@ -25,6 +25,8 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -37,10 +39,17 @@ jobs:
         with:
           category: codeql-go
           output: codeql-results
-      - name: CodeQL findings (summary)
+      - name: CodeQL findings (gate)
+        # Fails on any finding except the reviewed, accepted ones listed in
+        # .github/codeql-accepted.txt as "<rule> <path>" with a reason.
         run: |
-          jq -r '.runs[].results[] | "\(.level) \(.ruleId) \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine) | \(.message.text[0:160])"' codeql-results/*.sarif | sort | uniq
-          echo "total: $(jq '[.runs[].results[]] | length' codeql-results/*.sarif)"
+          jq -r '.runs[].results[] | "\(.ruleId) \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine) | \(.message.text[0:160])"' codeql-results/*.sarif | sort | uniq | tee findings.txt
+          new=0
+          while read -r rule loc _; do
+            path=${loc%%:*}
+            if ! grep -q "^$rule $path " .github/codeql-accepted.txt; then echo "::error file=$path::new CodeQL finding: $rule at $loc"; new=1; fi
+          done < findings.txt
+          exit $new
 
   gosec:
     runs-on: ubuntu-latest
@@ -49,24 +58,28 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.4
-      - name: gosec (report)
-        run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
-      - uses: github/codeql-action/upload-sarif@v3
+      - name: gosec (gate)
+        # Fails on any finding not suppressed with a justified #nosec;
+        # the SARIF copy goes to the Security tab either way.
+        run: gosec -fmt sarif -out gosec.sarif -stdout -verbose text ./...
+      - if: always()
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: gosec.sarif
           category: gosec
-      - name: gosec (gate)
-        # Fails on any finding not suppressed with a justified #nosec.
-        run: gosec -quiet -fmt text ./...
 
   zap:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -77,12 +90,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: zap-report
-          path: zap/zap-report.*
+          path: |
+            zap/*.html
+            zap/*.json
+            zap/*.md
 
   fuzz:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
