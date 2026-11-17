@@ -229,7 +229,7 @@ func doGet(ctx context.Context, hc *http.Client, method, u string, hdr map[strin
 func containerToken(getenv func(string) string) (map[string]string, error) {
 	hdr := map[string]string{}
 	if f := getenv("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"); f != "" {
-		b, err := os.ReadFile(f) // #nosec G304 -- path comes from the operator's own configuration, not from remote input
+		b, err := os.ReadFile(f) // #nosec G304 -- token file path set by the platform (EKS/ECS) in the agent's own environment
 		if err != nil {
 			return nil, fmt.Errorf("aws: container authorization token: %w", err)
 		}

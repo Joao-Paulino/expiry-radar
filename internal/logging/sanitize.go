@@ -20,7 +20,7 @@ var keyValueRE = regexp.MustCompile(`(?i)(password|secret|token|apikey|api_key|a
 // line or drive the terminal. Unicode line and paragraph separators
 // (shown as line breaks by many viewers) and bidirectional formatting
 // characters (which can make a line read differently from what it
-// holds) are neutralised too.
+// holds) and zero-width characters are neutralised too.
 func Sanitize(s string) string {
 	s = pemBlockRE.ReplaceAllString(s, "[REDACTED-PEM]")
 	s = keyValueRE.ReplaceAllString(s, "$1=[REDACTED]")
@@ -44,11 +44,13 @@ func Sanitize(s string) string {
 }
 
 func unsafeRune(r rune) bool {
-	return unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || isBidi(r)
+	return unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || hidden(r)
 }
 
-// isBidi reports the Unicode bidirectional formatting characters
-// (LRM, RLM, embeddings, overrides and isolates).
-func isBidi(r rune) bool {
-	return r == '\u200e' || r == '\u200f' || (r >= '\u202a' && r <= '\u202e') || (r >= '\u2066' && r <= '\u2069')
+// hidden reports characters that change how a line reads without being
+// visible: every Unicode bidirectional control (marks, embeddings,
+// overrides, isolates, the Arabic letter mark), the zero-width space and
+// the byte order mark.
+func hidden(r rune) bool {
+	return unicode.Is(unicode.Bidi_Control, r) || r == '\u200b' || r == '\ufeff'
 }
