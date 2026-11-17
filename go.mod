@@ -13,5 +13,4 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.9 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/tetratelabs/wazero v1.11.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
 )
