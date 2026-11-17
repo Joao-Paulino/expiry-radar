@@ -5,7 +5,7 @@ if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]:
     exit
 }
 
-$VERSION = "v0.8.1"
+$VERSION = "v0.8.2"
 $REPO = "Joao-Paulino/expiry-radar"
 $BASE_URL = "https://github.com/$REPO/releases/download/$VERSION"
 $DEFAULT_COL_DIR = "C:\ExpiryRadar\collector"
