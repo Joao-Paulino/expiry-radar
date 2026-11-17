@@ -51,6 +51,19 @@ antes que algo expire.
 | 🔑 | Separate agent and admin tokens, HTTPS only | Tokens separados para agentes e administração, só HTTPS |
 | 🙈 | Never stores secret values, only names and dates | Nunca guarda valores secretos, só nomes e datas |
 
+## ⚖️ How it compares / Comparação
+
+| Tool / Ferramenta | What it covers well / O que cobre bem | What Expiry Radar adds / O que o Expiry Radar acrescenta |
+|---|---|---|
+| **Prometheus** (blackbox / ssl exporters) + Alertmanager | TLS certificate dates on any endpoint, alerting / Datas de certificados TLS em qualquer endpoint, alertas | Cloud secrets and keys (Key Vault, App Registrations, IAM, Secret Manager), Vault, VMware licences, planned OPC UA and cloud IoT; agents only connect out (no inbound firewall rules into OT zones); inventory, history, owners and audit export out of the box / Segredos e chaves na cloud, Vault, licenças VMware, OPC UA e IoT na cloud planeados; agentes só fazem ligações de saída (sem regras de entrada nas zonas OT); inventário, histórico, donos e exportação para auditoria de origem |
+| **Zabbix, Nagios, Checkmk** | General monitoring with TLS certificate checks / Monitorização geral com verificação de certificados TLS | Same as above: cloud and secret coverage without writing custom scripts / O mesmo: cobertura de cloud e segredos sem escrever scripts próprios |
+| **Uptime Kuma** and similar / e semelhantes | Simple uptime and TLS expiry notifications for websites / Disponibilidade e aviso de expiração TLS para sites | Everything that is not a public website / Tudo o que não é um site público |
+| **cert-manager** | Issues and renews certificates inside Kubernetes / Emite e renova certificados dentro de Kubernetes | Watches what is *outside* its reach: other clusters, VMs, appliances, cloud, OT / Vigia o que está fora do seu alcance: outros clusters, VMs, appliances, cloud, OT |
+| **Cloud-native alerts** (ACM, Key Vault events, etc.) | Expiry events inside one provider / Eventos de expiração dentro de um fornecedor | One view across Azure, AWS, GCP, Vault and on-premises / Uma vista única sobre Azure, AWS, GCP, Vault e on-premises |
+| **Enterprise CLM** (Keyfactor, CyberArk/Venafi, AppViewX, DigiCert, Sectigo) | Full certificate lifecycle: discovery, issuance, automated renewal, policy / Ciclo de vida completo: descoberta, emissão, renovação automática, políticas | Free and open source, a single small binary, read only, minutes to install; covers secrets, keys and licences, not only certificates. It does not issue or renew: it tells you in time / Gratuito e open source, um único binário pequeno, só leitura, instala em minutos; cobre segredos, chaves e licenças, não só certificados. Não emite nem renova: avisa a tempo |
+
+Use Expiry Radar alongside these tools, not instead of them. / Usa o Expiry Radar em conjunto com estas ferramentas, não em vez delas.
+
 ## 🧭 How it works / Como funciona
 
 ```
