@@ -856,6 +856,41 @@ Só leitura, nunca escreve nos equipamentos; o agente fica na zona OT ou na DMZ 
 - [x] Managed certificates: App Service, Front Door, Application Gateway / Certificados geridos: App Service, Front Door, Application Gateway
 - [x] Items that disappear stop alerting and resolve once / Itens que desaparecem deixam de alertar e são resolvidos uma vez
 
+**Done in M4 / Concluído no M4**
+
+- [x] AWS auth without stored secrets: instance role, web identity, IAM Roles Anywhere; multi-account with assume_roles / Autenticação AWS sem segredos guardados: instance role, web identity, IAM Roles Anywhere; várias contas com assume_roles
+- [x] ACM and IAM server certificates / Certificados ACM e IAM server certificates
+- [x] IAM access key age / Idade das access keys IAM
+- [x] Secrets Manager rotation / Rotação no Secrets Manager
+
+**Done in M5 / Concluído no M5**
+
+- [x] GCP Certificate Manager certificates / Certificados do Certificate Manager
+- [x] Service account keys / Chaves de service accounts
+- [x] Secret Manager expiry and rotation; organization and folder discovery / Validade e rotação no Secret Manager; descoberta por organização e pastas
+
+**Done in M6 / Concluído no M6**
+
+- [x] vCenter and ESXi certificates / Certificados vCenter e ESXi
+- [x] vSphere licences / Licenças vSphere
+
+**Done since M6 / Concluído depois do M6**
+
+- [x] Local certificates: PEM/DER files and Windows certificate stores / Certificados locais: ficheiros PEM/DER e lojas de certificados Windows
+- [x] Collector and agent as Windows services and systemd daemons; installers for Windows and Linux / Collector e agente como serviços Windows e daemons systemd; instaladores Windows e Linux
+- [x] Dashboard redesign with dark and light themes and strict CSP / Novo painel com tema escuro e claro e CSP estrita
+- [x] SSO tested end to end against Keycloak in CI / SSO testado de ponta a ponta contra Keycloak no CI
+- [x] Per-agent tokens bound to the agent ID; earliest expiry wins across agents / Tokens por agente ligados ao ID; ganha a expiração mais próxima entre agentes
+- [x] Security testing on every PR: CodeQL, gosec, OWASP ZAP, fuzzing; pentest report and ASVS L2 / Testes de segurança em cada PR: CodeQL, gosec, OWASP ZAP, fuzzing; relatório de pentest e ASVS L2
+- [x] Supply chain: signed build provenance, SBOM and VEX per binary; OpenSSF Baseline / Cadeia de fornecimento: proveniência assinada, SBOM e VEX por binário; OpenSSF Baseline
+
+**In progress in M7 / Em curso no M7**
+
+- [x] OPC UA server certificates (discovery only, no session) / Certificados de servidores OPC UA (só descoberta, sem sessão)
+- [x] OPC UA PKI stores (local checker) and MQTT/AMQP brokers (TLS checker) documented / Stores PKI OPC UA (checker local) e brokers MQTT/AMQP (checker TLS) documentados
+- [ ] OT-safe mode for the TLS checker (pauses, short timeouts) / Modo OT-safe no checker TLS (pausas, timeouts curtos)
+- [ ] Security test against OWASP IoT Top 10 / Teste de segurança segundo o OWASP IoT Top 10
+
 ## 🛡️ Security / Segurança
 
 Agents only read expiry metadata and never send private keys or secret values.
