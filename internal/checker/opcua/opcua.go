@@ -44,6 +44,9 @@ func (c Config) Validate() error {
 	}
 	seen := map[string]bool{}
 	for _, t := range c.Targets {
+		if len(t.Endpoint) > 4096 {
+			return errors.New("opcua: endpoint longer than 4096 characters")
+		}
 		if seen[t.Endpoint] {
 			return fmt.Errorf("opcua: endpoint %q listed twice", t.Endpoint)
 		}
