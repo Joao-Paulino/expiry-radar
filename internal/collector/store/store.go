@@ -165,6 +165,11 @@ func (r StoredRecord) Status() string {
 	return s
 }
 
+// StaleAfter is how much older than an item's newest report another
+// agent's row may be and still count in ListCurrent. It is longer than
+// any sensible check interval, so agents on a daily schedule still count.
+const StaleAfter = 48 * time.Hour
+
 // ListCurrent returns, per (source, name, kind), the newest row among
 // the agents that still report it. An agent's newest row for an item is
 // gone only when that agent and checker then completed two error-free
@@ -178,7 +183,10 @@ func (r StoredRecord) Status() string {
 // When several agents currently report the same item, the one expiring
 // first is returned: an endpoint behind a load balancer may still serve
 // an old certificate, and no agent can mask what another one sees by
-// reporting a later date.
+// reporting a later date. Rows with alerts=off lose to rows that alert,
+// so an agent cannot silence another's key alert either. Rows more than
+// StaleAfter older than the item's newest report are ignored: an agent
+// that stopped running that checker must not pin an outdated date.
 func (s *SQLite) ListCurrent(ctx context.Context) ([]StoredRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		WITH per_agent AS (
@@ -207,17 +215,25 @@ func (s *SQLite) ListCurrent(ctx context.Context) ([]StoredRecord, error) {
 						WHERE r.agent_id = h.agent_id AND r.checker_name = h.checker_name AND r.prev_complete_at > e.checked_at
 					)
 				))
+		),
+		recent AS (
+			SELECT * FROM (
+				SELECT l.*, MAX(l.checked_at) OVER (PARTITION BY l.source, l.name, l.kind) AS newest
+				FROM live l
+			)
+			WHERE checked_at >= newest - ?
 		)
 		SELECT source, name, kind, expires_at, metadata_json, reported_by, checked_at
 		FROM (
-			SELECT l.*, ROW_NUMBER() OVER (
-				PARTITION BY l.source, l.name, l.kind
-				ORDER BY l.expires_at ASC, l.checked_at DESC, l.reported_by ASC
+			SELECT r.*, ROW_NUMBER() OVER (
+				PARTITION BY r.source, r.name, r.kind
+				ORDER BY COALESCE(json_extract(r.metadata_json, '$.alerts'), '') = 'off' ASC,
+					julianday(r.expires_at) ASC, r.checked_at DESC, r.reported_by ASC
 			) AS pick
-			FROM live l
+			FROM recent r
 		)
 		WHERE pick = 1
-	`)
+	`, int64(StaleAfter))
 	if err != nil {
 		return nil, err
 	}

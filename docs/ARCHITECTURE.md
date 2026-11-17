@@ -168,7 +168,7 @@ Schema changes are forward migrations in `internal/collector/db`, applied at sta
 
 ### What is "current"
 
-`store.ListCurrent` takes, for each (source, name, kind), the newest report per agent and then, across agents, the one **expiring first** (an endpoint behind a load balancer may still serve an old certificate, and no agent can mask what another one sees). An item is **gone**, and stops being shown and alerted, only after the checker that reported it has completed **two** error-free runs on that agent without it. One run is not enough, because a load balancer may alternate certificates between requests. Other rules:
+`store.ListCurrent` takes, for each (source, name, kind), the newest report per agent and then, across agents, the one **expiring first** (an endpoint behind a load balancer may still serve an old certificate, and no agent can mask what another one sees; reports more than 48 h behind the item's newest one do not count). An item is **gone**, and stops being shown and alerted, only after the checker that reported it has completed **two** error-free runs on that agent without it. One run is not enough, because a load balancer may alternate certificates between requests. Other rules:
 
 - A failing run never hides anything, since it may be partial.
 - Rows from before checker names were stored are gone only once every checker on that agent has completed.
@@ -222,7 +222,7 @@ flowchart TB
 |---|---|
 | Stolen agent token | Can only submit reports, never read data, and only as its own agent: per-agent tokens (`agents`) are bound to an `agent_id`, so a batch claiming another agent is refused (403). Remove the entry to revoke it. Shared `auth_tokens` (older setups) lack this binding and log a warning. |
 | Fake collector | Agents trust only `collector_ca_file`, not the system roots, when it is set. |
-| Fake report hiding an expiry | When agents disagree, the earliest expiry wins, so no agent can mask what another sees; items vanish only after two complete runs of the agent that reported them; future timestamps are clamped. A compromised agent can still lie about the items only it reports. |
+| Fake report hiding an expiry | When agents disagree, the earliest expiry wins and a row with `alerts=off` never beats one that alerts, so no agent can mask what another sees; rows more than 48 h older than the newest report for the item are ignored; items vanish only after two complete runs of the agent that reported them; future timestamps are clamped. A compromised agent can still lie about the items only it reports. |
 | Password guessing | Per-address throttle (5 per 15 min) and account lockout after 20 failures; TOTP required. |
 | Session theft or CSRF | Strict cookie flags, short lifetimes, CSRF tokens, "sign out all sessions" button. |
 | XSS or clickjacking | Contextual escaping by `html/template`; CSP `default-src 'self'` with no inline scripts or styles; `frame-ancestors 'none'`; HSTS. |

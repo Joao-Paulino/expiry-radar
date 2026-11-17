@@ -226,3 +226,73 @@ func TestListCurrent_EarliestExpiryAcrossAgentsWins(t *testing.T) {
 		t.Fatalf("want one row, the earliest expiry from honest-agent, got %+v", cur)
 	}
 }
+
+// A second agent must not silence a key alert by reporting the same key
+// slightly earlier with alerts=off (review of BUSL-01).
+func TestListCurrent_AlertsOffRowLosesToAlertingRow(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	t0 := time.Now().Add(-time.Hour)
+	key := checker.ExpiryRecord{Source: "aws://iam/1/user/bob/access_key_1", Name: "bob · key 1", Kind: "access_key", ExpiresAt: time.Now().Add(-48 * time.Hour)}
+	quiet := key
+	quiet.ExpiresAt = key.ExpiresAt.Add(-time.Hour)
+	quiet.Metadata = map[string]string{"alerts": "off"}
+	if err := s.SaveResult(ctx, "honest-agent", "aws", []checker.ExpiryRecord{key}, t0, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveResult(ctx, "rogue-agent", "aws", []checker.ExpiryRecord{quiet}, t0.Add(time.Minute), true); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := s.ListCurrent(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cur) != 1 || cur[0].ReportedBy != "honest-agent" || cur[0].Informational() {
+		t.Fatalf("alerts=off row hid the alerting one: %+v", cur)
+	}
+}
+
+// A row far older than the newest report for the same item (its agent
+// stopped running that checker) must not keep winning over fresh reports.
+func TestListCurrent_StaleRowDoesNotBeatFreshOnes(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	old := time.Now().Add(-5 * 24 * time.Hour)
+	expired := checker.ExpiryRecord{Source: "tls://web:443", Name: "web", Kind: "certificate", ExpiresAt: time.Now().Add(-24 * time.Hour)}
+	renewed := expired
+	renewed.ExpiresAt = time.Now().Add(300 * 24 * time.Hour)
+	if err := s.SaveResult(ctx, "agent-a", "tls-checker", []checker.ExpiryRecord{expired}, old, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveResult(ctx, "agent-b", "tls-checker", []checker.ExpiryRecord{renewed}, time.Now(), true); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := s.ListCurrent(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cur) != 1 || cur[0].ReportedBy != "agent-b" {
+		t.Fatalf("stale row still wins: %+v", cur)
+	}
+}
+
+// Sub-second expiry differences must order by time, not by text.
+func TestListCurrent_EarliestExpirySubSecond(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	t0 := time.Now().Add(-time.Hour)
+	base := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	a := checker.ExpiryRecord{Source: "tls://x:443", Name: "x", Kind: "certificate", ExpiresAt: base}
+	b := a
+	b.ExpiresAt = base.Add(500 * time.Millisecond)
+	if err := s.SaveResult(ctx, "agent-a", "tls-checker", []checker.ExpiryRecord{a}, t0, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveResult(ctx, "agent-b", "tls-checker", []checker.ExpiryRecord{b}, t0, true); err != nil {
+		t.Fatal(err)
+	}
+	cur, _ := s.ListCurrent(ctx)
+	if len(cur) != 1 || cur[0].ReportedBy != "agent-a" {
+		t.Fatalf("want agent-a (earlier by 0.5 s), got %+v", cur)
+	}
+}

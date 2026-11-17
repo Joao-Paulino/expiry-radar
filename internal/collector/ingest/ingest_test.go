@@ -214,3 +214,22 @@ func TestHandler_BoundTokenCannotImpersonate(t *testing.T) {
 		t.Fatalf("missing agent_id must default to the bound one: %d %v", code, st.touched)
 	}
 }
+
+// A shared (unbound) token kept from before per-agent tokens must not
+// report as an agent that has its own token (review of BUSL-02).
+func TestHandler_SharedTokenCannotUseBoundAgentID(t *testing.T) {
+	post := func(st *fakeStore, body string) int {
+		req := httptest.NewRequest("POST", "/ingest", strings.NewReader(body))
+		req = req.WithContext(auth.WithReservedAgents(req.Context(), map[string]bool{"web-01": true}))
+		rec := httptest.NewRecorder()
+		Handler(st)(rec, req)
+		return rec.Code
+	}
+	st := &fakeStore{}
+	if code := post(st, `{"agent_id":"web-01","results":[]}`); code != http.StatusForbidden || len(st.touched) != 0 {
+		t.Fatalf("shared token as bound id: got %d, touched %v", code, st.touched)
+	}
+	if code := post(st, `{"agent_id":"legacy-01","results":[]}`); code != http.StatusNoContent {
+		t.Fatalf("shared token, own legacy id: got %d", code)
+	}
+}

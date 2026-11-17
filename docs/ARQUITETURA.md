@@ -168,7 +168,7 @@ As alterações ao esquema são migrações progressivas em `internal/collector/
 
 ### O que está "atual"
 
-O `store.ListCurrent` pega, para cada (source, name, kind), no relatório mais recente de cada agente e depois, entre agentes, no que **expira primeiro** (um endpoint atrás de um load balancer pode ainda servir um certificado antigo, e nenhum agente consegue esconder o que outro vê). Um item é considerado **desaparecido**, e deixa de ser mostrado e alertado, só depois de o checker que o reportava ter feito **duas** execuções completas sem erros nesse agente sem o voltar a reportar. Uma só não chega, porque um load balancer pode alternar certificados entre pedidos. Outras regras:
+O `store.ListCurrent` pega, para cada (source, name, kind), no relatório mais recente de cada agente e depois, entre agentes, no que **expira primeiro** (um endpoint atrás de um load balancer pode ainda servir um certificado antigo, e nenhum agente consegue esconder o que outro vê; relatórios com mais de 48 h de atraso face ao mais recente do item não contam). Um item é considerado **desaparecido**, e deixa de ser mostrado e alertado, só depois de o checker que o reportava ter feito **duas** execuções completas sem erros nesse agente sem o voltar a reportar. Uma só não chega, porque um load balancer pode alternar certificados entre pedidos. Outras regras:
 
 - Uma execução com erros nunca esconde nada, porque pode estar incompleta.
 - Os registos anteriores ao armazenamento do nome do checker só desaparecem quando todos os checkers desse agente tiverem completado.
@@ -222,7 +222,7 @@ flowchart TB
 |---|---|
 | Token de agente roubado | Só serve para enviar relatórios, nunca para ler dados, e apenas como o seu próprio agente: os tokens por agente (`agents`) estão ligados a um `agent_id`, e um envio com outro agente é recusado (403). Para revogar, retira a entrada. Os `auth_tokens` partilhados (instalações antigas) não têm esta ligação e geram um aviso. |
 | Collector falso | Quando `collector_ca_file` está definido, os agentes só confiam nesse certificado, não nas raízes do sistema. |
-| Relatório falso a esconder uma expiração | Quando os agentes discordam, ganha a expiração mais próxima, por isso nenhum agente esconde o que outro vê; os itens só desaparecem após duas execuções completas do agente que os reportou; as datas no futuro são limitadas. Um agente comprometido ainda pode mentir sobre os itens que só ele reporta. |
+| Relatório falso a esconder uma expiração | Quando os agentes discordam, ganha a expiração mais próxima e uma linha com `alerts=off` nunca ganha a uma que alerta, por isso nenhum agente esconde o que outro vê; linhas mais de 48 h mais antigas do que o relatório mais recente do item são ignoradas; os itens só desaparecem após duas execuções completas do agente que os reportou; as datas no futuro são limitadas. Um agente comprometido ainda pode mentir sobre os itens que só ele reporta. |
 | Adivinhar a password | Limite por endereço (5 em 15 min) e bloqueio da conta após 20 falhas; TOTP obrigatório. |
 | Roubo de sessão ou CSRF | Cookies com flags restritas, durações curtas, tokens CSRF e botão "terminar todas as sessões". |
 | XSS ou clickjacking | Escape contextual pelo `html/template`; CSP `default-src 'self'` sem scripts nem estilos inline; `frame-ancestors 'none'`; HSTS. |

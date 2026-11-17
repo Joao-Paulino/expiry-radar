@@ -59,6 +59,12 @@ func BoundAgent(ctx context.Context) (string, bool) {
 // request context (see BoundAgent). Every candidate is compared, in
 // constant time, so the response time does not reveal which one matched.
 func AgentMiddleware(creds []Credential, next http.Handler) http.Handler {
+	reserved := map[string]bool{}
+	for _, c := range creds {
+		if c.AgentID != "" {
+			reserved[c.AgentID] = true
+		}
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		matched, agentID := false, ""
@@ -73,7 +79,24 @@ func AgentMiddleware(creds []Credential, next http.Handler) http.Handler {
 		}
 		if agentID != "" {
 			r = r.WithContext(WithBoundAgent(r.Context(), agentID))
+		} else {
+			r = r.WithContext(WithReservedAgents(r.Context(), reserved))
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+type reservedAgentsKey struct{}
+
+// WithReservedAgents returns ctx carrying the agent IDs that have their
+// own token. AgentMiddleware sets it for shared (unbound) tokens.
+func WithReservedAgents(ctx context.Context, ids map[string]bool) context.Context {
+	return context.WithValue(ctx, reservedAgentsKey{}, ids)
+}
+
+// IsReservedAgent reports whether agentID has its own token, so a shared
+// token must not report as it.
+func IsReservedAgent(ctx context.Context, agentID string) bool {
+	ids, _ := ctx.Value(reservedAgentsKey{}).(map[string]bool)
+	return ids[agentID]
 }
