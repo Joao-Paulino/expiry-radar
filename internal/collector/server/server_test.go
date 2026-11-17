@@ -276,6 +276,23 @@ func TestRun_SetsSecurityHeaders(t *testing.T) {
 	if pp := h.Get("Permissions-Policy"); !strings.Contains(pp, "camera=()") || !strings.Contains(pp, "geolocation=()") {
 		t.Errorf("Permissions-Policy = %q", pp)
 	}
+	// Dashboard pages and exports list the estate: never cached by the
+	// browser or a proxy (ASVS 8.1.1). Static assets stay cacheable.
+	for _, path := range []string{"/", "/export.json", "/history"} {
+		req, _ := http.NewRequest(http.MethodGet, "https://"+addr+path, nil)
+		req.Header.Set("Authorization", "Bearer admin-token-0123456789abcdef0123456789")
+		r, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if got := r.Header.Get("Cache-Control"); got != "no-store" {
+			t.Errorf("%s: Cache-Control = %q, want no-store", path, got)
+		}
+	}
+	if got := css.Header.Get("Cache-Control"); got == "no-store" {
+		t.Errorf("/static/app.css should stay cacheable, got %q", got)
+	}
 }
 
 // TestConfig_SSOSessionHours proves the SSO session lifetime defaults to
