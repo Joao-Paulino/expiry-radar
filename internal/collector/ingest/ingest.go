@@ -50,6 +50,11 @@ func Handler(st store.Store) http.HandlerFunc {
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}
+		} else if auth.IsReservedAgent(ctx, batch.AgentID) {
+			log.Printf("ingest: shared token tried to report as agent %q, which has its own token (from %s)",
+				logging.Sanitize(batch.AgentID), logging.Sanitize(r.RemoteAddr))
+			w.WriteHeader(http.StatusForbidden)
+			return
 		}
 
 		if batch.AgentID != "" {

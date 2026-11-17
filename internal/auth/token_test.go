@@ -67,3 +67,19 @@ func TestAgentMiddleware_ExposesBoundAgent(t *testing.T) {
 		t.Errorf("unknown token: %d", w.Code)
 	}
 }
+
+// A shared token's request carries the IDs that have their own token, so
+// ingest can refuse a shared token reporting as one of them.
+func TestAgentMiddleware_SharedTokenSeesReservedIDs(t *testing.T) {
+	creds := []Credential{{Token: "bound-token-0123456789abcdef0123", AgentID: "web-01"}, {Token: "shared-token-0123456789abcdef012"}}
+	var reserved, other bool
+	h := AgentMiddleware(creds, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reserved, other = IsReservedAgent(r.Context(), "web-01"), IsReservedAgent(r.Context(), "legacy-01")
+	}))
+	req := httptest.NewRequest("POST", "/ingest", nil)
+	req.Header.Set("Authorization", "Bearer shared-token-0123456789abcdef012")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if !reserved || other {
+		t.Fatalf("reserved(web-01)=%v reserved(legacy-01)=%v", reserved, other)
+	}
+}

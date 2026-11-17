@@ -3,8 +3,9 @@ info:
   title: Expiry Radar collector ingest API
   version: "1"
   description: |
-    The only endpoint agents call. Agents authenticate with a bearer token
-    listed in the collector's auth_tokens. Bodies above 16 MiB are refused
+    The only endpoint agents call. Agents authenticate with their own
+    bearer token (collector add-agent); a token may only report as its
+    agent ID (403 otherwise). Bodies above 16 MiB are refused
     with 413. checked_at values more than 5 minutes in the future are
     clamped to the receive time.
 servers:
@@ -40,6 +41,8 @@ paths:
           description: Body is not a valid batch
         "401":
           description: Missing or unknown bearer token
+        "403":
+          description: Token not allowed to report as this agent_id
         "413":
           description: Body larger than 16 MiB
         "500":
