@@ -7,6 +7,10 @@
 | Method | OWASP IoT Top 10 (2018), grey box: code review, tests against a hostile fake OPC UA server, fuzzing, interop against a real OPC UA server (python asyncua 2.1.0), independent code review |
 | Result | No open finding. One review finding (certificates with negative serials dropped) and nine gosec integer-conversion warnings fixed before release. One recommendation (I9). |
 
+## Summary (EN-US)
+
+Assessment of the Expiry Radar agent deployed in ICS/OT and IIoT networks against the OWASP IoT Top 10. The agent opens no ports, has no default passwords, talks to the collector over HTTPS only, stores no secrets, and never writes to field devices (OPC UA discovery only, no session). The OPC UA parser was tested against hostile servers and fuzzed. No open findings. Recommendation: enable `ot_safe` in OT networks (it is off by default so existing installations keep their behavior).
+
 ## Resumo (PT-PT)
 
 Avaliação do agente da Expiry Radar quando instalado em redes ICS/OT e IIoT, segundo o OWASP IoT Top 10. O agente não abre portas, não tem passwords por omissão, só fala HTTPS com o coletor, não guarda segredos e nunca escreve nos equipamentos (OPC UA só por descoberta, sem sessão). O parser OPC UA foi testado contra servidores hostis e com fuzzing. Não há falhas em aberto. Recomendação: ativar `ot_safe` em redes OT (não está ativo por omissão para não mudar o comportamento de instalações existentes).
@@ -23,7 +27,7 @@ Avaliação do agente da Expiry Radar quando instalado em redes ICS/OT e IIoT, s
 | I6 | Insufficient privacy protection | ✅ Pass | Only certificate and secret metadata (names, dates, issuers) is collected; never secret values, never personal data. |
 | I7 | Insecure data transfer and storage | ✅ Pass | Agent → collector over HTTPS only (enforced at start-up), TLS ≥ 1.2. The OPC UA discovery channel is unencrypted by design (SecurityPolicy None), but carries only the server's public certificate and no credentials. Local queue file `0600`; it holds metadata only. |
 | I8 | Lack of device management | ✅ Pass | Each agent has its own token and ID; the collector alerts on silent agents and failing checkers; agents can be forgotten from the dashboard; tokens revoked by removing them from the collector config. |
-| I9 | Insecure default settings | ⚠️ Pass with recommendation | Secure defaults: HTTPS required, certificate verification on, no listening ports, read only. `ot_safe` (≥ 1 h interval, one target at a time with 2 s pause, 5 s timeouts) is **opt-in** so existing IT installations keep their behaviour. **Recommendation: always set `"ot_safe": true` for agents in OT zones.** |
+| I9 | Insecure default settings | ⚠️ Pass with recommendation | Secure defaults: HTTPS required, certificate verification on, no listening ports, read only. `ot_safe` (≥ 1 h interval, one target at a time with 2 s pause, 5 s timeouts) is **opt-in** so existing IT installations keep their behavior. **Recommendation: always set `"ot_safe": true` for agents in OT zones.** |
 | I10 | Lack of physical hardening | N/A | Software only. Harden the host per ISA/IEC 62443-3-3 / plant baseline; the agent needs no admin rights (Linux: dedicated user via the installer; Windows: LocalService). |
 
 ## Safety towards field devices
