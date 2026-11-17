@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
 )
@@ -103,7 +104,8 @@ func leafFromPublicCertData(b64 string) (*x509.Certificate, error) {
 // sub, so a URL built from it cannot leave the ARM host or path.
 func safeResourceID(id, sub string) bool {
 	prefix := "/subscriptions/" + strings.ToLower(sub) + "/resourcegroups/"
-	return strings.HasPrefix(strings.ToLower(id), prefix) && !strings.ContainsAny(id, "?#%@\\ ") && !strings.Contains(id, "..") && !strings.Contains(id, "//")
+	ctrl := strings.IndexFunc(id, func(r rune) bool { return r < 0x20 || r == 0x7f || unicode.IsControl(r) }) >= 0
+	return !ctrl && strings.HasPrefix(strings.ToLower(id), prefix) && !strings.ContainsAny(id, "?#%@\\ ") && !strings.Contains(id, "..") && !strings.Contains(id, "//")
 }
 
 type armResource struct {
