@@ -92,7 +92,7 @@ func serverError(body []byte) error {
 	if d.err != nil {
 		return errors.New("opcua: server sent an error")
 	}
-	return fmt.Errorf("opcua: server error 0x%08X %s", code, reason)
+	return fmt.Errorf("opcua: server error 0x%08X %s", code, clip(reason))
 }
 
 func hello(conn net.Conn, endpointURL string) error {

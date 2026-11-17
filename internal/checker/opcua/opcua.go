@@ -10,7 +10,6 @@ package opcua
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -100,7 +99,7 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 // Servers usually present the same certificate on every secured endpoint.
 func recordsFor(source string, eps []Endpoint) ([]checker.ExpiryRecord, error) {
 	type seen struct {
-		cert     *x509.Certificate
+		cert     leafInfo
 		ep       Endpoint
 		policies map[string]bool
 	}
@@ -112,21 +111,21 @@ func recordsFor(source string, eps []Endpoint) ([]checker.ExpiryRecord, error) {
 			continue
 		}
 		// The field may hold a chain: the leaf comes first.
-		certs, err := x509.ParseCertificates(ep.ServerCertificate)
-		if err != nil || len(certs) == 0 {
-			errs = append(errs, fmt.Errorf("endpoint %s: unreadable server certificate", ep.SecurityPolicyURI))
+		leaf, err := parseLeaf(ep.ServerCertificate)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("endpoint %s: unreadable server certificate", clip(ep.SecurityPolicyURI)))
 			continue
 		}
-		sum := sha256.Sum256(certs[0].Raw)
+		sum := sha256.Sum256(leaf.raw)
 		th := hex.EncodeToString(sum[:])
 		s, ok := byThumb[th]
 		if !ok {
-			s = &seen{cert: certs[0], ep: ep, policies: map[string]bool{}}
+			s = &seen{cert: leaf, ep: ep, policies: map[string]bool{}}
 			byThumb[th] = s
 			order = append(order, th)
 		}
 		if p := ep.SecurityPolicyURI; p != "" {
-			s.policies[p[strings.LastIndex(p, "#")+1:]] = true
+			s.policies[clip(p[strings.LastIndex(p, "#")+1:])] = true
 		}
 	}
 	var out []checker.ExpiryRecord
@@ -137,7 +136,7 @@ func recordsFor(source string, eps []Endpoint) ([]checker.ExpiryRecord, error) {
 			policies = append(policies, p)
 		}
 		sort.Strings(policies)
-		name := s.cert.Subject.CommonName
+		name := s.cert.commonName
 		if name == "" {
 			name = s.ep.ApplicationName
 		}
@@ -145,22 +144,25 @@ func recordsFor(source string, eps []Endpoint) ([]checker.ExpiryRecord, error) {
 			name = s.ep.ApplicationURI
 		}
 		meta := map[string]string{
-			"issuer":            s.cert.Issuer.CommonName,
-			"serial":            s.cert.SerialNumber.String(),
+			"issuer":            clip(s.cert.issuerCN),
+			"serial":            s.cert.serial,
 			"sha256":            th,
-			"application_uri":   s.ep.ApplicationURI,
-			"security_policies": strings.Join(policies, ","),
+			"application_uri":   clip(s.ep.ApplicationURI),
+			"security_policies": clip(strings.Join(policies, ",")),
 		}
-		if s.cert.Issuer.String() == s.cert.Subject.String() {
+		if s.cert.selfSigned {
 			meta["self_signed"] = "true"
 		}
 		out = append(out, checker.ExpiryRecord{
 			Source:    source,
-			Name:      name,
+			Name:      clip(name),
 			Kind:      "certificate",
-			ExpiresAt: s.cert.NotAfter,
+			ExpiresAt: s.cert.notAfter,
 			Metadata:  meta,
 		})
+	}
+	if len(out) == 0 && len(errs) == 0 {
+		errs = append(errs, errors.New("no server certificate advertised on any endpoint"))
 	}
 	return out, errors.Join(errs...)
 }
