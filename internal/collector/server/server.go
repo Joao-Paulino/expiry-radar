@@ -33,8 +33,12 @@ import (
 type Config struct {
 	DBPath     string `json:"db_path"`
 	ListenAddr string `json:"listen_addr"`
-	// AuthTokens authenticate Agents pushing to /ingest.
+	// AuthTokens authenticate Agents pushing to /ingest. They are
+	// shared: a holder can report as any agent ID. Prefer Agents.
 	AuthTokens []string `json:"auth_tokens"`
+	// Agents are per-agent tokens: each may only report as its own ID,
+	// so one compromised agent host cannot hide another agent's items.
+	Agents []AgentCredential `json:"agents"`
 	// AdminTokens authenticate the dashboard, mute/assign-owner, and
 	// export endpoints — distinct from AuthTokens, so an agent's
 	// ingest token can never read or mute the inventory.
@@ -138,8 +142,8 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("server: theme must be auto, dark or light")
 	}
-	if len(c.AuthTokens) == 0 {
-		return fmt.Errorf("server: Config.AuthTokens must have at least one token")
+	if len(c.AuthTokens) == 0 && len(c.Agents) == 0 {
+		return fmt.Errorf("server: configure agents (per-agent tokens) or auth_tokens")
 	}
 	if len(c.AdminTokens) == 0 {
 		return fmt.Errorf("server: Config.AdminTokens must have at least one token")
@@ -150,6 +154,23 @@ func (c Config) Validate() error {
 			return fmt.Errorf("server: every auth_tokens entry must be at least %d characters", MinTokenLength)
 		}
 		agentTokens[tok] = true
+	}
+	ids := map[string]bool{}
+	for _, a := range c.Agents {
+		if strings.TrimSpace(a.ID) == "" {
+			return fmt.Errorf("server: every agents entry needs an id")
+		}
+		if ids[a.ID] {
+			return fmt.Errorf("server: agent id %q is listed twice", a.ID)
+		}
+		ids[a.ID] = true
+		if len(a.Token) < MinTokenLength {
+			return fmt.Errorf("server: the token of agent %q must be at least %d characters", a.ID, MinTokenLength)
+		}
+		if agentTokens[a.Token] {
+			return fmt.Errorf("server: the token of agent %q is already used by another agent or auth_tokens", a.ID)
+		}
+		agentTokens[a.Token] = true
 	}
 	for _, tok := range c.AdminTokens {
 		if len(tok) < MinTokenLength {
@@ -344,6 +365,9 @@ func NewHTTPServer(h http.Handler) *http.Server {
 // Run wires up storage, ingest, alerting, and the dashboard, then
 // serves them over HTTPS until an error occurs or cfg.Done is closed.
 func Run(cfg Config) error {
+	if len(cfg.AuthTokens) > 0 {
+		log.Printf("collector: auth_tokens are shared: any agent holding one can report as any agent ID. Prefer per-agent tokens: collector add-agent <config> <id>")
+	}
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -378,7 +402,7 @@ func Run(cfg Config) error {
 		ssoHandlers.Register(mux)
 	}
 	mux.Handle("/", session.Middleware(sessions, cfg.AdminTokens, dashboardMux))
-	mux.Handle("POST /ingest", auth.Middleware(cfg.AuthTokens, ingest.Handler(st)))
+	mux.Handle("POST /ingest", auth.AgentMiddleware(cfg.agentCredentials(), ingest.Handler(st)))
 
 	if interval := cfg.EffectiveAlertInterval(); interval > 0 {
 		engine := &alert.Engine{Store: st, Rules: rs, Thresholds: alert.DefaultThresholds(),
@@ -421,4 +445,23 @@ func Run(cfg Config) error {
 		return err
 	}
 	return nil
+}
+
+// AgentCredential is a per-agent token: pushes made with Token may only
+// report as agent ID.
+type AgentCredential struct {
+	ID    string `json:"id"`
+	Token string `json:"token"`
+}
+
+// agentCredentials merges the per-agent tokens and the shared ones.
+func (c Config) agentCredentials() []auth.Credential {
+	out := make([]auth.Credential, 0, len(c.Agents)+len(c.AuthTokens))
+	for _, a := range c.Agents {
+		out = append(out, auth.Credential{Token: a.Token, AgentID: a.ID})
+	}
+	for _, t := range c.AuthTokens {
+		out = append(out, auth.Credential{Token: t})
+	}
+	return out
 }

@@ -216,7 +216,7 @@ go install github.com/Joao-Paulino/expiry-radar/cmd/agent@latest
   "listen_addr": "0.0.0.0:8443",
   "tls_cert_file": "/etc/expiry-radar/collector.crt",
   "tls_key_file": "/etc/expiry-radar/collector.key",
-  "auth_tokens": ["<agent token, see Tokens below>"],
+  "agents": [{"id": "web-01", "token": "<added by: collector add-agent collector.json web-01>"}],
   "admin_tokens": ["<admin token, see Tokens below>"],
   "alert_interval_seconds": 3600,
   "slack_webhook_url": "",
@@ -240,7 +240,8 @@ go install github.com/Joao-Paulino/expiry-radar/cmd/agent@latest
 | `listen_addr` | Address and port the collector listens on (HTTPS only) | Endereço e porta onde o collector escuta (só HTTPS) |
 | `tls_cert_file` | Collector certificate, PEM. See [🔒 Collector certificate](#-collector-certificate--certificado-do-collector) | Certificado do collector, em PEM. Ver [🔒 Certificado](#-collector-certificate--certificado-do-collector) |
 | `tls_key_file` | Private key of that certificate, PEM | Chave privada desse certificado, em PEM |
-| `auth_tokens` | Tokens agents use to send results. See [🔑 Tokens](#-tokens) | Tokens que os agentes usam para enviar resultados. Ver [🔑 Tokens](#-tokens) |
+| `agents` | Per-agent tokens: `[{"id": "...", "token": "..."}]`. Each token may only report as its own `agent_id`. Add one with `collector add-agent <config> <id>`. See [🔑 Tokens](#-tokens) | Tokens por agente: cada token só pode reportar como o seu `agent_id`. Cria com `collector add-agent <config> <id>`. Ver [🔑 Tokens](#-tokens) |
+| `auth_tokens` | Shared agent tokens (older setups). A holder can report as **any** agent ID, so one compromised agent host could hide other agents' items. Prefer `agents`; the collector logs a warning while these are set | Tokens partilhados (instalações antigas). Quem tem um pode reportar como **qualquer** agente; prefere `agents`. O collector avisa no arranque enquanto existirem |
 | `admin_tokens` | Tokens for the dashboard, mute and export. See [🔑 Tokens](#-tokens) | Tokens para o painel, silenciamento e exportação. Ver [🔑 Tokens](#-tokens) |
 | `alert_interval_seconds` | How often alerts are evaluated; `0` disables alerting | De quanto em quanto tempo os alertas são avaliados; `0` desliga os alertas |
 | `reminder_critical_hours` | Re-send an unchanged critical alert after this many hours (default 24, `0` = never) | Reenvia um alerta crítico inalterado ao fim destas horas (por omissão 24, `0` = nunca) |
@@ -374,7 +375,8 @@ Cada comando gera um token de 64 caracteres. Corre-o uma vez por token.
 
 | | EN | PT |
 |---|---|---|
-| `auth_tokens` | Tokens agents use to send results. Use one per agent (or per group of agents) and copy it into that agent's `token`. | Tokens que os agentes usam para enviar resultados. Usa um por agente (ou por grupo) e copia-o para o `token` desse agente. |
+| `agents` | **Recommended.** `collector add-agent collector.json web-01` creates a token bound to `web-01`, saves it in the config and prints it once; put it in that agent's `token` with `"agent_id": "web-01"`, then restart the collector. A batch claiming another agent ID is refused (403) and logged. | **Recomendado.** `collector add-agent collector.json web-01` cria um token ligado a `web-01`, grava-o na config e mostra-o uma vez; põe-no no `token` desse agente, com `"agent_id": "web-01"`, e reinicia o collector. Um envio com outro `agent_id` é recusado (403) e registado. |
+| `auth_tokens` | Shared tokens, kept for older setups: any agent with one can report as any agent ID. Migrate with `add-agent`, then remove them. | Tokens partilhados, mantidos para instalações antigas: qualquer agente com um pode reportar como qualquer `agent_id`. Migra com `add-agent` e depois remove-os. |
 | `admin_tokens` | Tokens for the dashboard, mute and export. Must be different from every agent token. | Tokens para o painel, silenciamento e exportação. Têm de ser diferentes de todos os tokens de agente. |
 | Rules | At least 32 characters; empty, short or shared tokens stop the collector from starting. | Mínimo de 32 caracteres; tokens vazios, curtos ou repetidos impedem o collector de arrancar. |
 | Rotate | Add the new token, update the agents, then remove the old one. Both work in between. | Adiciona o novo token, atualiza os agentes e depois remove o antigo. Ambos funcionam entretanto. |
@@ -448,7 +450,7 @@ ligação estar encriptada. O certificado do servidor é verificado, com TLS 1.2
 {
   "collector_url": "https://collector.example.com:8443",
   "collector_ca_file": "/etc/expiry-radar/collector-ca.pem",
-  "token": "<one of the collector's auth_tokens>",
+  "token": "<this agent's token from: collector add-agent collector.json web-01>",
   "agent_id": "web-01",
   "queue_path": "/var/lib/expiry-radar/queue.jsonl",
   "interval_seconds": 3600,
@@ -468,7 +470,7 @@ chmod 600 agent.json          # it holds the agent token
 |---|---|---|
 | `collector_url` | Collector address, e.g. `https://collector:8443` (`/ingest` is added automatically); must use `https://` | Endereço do collector, por exemplo `https://collector:8443` (o `/ingest` é acrescentado automaticamente); tem de usar `https://` |
 | `collector_ca_file` | Collector CA certificate, PEM; only for internal CA or self-signed (options B and C above) | Certificado da CA do collector, em PEM; só para CA interna ou autoassinado (opções B e C acima) |
-| `token` | One of the collector's `auth_tokens` | Um dos `auth_tokens` do collector |
+| `token` | This agent's token (`collector add-agent`); its `agent_id` must match | O token deste agente (`collector add-agent`); o `agent_id` tem de coincidir |
 | `agent_id` | Name of this agent, shown on the dashboard | Nome deste agente, mostrado no painel |
 | `queue_path` | Local file where results wait while the collector is unreachable | Ficheiro local onde os resultados esperam enquanto o collector não responde |
 | `interval_seconds` | Seconds between checks; the first check runs at startup | Segundos entre verificações; a primeira corre no arranque |

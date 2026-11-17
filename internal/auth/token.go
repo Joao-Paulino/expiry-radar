@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
 	"strings"
@@ -28,5 +29,51 @@ func Middleware(validTokens []string, next http.Handler) http.Handler {
 		}
 
 		w.WriteHeader(http.StatusUnauthorized)
+	})
+}
+
+// Credential is one agent token. AgentID, when set, binds the token: a
+// batch pushed with it may only claim that agent ID. An empty AgentID
+// is a shared token (auth_tokens), which can claim any agent ID.
+type Credential struct {
+	Token   string
+	AgentID string
+}
+
+type boundAgentKey struct{}
+
+// WithBoundAgent returns ctx carrying the agent ID a token is bound to.
+func WithBoundAgent(ctx context.Context, agentID string) context.Context {
+	return context.WithValue(ctx, boundAgentKey{}, agentID)
+}
+
+// BoundAgent returns the agent ID the request's token is bound to, and
+// false for a shared token.
+func BoundAgent(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(boundAgentKey{}).(string)
+	return id, ok && id != ""
+}
+
+// AgentMiddleware is Middleware for agent credentials: it accepts any
+// listed token and, for a bound one, passes the agent ID on through the
+// request context (see BoundAgent). Every candidate is compared, in
+// constant time, so the response time does not reveal which one matched.
+func AgentMiddleware(creds []Credential, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		matched, agentID := false, ""
+		for _, c := range creds {
+			if subtle.ConstantTimeCompare([]byte(got), []byte(c.Token)) == 1 {
+				matched, agentID = true, c.AgentID
+			}
+		}
+		if !matched {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if agentID != "" {
+			r = r.WithContext(WithBoundAgent(r.Context(), agentID))
+		}
+		next.ServeHTTP(w, r)
 	})
 }

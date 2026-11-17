@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Joao-Paulino/expiry-radar/internal/auth"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/store"
 )
@@ -184,5 +185,32 @@ func TestHandler_OversizedBodyRejected(t *testing.T) {
 	}
 	if len(st.touched) != 0 {
 		t.Fatal("nothing may be stored from a rejected body")
+	}
+}
+
+// A token bound to an agent may only report as that agent (pentest
+// BUSL-02): otherwise one compromised host could retire every other
+// agent's items with empty complete runs.
+func TestHandler_BoundTokenCannotImpersonate(t *testing.T) {
+	post := func(st *fakeStore, body string) int {
+		req := httptest.NewRequest("POST", "/ingest", strings.NewReader(body))
+		req = req.WithContext(auth.WithBoundAgent(req.Context(), "web-01"))
+		rec := httptest.NewRecorder()
+		Handler(st)(rec, req)
+		return rec.Code
+	}
+	st := &fakeStore{}
+	if code := post(st, `{"agent_id":"db-01","results":[{"checker_name":"tls-checker","checked_at":"2026-01-01T00:00:00Z"}]}`); code != http.StatusForbidden {
+		t.Fatalf("impersonation: got %d, want 403", code)
+	}
+	if len(st.touched) != 0 || len(st.runs) != 0 {
+		t.Fatalf("nothing may be stored for a refused batch: %+v %+v", st.touched, st.runs)
+	}
+	if code := post(st, `{"agent_id":"web-01","results":[]}`); code != http.StatusNoContent {
+		t.Fatalf("own id: got %d", code)
+	}
+	st = &fakeStore{}
+	if code := post(st, `{"results":[{"checker_name":"tls-checker","checked_at":"2026-01-01T00:00:00Z"}]}`); code != http.StatusNoContent || len(st.touched) != 1 || st.touched[0] != "web-01" {
+		t.Fatalf("missing agent_id must default to the bound one: %d %v", code, st.touched)
 	}
 }

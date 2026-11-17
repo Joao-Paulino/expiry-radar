@@ -24,7 +24,7 @@ import (
 type Config = server.Config
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  collector <config.json>\n  collector version\n  collector gen-cert <dir> [--host ip,dns,...] [--days N]\n  collector install-service <config.json> [--account NAME]\n  collector uninstall-service\n  collector set-admin-password <config.json>\n  collector set-admin-totp <config.json>")
+	fmt.Fprintln(os.Stderr, "usage:\n  collector <config.json>\n  collector version\n  collector add-agent <config.json> <agent-id>\n  collector gen-cert <dir> [--host ip,dns,...] [--days N]\n  collector install-service <config.json> [--account NAME]\n  collector uninstall-service\n  collector set-admin-password <config.json>\n  collector set-admin-totp <config.json>")
 	os.Exit(2)
 }
 
@@ -44,6 +44,16 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "add-agent":
+		if len(os.Args) != 4 {
+			fmt.Fprintln(os.Stderr, "usage: collector add-agent <config.json> <agent-id>")
+			os.Exit(2)
+		}
+		if err := runAddAgent(os.Args[2], os.Args[3], os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "collector: %s\n", err)
+			os.Exit(1)
+		}
+		return
 	case "gen-cert":
 		dir, hosts, days, err := parseGenCertArgs(os.Args[2:])
 		if err == nil {
