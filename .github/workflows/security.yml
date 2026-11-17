@@ -113,7 +113,8 @@ jobs:
             "FuzzReadCertFile ./internal/checker/local/" \
             "FuzzLeafFromPublicCertData ./internal/checker/azure/" \
             "FuzzSafeResourceID ./internal/checker/azure/" \
-            "FuzzLeafOf ./internal/checker/vmware/"; do
+            "FuzzLeafOf ./internal/checker/vmware/" \
+            "FuzzParseGetEndpointsResponse ./internal/checker/opcua/"; do
             set -- $t
             echo "::group::$1"
             go test -run '^$' -fuzz "^$1\$" -fuzztime 30s "$2"
