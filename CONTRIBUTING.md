@@ -33,3 +33,5 @@ Architecture, code layout and how to add a checker: [docs/ARCHITECTURE.md](docs/
 ## License
 
 By contributing you agree that your contribution is licensed under the [MIT License](LICENSE).
+
+Every commit must carry a `Signed-off-by:` line (`git commit -s`), asserting the [Developer Certificate of Origin](https://developercertificate.org/): you wrote the change or have the right to submit it under the project's license.
