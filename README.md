@@ -53,6 +53,9 @@ antes que algo expire.
 
 ## ⚖️ How it compares / Comparação
 
+> **Expiry Radar is free and open source (MIT): no licence, no per-certificate pricing, no account.** /
+> **O Expiry Radar é gratuito e open source (MIT): sem licença, sem preço por certificado, sem conta.**
+
 | Tool / Ferramenta | What it covers well / O que cobre bem | What Expiry Radar adds / O que o Expiry Radar acrescenta |
 |---|---|---|
 | **Prometheus** (blackbox / ssl exporters) + Alertmanager | TLS certificate dates on any endpoint, alerting / Datas de certificados TLS em qualquer endpoint, alertas | Cloud secrets and keys (Key Vault, App Registrations, IAM, Secret Manager), Vault, VMware licences, planned OPC UA and cloud IoT; agents only connect out (no inbound firewall rules into OT zones); inventory, history, owners and audit export out of the box / Segredos e chaves na cloud, Vault, licenças VMware, OPC UA e IoT na cloud planeados; agentes só fazem ligações de saída (sem regras de entrada nas zonas OT); inventário, histórico, donos e exportação para auditoria de origem |
