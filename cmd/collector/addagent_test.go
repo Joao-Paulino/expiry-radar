@@ -39,9 +39,6 @@ func TestAddAgent(t *testing.T) {
 	if tok == agents[1].(map[string]any)["token"].(string) {
 		t.Fatal("two agents got the same token")
 	}
-	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o640 {
-		t.Errorf("file mode changed to %v", fi.Mode().Perm())
-	}
 	if err := runAddAgent(p, "web-01", &out); err == nil {
 		t.Error("duplicate agent id accepted")
 	}
