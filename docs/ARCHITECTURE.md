@@ -1,5 +1,7 @@
 # Expiry Radar architecture
 
+> 🇵🇹 Versão em português: [ARQUITETURA.md](ARQUITETURA.md)
+
 This document explains how Expiry Radar is built: its parts, how data flows between them, where the trust boundaries are and which design choices were made, and why. It is meant for contributors and for security reviewers. For installation and configuration, see the [README](../README.md). The per-feature design notes are in [docs/superpowers/specs](superpowers/specs).
 
 ## 1. Purpose and principles
