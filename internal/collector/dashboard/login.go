@@ -97,7 +97,9 @@ func LoginHandlers(auth *admin.Authenticator, sessions *session.Store, buttons [
 
 		// Never reuse a session id that existed before login.
 		if c, err := r.Cookie(session.CookieName); err == nil && c.Value != "" {
-			sessions.Delete(ctx, c.Value)
+			if err := sessions.Delete(ctx, c.Value); err != nil {
+				log.Printf("dashboard: dropping the previous session failed: %s", logging.Sanitize(err.Error()))
+			}
 		}
 		id, _, err := sessions.Create(ctx)
 		if err != nil {

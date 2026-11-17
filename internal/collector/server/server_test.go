@@ -261,6 +261,21 @@ func TestRun_SetsSecurityHeaders(t *testing.T) {
 		!strings.HasPrefix(h.Get("Strict-Transport-Security"), "max-age=") || h.Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("missing security headers: %v", h)
 	}
+	// Cross-origin isolation and a closed Permissions-Policy (ZAP, OWASP
+	// Secure Headers): the dashboard loads nothing from other origins and
+	// needs no browser features.
+	for k, want := range map[string]string{
+		"Cross-Origin-Opener-Policy":   "same-origin",
+		"Cross-Origin-Resource-Policy": "same-origin",
+		"Cross-Origin-Embedder-Policy": "require-corp",
+	} {
+		if got := h.Get(k); got != want {
+			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+	if pp := h.Get("Permissions-Policy"); !strings.Contains(pp, "camera=()") || !strings.Contains(pp, "geolocation=()") {
+		t.Errorf("Permissions-Policy = %q", pp)
+	}
 }
 
 // TestConfig_SSOSessionHours proves the SSO session lifetime defaults to

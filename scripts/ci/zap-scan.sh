@@ -40,6 +40,8 @@ docker run --rm --network host -v "$W:/zap/wrk:rw" \
 test -s "$W/zap-report.json" || { echo "ZAP produced no report"; exit 1; }
 echo "--- ZAP alerts (risk: name, count)"
 jq -r '.site[].alerts[] | "\(.riskdesc | split(" ")[0]): \(.name) [\(.cweid)] x\(.count)"' "$W/zap-report.json" | sort | uniq
+echo "--- Medium and High: where and why"
+jq -r '.site[].alerts[] | select(.riskdesc|test("^(High|Medium)")) | "== \(.name) [CWE-\(.cweid)]", (.instances[] | "  \(.method) \(.uri) param=\(.param) evidence=\(.evidence[0:120]) other=\(.otherinfo[0:200])")' "$W/zap-report.json"
 level="${FAIL_ON:-High}"
 bad=$(jq --arg l "$level" '[.site[].alerts[] | select((.riskdesc | split(" ")[0]) as $r | ($l=="High" and $r=="High") or ($l=="Medium" and ($r=="High" or $r=="Medium")))] | length' "$W/zap-report.json")
 echo "alerts at or above $level: $bad"

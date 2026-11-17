@@ -192,7 +192,7 @@ type externalConfig struct {
 // endpoints must be Google's (a crafted file must not send the subject
 // token or the federated token elsewhere).
 func externalAccount(ctx context.Context, hc *http.Client, ep endpoints, file string) (token, error) {
-	raw, err := os.ReadFile(file)
+	raw, err := os.ReadFile(file) // #nosec G304 -- path comes from the operator's own configuration, not from remote input
 	if err != nil {
 		return token{}, fmt.Errorf("gcp: credential_file: %w", err)
 	}
@@ -214,7 +214,9 @@ func externalAccount(ctx context.Context, hc *http.Client, ep endpoints, file st
 	subject := strings.TrimSpace(string(subj))
 	if cfg.CredentialSource.Format.Type == "json" {
 		var m map[string]any
-		json.Unmarshal(subj, &m)
+		if err := json.Unmarshal(subj, &m); err != nil {
+			return token{}, fmt.Errorf("gcp: subject token file is not JSON: %w", err)
+		}
 		s, _ := m[cfg.CredentialSource.Format.SubjectTokenFieldName].(string)
 		subject = s
 	}

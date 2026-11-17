@@ -97,7 +97,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, password, code string)
 		// Same database work as the correct-password path, so timing
 		// does not reveal that the password was wrong.
 		if !totpOK {
-			lookupRecovery(a.Store, ctx, recoveryHash)
+			_, _ = lookupRecovery(a.Store, ctx, recoveryHash) // timing equaliser only
 		}
 		return Result{}, ErrInvalidCredentials
 	}

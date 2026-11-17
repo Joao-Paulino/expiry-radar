@@ -59,7 +59,7 @@ type Config struct {
 
 // loadConfig reads and decodes the JSON config file at path.
 func loadConfig(path string) (Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from the operator's own configuration, not from remote input
 	if err != nil {
 		return Config{}, err
 	}
@@ -133,7 +133,7 @@ func (c Config) Validate() error {
 // trustCAFile adds the PEM certificates in path to the roots the
 // pusher trusts for the Collector, on top of the system store.
 func trustCAFile(p *agent.Pusher, path string) error {
-	pemBytes, err := os.ReadFile(path)
+	pemBytes, err := os.ReadFile(path) // #nosec G304 -- path comes from the operator's own configuration, not from remote input
 	if err != nil {
 		return fmt.Errorf("agent: reading collector_ca_file: %w", err)
 	}

@@ -181,7 +181,7 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 		return nil, fmt.Errorf("vmware: login: %w", err)
 	}
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	var session string
 	if resp.StatusCode != 201 && resp.StatusCode != 200 || json.Unmarshal(data, &session) != nil || session == "" {
 		return nil, fmt.Errorf("vmware: login: HTTP %d", resp.StatusCode)
@@ -300,7 +300,7 @@ func (c *Checker) esxi(ctx context.Context, auth map[string]string) ([]checker.E
 			continue
 		}
 		cs := conn.(*tls.Conn).ConnectionState()
-		conn.Close()
+		_ = conn.Close()
 		if len(cs.PeerCertificates) == 0 {
 			continue
 		}
