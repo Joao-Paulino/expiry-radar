@@ -119,11 +119,11 @@ func Open(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	if _, err := database.Exec(schema); err != nil {
-		database.Close()
+		_ = database.Close()
 		return nil, err
 	}
 	if err := migrate(database); err != nil {
-		database.Close()
+		_ = database.Close()
 		return nil, err
 	}
 	return database, nil
@@ -162,7 +162,7 @@ func addColumnIfMissing(database *sql.DB, table, column, decl string) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	rows.Close()
+	_ = rows.Close()
 	_, err = database.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + decl)
 	return err
 }

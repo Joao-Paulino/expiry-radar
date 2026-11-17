@@ -7,7 +7,7 @@ package local
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- thumbprint identifier only (Windows convention), not a security control
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
@@ -134,7 +134,7 @@ func (f *fileChecker) Check(ctx context.Context) ([]checker.ExpiryRecord, error)
 // readCertFile returns the certificates in a PEM or DER file, or none
 // when the file holds something else (a key, a CSR).
 func readCertFile(path string) ([]*x509.Certificate, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from the operator's own configuration, not from remote input
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +182,7 @@ func records(source string, certs []*x509.Certificate) []checker.ExpiryRecord {
 	}
 	var out []checker.ExpiryRecord
 	for _, c := range certs {
-		sum := sha1.Sum(c.Raw)
+		sum := sha1.Sum(c.Raw) // #nosec G401 -- thumbprint identifier, as shown by Windows and browsers
 		thumb := hex.EncodeToString(sum[:])
 		name := displayName(c)
 		if byName[name] > 1 {

@@ -78,6 +78,9 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 // InsecureSkipVerify here keeps SNI correct for virtual-hosted
 // targets.
 func (c *Checker) dialConfig(host string) *tls.Config {
+	// #nosec G402 -- the checker must read expired, self-signed and private-CA
+	// certificates to report their dates; it sends no data and trusts nothing
+	// it reads beyond the certificate metadata it records.
 	cfg := &tls.Config{InsecureSkipVerify: true, ServerName: host}
 	if c.TLSConfig != nil && c.TLSConfig.RootCAs != nil {
 		cfg.RootCAs = c.TLSConfig.RootCAs
@@ -147,7 +150,7 @@ func (c *Checker) checkTarget(ctx context.Context, target Target) (checker.Expir
 		}
 		client, err := smtp.NewClient(rawConn, target.Host)
 		if err != nil {
-			rawConn.Close()
+			_ = rawConn.Close()
 			return checker.ExpiryRecord{}, err
 		}
 		defer client.Close()

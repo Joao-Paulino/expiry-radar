@@ -179,3 +179,23 @@ func TestCheck_ManagedCertificatesWithoutVaultDiscovery(t *testing.T) {
 		t.Fatalf("vaults discovered without discover_key_vaults: %v", err)
 	}
 }
+
+// Properties ARM returns in an unexpected shape must not hide a
+// certificate: the run is incomplete, and the other items still count.
+func TestCheck_ManagedCertificatesMalformedPropertiesIsAnError(t *testing.T) {
+	f := managedCertsFake(t)
+	sub := "/subscriptions/" + guid
+	f.arm[sub+"/providers/Microsoft.Web/certificates"] = append(f.arm[sub+"/providers/Microsoft.Web/certificates"], map[string]any{
+		"id": sub + "/resourceGroups/rg-web/providers/Microsoft.Web/certificates/weird", "name": "weird",
+		"properties": map[string]any{"expirationDate": 20270101}}) // a number, not a string
+	f.arm[sub+"/providers/Microsoft.Network/applicationGateways"] = append(f.arm[sub+"/providers/Microsoft.Network/applicationGateways"], map[string]any{
+		"id": sub + "/resourceGroups/rg-net/providers/Microsoft.Network/applicationGateways/agw-odd", "name": "agw-odd",
+		"properties": map[string]any{"sslCertificates": "not-a-list"}})
+	recs, err := newTestChecker(t, f, Config{Subscriptions: []string{guid}, ManagedCertificates: true}).Check(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "weird") || !strings.Contains(err.Error(), "agw-odd") {
+		t.Fatalf("malformed properties must be errors naming the resource, got %v", err)
+	}
+	if len(recs) != 6 {
+		t.Fatalf("the well-formed items must still be reported: got %d", len(recs))
+	}
+}

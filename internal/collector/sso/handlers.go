@@ -286,7 +286,9 @@ func (h *Handlers) callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if old, err := r.Cookie(session.CookieName); err == nil && old.Value != "" {
-		h.Sessions.Delete(ctx, old.Value)
+		if err := h.Sessions.Delete(ctx, old.Value); err != nil {
+			log.Printf("sso: dropping the previous session failed: %s", logging.Sanitize(err.Error()))
+		}
 	}
 	id, _, err := h.Sessions.CreateWithLifetime(ctx, h.SessionLifetime)
 	if err != nil {
@@ -305,7 +307,9 @@ func (h *Handlers) callback(w http.ResponseWriter, r *http.Request) {
 	// part of the cross-site navigation coming from the provider.
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	continuePage.Execute(w, nil)
+	if err := continuePage.Execute(w, nil); err != nil {
+		log.Printf("sso: continue page: %s", logging.Sanitize(err.Error()))
+	}
 }
 
 var continuePage = template.Must(template.New("c").Parse(`<!DOCTYPE html>

@@ -300,6 +300,12 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Strict-Transport-Security", "max-age=31536000")
 		h.Set("Referrer-Policy", "no-referrer")
+		// Cross-origin isolation: nothing here is meant to be embedded,
+		// opened by, or loaded from another origin.
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
+		h.Set("Cross-Origin-Embedder-Policy", "require-corp")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), clipboard-read=(), interest-cohort=()")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -406,7 +412,7 @@ func Run(cfg Config) error {
 	if cfg.Done != nil {
 		go func() {
 			<-cfg.Done
-			srv.Close()
+			_ = srv.Close()
 		}()
 	}
 

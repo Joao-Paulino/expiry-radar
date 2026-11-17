@@ -160,11 +160,25 @@ func (c *Checker) checkManagedCerts(ctx context.Context, src tokenSource) ([]che
 		var out []armResource
 		for _, raw := range items {
 			var r armResource
-			if json.Unmarshal(raw, &r) == nil && r.ID != "" {
-				out = append(out, r)
+			if err := json.Unmarshal(raw, &r); err != nil || r.ID == "" {
+				errs = append(errs, fmt.Errorf("%s: unreadable item: %v", path, err))
+				continue
 			}
+			out = append(out, r)
 		}
 		return out
+	}
+	// props decodes a resource's properties; a shape we cannot read is
+	// an error (the run is incomplete), never a silently skipped item.
+	props := func(r armResource, v any) bool {
+		if len(r.Properties) == 0 {
+			return true
+		}
+		if err := json.Unmarshal(r.Properties, v); err != nil {
+			errs = append(errs, fmt.Errorf("%s: unreadable properties: %v", r.Name, err))
+			return false
+		}
+		return true
 	}
 
 	for _, sub := range c.cfg.Subscriptions {
@@ -173,7 +187,9 @@ func (c *Checker) checkManagedCerts(ctx context.Context, src tokenSource) ([]che
 			var p struct {
 				SubjectName, ExpirationDate, CanonicalName, Thumbprint, KeyVaultID string
 			}
-			json.Unmarshal(r.Properties, &p)
+			if !props(r, &p) {
+				continue
+			}
 			name := p.SubjectName
 			if name == "" {
 				name = r.Name
@@ -185,7 +201,9 @@ func (c *Checker) checkManagedCerts(ctx context.Context, src tokenSource) ([]che
 				DistinguishedName, ExpirationTime, Status string
 				AutoRenew                                 bool
 			}
-			json.Unmarshal(r.Properties, &p)
+			if !props(r, &p) {
+				continue
+			}
 			name := r.Name
 			for _, part := range strings.Split(p.DistinguishedName, ",") {
 				if cn, ok := strings.CutPrefix(strings.TrimSpace(part), "CN="); ok {
@@ -212,7 +230,9 @@ func (c *Checker) checkManagedCerts(ctx context.Context, src tokenSource) ([]che
 						Type, Subject, ExpirationDate string
 					} `json:"parameters"`
 				}
-				json.Unmarshal(r.Properties, &p)
+				if !props(r, &p) {
+					continue
+				}
 				if !strings.HasSuffix(p.Parameters.Type, "Certificate") || p.Parameters.ExpirationDate == "" {
 					continue // URL signing keys, certificates not provisioned yet
 				}
@@ -233,7 +253,9 @@ func (c *Checker) checkManagedCerts(ctx context.Context, src tokenSource) ([]che
 					} `json:"properties"`
 				} `json:"sslCertificates"`
 			}
-			json.Unmarshal(gw.Properties, &p)
+			if !props(gw, &p) {
+				continue
+			}
 			for _, sc := range p.SSLCertificates {
 				if sc.Properties.PublicCertData == "" {
 					continue

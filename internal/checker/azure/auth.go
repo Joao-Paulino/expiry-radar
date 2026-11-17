@@ -172,7 +172,7 @@ func readBody(resp *http.Response, what string) ([]byte, error) {
 			Description string          `json:"error_description"`
 			Message     string          `json:"message"`
 		}
-		json.Unmarshal(data, &e)
+		_ = json.Unmarshal(data, &e) // error body is best effort; the status code is reported anyway
 		msg := e.Description
 		if msg == "" {
 			msg = e.Message
@@ -272,7 +272,7 @@ func (a *authenticator) certificateAssertion() (string, error) {
 	thumb := sha256.Sum256(certDER)
 	hdr, _ := json.Marshal(map[string]string{"alg": "PS256", "typ": "JWT", "x5t#S256": b64(thumb[:])})
 	jti := make([]byte, 16)
-	rand.Read(jti)
+	_, _ = rand.Read(jti) // crypto/rand.Read never returns an error (Go 1.24+)
 	now := time.Now()
 	claims, _ := json.Marshal(map[string]any{
 		"aud": a.tokenURL(), "iss": a.cfg.ClientID, "sub": a.cfg.ClientID, "jti": hex.EncodeToString(jti),
@@ -331,7 +331,7 @@ func (a *authenticator) managedIdentity(ctx context.Context, resource string) (a
 		return accessToken{}, err
 	}
 	if arc && resp.StatusCode == http.StatusUnauthorized {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		key, err := a.arcKey(resp.Header.Get("WWW-Authenticate"))
 		if err != nil {
 			return accessToken{}, err

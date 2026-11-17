@@ -68,14 +68,14 @@ func runGenCert(dir string, hosts []string, days int, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	if err := writeFileExcl(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
 		return err
 	}
 	if err := writeFileExcl(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
-		os.Remove(keyPath)
+		_ = os.Remove(keyPath) // best effort: never leave a key without its certificate
 		return err
 	}
 	fmt.Fprintf(out, "Wrote %s and %s (valid %d days) for %s\n", certPath, keyPath, days,
@@ -85,7 +85,7 @@ func runGenCert(dir string, hosts []string, days int, out io.Writer) error {
 }
 
 func writeFileExcl(path string, data []byte, perm os.FileMode) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm) // #nosec G304 -- operator-chosen output directory; O_EXCL never overwrites
 	if err != nil {
 		return err
 	}

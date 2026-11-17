@@ -21,7 +21,7 @@ import (
 )
 
 func loadConfig(path string) (Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from the operator's own configuration, not from remote input
 	if err != nil {
 		return Config{}, fmt.Errorf("reading config: %w", err)
 	}
@@ -92,7 +92,7 @@ func readSecret(in io.Reader, r *bufio.Reader, out io.Writer, prompt string) (st
 		go func() {
 			select {
 			case <-sigs:
-				setEcho(in, true)
+				_ = setEcho(in, true) // restoring echo is best effort
 				fmt.Fprintln(out)
 				os.Exit(130)
 			case <-done:
@@ -101,7 +101,7 @@ func readSecret(in io.Reader, r *bufio.Reader, out io.Writer, prompt string) (st
 		defer func() {
 			signal.Stop(sigs)
 			close(done)
-			setEcho(in, true)
+			_ = setEcho(in, true) // restoring echo is best effort
 			fmt.Fprintln(out)
 		}()
 	}
@@ -118,7 +118,7 @@ func openAdminStores(cfgPath string) (*admin.Store, *session.Store, func(), erro
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return &admin.Store{DB: database}, &session.Store{DB: database, Now: time.Now}, func() { database.Close() }, nil
+	return &admin.Store{DB: database}, &session.Store{DB: database, Now: time.Now}, func() { _ = database.Close() }, nil
 }
 
 // runSetAdminPassword asks for the new Administrator password twice

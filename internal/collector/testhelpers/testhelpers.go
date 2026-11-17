@@ -50,7 +50,7 @@ func WriteSelfSignedCertForTest(t *testing.T, dir string) (certFile, keyFile str
 	certFile = filepath.Join(dir, "cert.pem")
 	keyFile = filepath.Join(dir, "key.pem")
 
-	certOut, err := os.Create(certFile)
+	certOut, err := os.Create(certFile) // #nosec G304 -- test helper writing into t.TempDir()
 	if err != nil {
 		t.Fatalf("create cert file: %v", err)
 	}
@@ -59,7 +59,7 @@ func WriteSelfSignedCertForTest(t *testing.T, dir string) (certFile, keyFile str
 		t.Fatalf("encode cert: %v", err)
 	}
 
-	keyOut, err := os.Create(keyFile)
+	keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- test helper writing into t.TempDir()
 	if err != nil {
 		t.Fatalf("create key file: %v", err)
 	}

@@ -139,7 +139,7 @@ func (c *Checker) Name() string { return "vault" }
 func (c *Checker) Kind() string { return "certificate" }
 
 func readTrimmed(path string) (string, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path comes from the operator's own configuration, not from remote input
 	if err != nil {
 		return "", err
 	}
@@ -207,7 +207,7 @@ func (s *session) call(ctx context.Context, method, path string, body any, out a
 		var e struct {
 			Errors []string `json:"errors"`
 		}
-		json.Unmarshal(data, &e)
+		_ = json.Unmarshal(data, &e) // error body is best effort; the status code is reported anyway
 		return &apiError{fmt.Sprintf("%s %s", method, "/v1/"+path), resp.StatusCode, e.Errors}
 	}
 	if out != nil && len(data) > 0 {

@@ -229,7 +229,7 @@ func doGet(ctx context.Context, hc *http.Client, method, u string, hdr map[strin
 func containerToken(getenv func(string) string) (map[string]string, error) {
 	hdr := map[string]string{}
 	if f := getenv("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"); f != "" {
-		b, err := os.ReadFile(f)
+		b, err := os.ReadFile(f) // #nosec G304 -- path comes from the operator's own configuration, not from remote input
 		if err != nil {
 			return nil, fmt.Errorf("aws: container authorization token: %w", err)
 		}
@@ -260,7 +260,9 @@ func instanceRole(ctx context.Context, hc *http.Client, ep endpoints, getenv fun
 		if err != nil {
 			return credentials{}, fmt.Errorf("aws: ECS credentials: %w", err)
 		}
-		json.Unmarshal(b, &j)
+		if err := json.Unmarshal(b, &j); err != nil {
+			return credentials{}, fmt.Errorf("aws: ECS credentials: %w", err)
+		}
 		return j.toCreds("ECS credentials")
 	}
 	if full := getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI"); full != "" {
@@ -275,7 +277,9 @@ func instanceRole(ctx context.Context, hc *http.Client, ep endpoints, getenv fun
 		if err != nil {
 			return credentials{}, fmt.Errorf("aws: container credentials: %w", err)
 		}
-		json.Unmarshal(b, &j)
+		if err := json.Unmarshal(b, &j); err != nil {
+			return credentials{}, fmt.Errorf("aws: container credentials: %w", err)
+		}
 		return j.toCreds("container credentials")
 	}
 	tok, err := doGet(ctx, hc, http.MethodPut, ep.imds+"/latest/api/token", map[string]string{"X-aws-ec2-metadata-token-ttl-seconds": "21600"})
@@ -295,7 +299,9 @@ func instanceRole(ctx context.Context, hc *http.Client, ep endpoints, getenv fun
 	if err != nil {
 		return credentials{}, fmt.Errorf("aws: instance role credentials: %w", err)
 	}
-	json.Unmarshal(b, &j)
+	if err := json.Unmarshal(b, &j); err != nil {
+		return credentials{}, fmt.Errorf("aws: instance role credentials: %w", err)
+	}
 	return j.toCreds("instance metadata")
 }
 

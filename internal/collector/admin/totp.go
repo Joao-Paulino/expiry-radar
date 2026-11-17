@@ -3,7 +3,7 @@ package admin
 import (
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- HMAC-SHA1 is what RFC 6238 TOTP and authenticator apps use
 	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
@@ -37,7 +37,7 @@ func TOTPCode(secret string, step int64) (string, error) {
 		return "", fmt.Errorf("admin: invalid TOTP secret: %w", err)
 	}
 	var msg [8]byte
-	binary.BigEndian.PutUint64(msg[:], uint64(step))
+	binary.BigEndian.PutUint64(msg[:], uint64(step)) // #nosec G115 -- step is Unix time / 30, never negative after 1970
 	mac := hmac.New(sha1.New, key)
 	mac.Write(msg[:])
 	sum := mac.Sum(nil)

@@ -75,7 +75,7 @@ func doWithRetry(ctx context.Context, hc *http.Client, req *http.Request) (*http
 		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s >= 0 {
 			wait = min(time.Duration(s)*time.Second, 30*time.Second)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
