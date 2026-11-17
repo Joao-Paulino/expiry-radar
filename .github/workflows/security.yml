@@ -1,0 +1,103 @@
+# Security testing beyond unit tests, mapped to OWASP Top 10 and the
+# CWE Top 25:
+#   codeql  SAST, semantic data-flow analysis (security-extended queries)
+#   gosec   Go-specific SAST rules (crypto, file permissions, SQL, ...)
+#   zap     DAST, OWASP ZAP spider + active scan against a real collector
+#   fuzz    Go native fuzzing of every parser that sees external input
+# Results of codeql and gosec appear under Security > Code scanning.
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * 1" # weekly, to catch new CodeQL queries and ZAP rules
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          queries: security-extended
+      - run: go build ./...
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: codeql-go
+
+  gosec:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.4
+      - name: gosec (report)
+        run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+      - name: gosec (gate)
+        # Fails on any finding not suppressed with a justified #nosec.
+        run: gosec -quiet -fmt text ./...
+
+  zap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: scripts/ci/zap-scan.sh
+        env:
+          FAIL_ON: Medium
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: zap/zap-report.*
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: fuzz each external parser for 30s
+        run: |
+          set -e
+          for t in \
+            "FuzzHandler ./internal/collector/ingest/" \
+            "FuzzSanitize ./internal/logging/" \
+            "FuzzReadCertFile ./internal/checker/local/" \
+            "FuzzLeafFromPublicCertData ./internal/checker/azure/" \
+            "FuzzSafeResourceID ./internal/checker/azure/" \
+            "FuzzLeafOf ./internal/checker/vmware/"; do
+            set -- $t
+            echo "::group::$1"
+            go test -run '^$' -fuzz "^$1\$" -fuzztime 30s "$2"
+            echo "::endgroup::"
+          done
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers
+          path: "**/testdata/fuzz/**"
