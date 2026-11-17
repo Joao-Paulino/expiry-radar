@@ -1,3 +1,5 @@
 # CodeQL findings reviewed and accepted. Format: <rule-id> <path> <reason>
 go/disabled-certificate-check internal/checker/tls/tls.go The TLS checker must read expired, self-signed and private-CA certificates to report their dates; it sends nothing and trusts only the certificate metadata it records.
 go/disabled-certificate-check internal/checker/vmware/vmware.go ESXi hosts usually present self-signed certificates; the checker records whether verification would pass in metadata "verified" and reads only the certificate.
+go/log-injection internal/collector/session/middleware.go Request values are passed through logging.Sanitize, which escapes CR/LF, Unicode line separators and bidi controls (fuzzed by FuzzSanitize); CodeQL does not model this custom sanitizer.
+go/log-injection internal/collector/sso/handlers.go Same: subject and reason go through logging.Sanitize before logging.
