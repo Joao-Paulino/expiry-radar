@@ -1,6 +1,7 @@
 package opcua
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -255,14 +256,6 @@ func TestCheck_ServerErrorAndBadTargetDoNotStopOthers(t *testing.T) {
 	}
 }
 
-func TestCheck_ServerWithoutCertificateGivesNoRecord(t *testing.T) {
-	url := startFake(t, &fakeServer{eps: []Endpoint{{URL: "x", SecurityPolicyURI: securityPolicyNone, SecurityMode: 1}}})
-	recs, err := New(Config{Targets: []Target{{Endpoint: url}}}).Check(context.Background())
-	if err != nil || len(recs) != 0 {
-		t.Fatalf("recs=%+v err=%v", recs, err)
-	}
-}
-
 func TestGetEndpoints_TimesOutOnSilentServer(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -280,5 +273,55 @@ func TestGetEndpoints_TimesOutOnSilentServer(t *testing.T) {
 	_, err = GetEndpoints(context.Background(), "opc.tcp://"+ln.Addr().String(), 300*time.Millisecond)
 	if err == nil || time.Since(start) > 2*time.Second {
 		t.Fatalf("err=%v after %v", err, time.Since(start))
+	}
+}
+
+// Older PLC/HMI tooling issues certificates with a negative serial,
+// which Go's x509 parser rejects. The device must still be reported.
+func TestCheck_NegativeSerialCertificateIsStillReported(t *testing.T) {
+	notAfter := time.Now().Add(10 * 24 * time.Hour).Truncate(time.Second).UTC()
+	der := testCert(t, "old-hmi", notAfter)
+	neg := bytes.Replace(der, []byte{0x02, 0x01, 0x2a}, []byte{0x02, 0x01, 0xd6}, 1) // serial 42 -> -42
+	if _, err := x509.ParseCertificate(neg); err == nil {
+		t.Skip("this Go accepts negative serials")
+	}
+	url := startFake(t, &fakeServer{eps: []Endpoint{{URL: "x", ServerCertificate: neg, SecurityPolicyURI: "#Basic256Sha256"}}})
+	recs, err := New(Config{Targets: []Target{{Endpoint: url}}}).Check(context.Background())
+	if err != nil || len(recs) != 1 || recs[0].Name != "old-hmi" || !recs[0].ExpiresAt.Equal(notAfter) {
+		t.Fatalf("recs=%+v err=%v", recs, err)
+	}
+}
+
+// A chain whose second certificate is broken must not lose the leaf.
+func TestCheck_BrokenChainKeepsLeaf(t *testing.T) {
+	leaf := testCert(t, "leaf", time.Now().Add(time.Hour))
+	chain := append(append([]byte{}, leaf...), 0x30, 0x03, 0x02, 0x01, 0x00)
+	url := startFake(t, &fakeServer{eps: []Endpoint{{URL: "x", ServerCertificate: chain, SecurityPolicyURI: "#Basic256Sha256"}}})
+	recs, err := New(Config{Targets: []Target{{Endpoint: url}}}).Check(context.Background())
+	if err != nil || len(recs) != 1 || recs[0].Name != "leaf" {
+		t.Fatalf("recs=%+v err=%v", recs, err)
+	}
+}
+
+// A server that advertises no certificate at all must not look healthy.
+func TestCheck_NoCertificateAdvertisedIsAnError(t *testing.T) {
+	url := startFake(t, &fakeServer{eps: []Endpoint{{URL: "x", SecurityPolicyURI: securityPolicyNone, SecurityMode: 1}}})
+	recs, err := New(Config{Targets: []Target{{Endpoint: url}}}).Check(context.Background())
+	if len(recs) != 0 || err == nil || !strings.Contains(err.Error(), "no server certificate") {
+		t.Fatalf("recs=%+v err=%v", recs, err)
+	}
+}
+
+// Server-supplied strings are bounded before they reach records.
+func TestCheck_LongServerStringsAreTruncated(t *testing.T) {
+	long := strings.Repeat("u", 5000)
+	url := startFake(t, &fakeServer{eps: []Endpoint{{URL: "x", ApplicationURI: long, ServerCertificate: testCert(t, "", time.Now().Add(time.Hour)), SecurityPolicyURI: "#" + long}}})
+	recs, err := New(Config{Targets: []Target{{Endpoint: url}}}).Check(context.Background())
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("recs=%+v err=%v", recs, err)
+	}
+	r := recs[0]
+	if len(r.Name) > 256 || len(r.Metadata["application_uri"]) > 256 || len(r.Metadata["security_policies"]) > 256 {
+		t.Fatalf("not truncated: name %d, uri %d, policies %d", len(r.Name), len(r.Metadata["application_uri"]), len(r.Metadata["security_policies"]))
 	}
 }
