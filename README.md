@@ -116,7 +116,7 @@ O collector e o agente correm como serviço nos dois sistemas: arranque automát
 #### 🪟 Windows (PowerShell as Administrator / como Administrador)
 
 ```powershell
-$v = "v0.7.0"   # latest release / último release
+$v = (Invoke-RestMethod https://api.github.com/repos/Joao-Paulino/expiry-radar/releases/latest).tag_name   # latest release / último release
 $base = "https://github.com/Joao-Paulino/expiry-radar/releases/download/$v"
 New-Item -ItemType Directory C:\ExpiryRadar\collector, C:\ExpiryRadar\agent -Force | Out-Null
 
@@ -152,7 +152,7 @@ Get-Service ExpiryRadar*
 #### 🐧 Linux (systemd)
 
 ```bash
-v=v0.7.0   # latest release / último release
+v=$(curl -fsSL https://api.github.com/repos/Joao-Paulino/expiry-radar/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')   # latest release / último release
 base=https://github.com/Joao-Paulino/expiry-radar/releases/download/$v
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin expiry-radar
 sudo install -d /opt/expiry-radar /etc/expiry-radar
