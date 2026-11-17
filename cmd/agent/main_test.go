@@ -9,6 +9,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/gcp"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/local"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/opcua"
+	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"net/http"
 	"net/http/httptest"
@@ -263,5 +264,30 @@ func TestCheckers_IncludesOPCUAWhenConfigured(t *testing.T) {
 	cfg.OPCUA.Targets[0].Endpoint = "http://plc-01"
 	if cfg.Validate() == nil {
 		t.Fatal("non opc.tcp endpoint accepted")
+	}
+}
+
+// ot_safe: at least one hour between runs, and gentle checkers.
+func TestConfig_OTSafe(t *testing.T) {
+	cfg := Config{CollectorURL: "https://c", Token: "t", AgentID: "a", QueuePath: "/q", IntervalSeconds: 600, OTSafe: true,
+		OPCUA: &opcua.Config{Targets: []opcua.Target{{Endpoint: "opc.tcp://plc-01:4840"}}}}
+	if cfg.Validate() == nil {
+		t.Fatal("ot_safe with a 10 minute interval accepted")
+	}
+	cfg.IntervalSeconds = 3600
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range checkers(cfg) {
+		switch v := c.(type) {
+		case *tlschecker.Checker:
+			if v.Pause < 2*time.Second || v.Timeout == 0 || v.Timeout > 5*time.Second {
+				t.Errorf("tls not gentle: pause %v timeout %v", v.Pause, v.Timeout)
+			}
+		case *opcua.Checker:
+			if p, to := v.Settings(); p < 2*time.Second || to > 5*time.Second {
+				t.Errorf("opcua not gentle: pause %v timeout %v", p, to)
+			}
+		}
 	}
 }

@@ -33,6 +33,11 @@ type Checker struct {
 	// InsecureSkipVerify against a self-signed test server; production
 	// code leaves it nil (default verification).
 	TLSConfig *tls.Config
+	// Timeout bounds each connection and handshake (default 10s).
+	Timeout time.Duration
+	// Pause waits between targets so fragile devices (OT) are not hit
+	// back to back (default 0).
+	Pause time.Duration
 }
 
 // New returns a Checker for the given targets.
@@ -54,7 +59,14 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 	var records []checker.ExpiryRecord
 	var errs []error
 
-	for _, target := range c.Targets {
+	for i, target := range c.Targets {
+		if i > 0 && c.Pause > 0 {
+			select {
+			case <-ctx.Done():
+				return records, errors.Join(append(errs, ctx.Err())...)
+			case <-time.After(c.Pause):
+			}
+		}
 		rec, err := c.checkTarget(ctx, target)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s:%d: %w", target.Host, target.Port, err))
@@ -135,7 +147,7 @@ func (c *Checker) checkTarget(ctx context.Context, target Target) (checker.Expir
 
 	switch target.StartTLS {
 	case "":
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		dialer := &net.Dialer{Timeout: c.timeout()}
 		conn, err := tls.DialWithDialer(dialer, "tcp", addr, c.dialConfig(target.Host))
 		if err != nil {
 			return checker.ExpiryRecord{}, err
@@ -143,7 +155,7 @@ func (c *Checker) checkTarget(ctx context.Context, target Target) (checker.Expir
 		defer conn.Close()
 		return c.recordFor(addr, conn.ConnectionState().PeerCertificates, target.Host)
 	case "smtp":
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		dialer := &net.Dialer{Timeout: c.timeout()}
 		rawConn, err := dialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			return checker.ExpiryRecord{}, err
@@ -165,4 +177,11 @@ func (c *Checker) checkTarget(ctx context.Context, target Target) (checker.Expir
 	default:
 		return checker.ExpiryRecord{}, fmt.Errorf("unsupported StartTLS protocol %q", target.StartTLS)
 	}
+}
+
+func (c *Checker) timeout() time.Duration {
+	if c.Timeout > 0 {
+		return c.Timeout
+	}
+	return 10 * time.Second
 }
