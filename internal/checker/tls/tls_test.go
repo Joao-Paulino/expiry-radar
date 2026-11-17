@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestChecker_Check_ReturnsCertExpiry(t *testing.T) {
@@ -104,5 +105,16 @@ func TestChecker_dialConfig_AlwaysSetsServerNameForSMTPTargets(t *testing.T) {
 	}
 	if !cfg.InsecureSkipVerify {
 		t.Fatal("expected InsecureSkipVerify to be true")
+	}
+}
+
+// OT-safe: the checker waits Pause between targets so fragile devices
+// are not hit back to back.
+func TestCheck_PausesBetweenTargets(t *testing.T) {
+	c := &Checker{Targets: []Target{{Host: "127.0.0.1", Port: 1}, {Host: "127.0.0.1", Port: 1}}, Pause: 300 * time.Millisecond, Timeout: time.Second}
+	start := time.Now()
+	_, _ = c.Check(context.Background())
+	if d := time.Since(start); d < 300*time.Millisecond {
+		t.Fatalf("no pause between targets: %v", d)
 	}
 }

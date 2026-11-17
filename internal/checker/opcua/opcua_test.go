@@ -325,3 +325,10 @@ func TestCheck_LongServerStringsAreTruncated(t *testing.T) {
 		t.Fatalf("not truncated: name %d, uri %d, policies %d", len(r.Name), len(r.Metadata["application_uri"]), len(r.Metadata["security_policies"]))
 	}
 }
+
+func TestConfig_RejectsDuplicateEndpoints(t *testing.T) {
+	cfg := Config{Targets: []Target{{Endpoint: "opc.tcp://plc:4840"}, {Endpoint: "opc.tcp://plc:4840"}}}
+	if cfg.Validate() == nil {
+		t.Fatal("duplicate endpoint accepted")
+	}
+}

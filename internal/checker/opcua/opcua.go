@@ -42,7 +42,12 @@ func (c Config) Validate() error {
 	if len(c.Targets) == 0 {
 		return errors.New("opcua: at least one target is required")
 	}
+	seen := map[string]bool{}
 	for _, t := range c.Targets {
+		if seen[t.Endpoint] {
+			return fmt.Errorf("opcua: endpoint %q listed twice", t.Endpoint)
+		}
+		seen[t.Endpoint] = true
 		u, err := url.Parse(t.Endpoint)
 		if err != nil || u.Scheme != "opc.tcp" || u.Hostname() == "" {
 			return fmt.Errorf("opcua: invalid endpoint %q (want opc.tcp://host:port)", t.Endpoint)
@@ -59,6 +64,15 @@ type Checker struct{ cfg Config }
 
 // New returns a Checker for cfg.
 func New(cfg Config) *Checker { return &Checker{cfg: cfg} }
+
+// Settings returns the pause between servers and the per-server timeout.
+func (c *Checker) Settings() (pause, timeout time.Duration) {
+	timeout = time.Duration(c.cfg.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	return time.Duration(c.cfg.PauseSeconds) * time.Second, timeout
+}
 
 // Name identifies this checker.
 func (c *Checker) Name() string { return "opcua" }

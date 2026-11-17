@@ -801,6 +801,8 @@ One record per distinct certificate (servers repeat the same certificate on ever
 "tls_targets": [{"host": "mqtt.plant.local", "port": 8883}, {"host": "rabbit.plant.local", "port": 5671}]
 ```
 
+**OT-safe mode.** `"ot_safe": true` in the agent config: at least one hour between runs (`interval_seconds` ≥ 3600, enforced), one target at a time with a 2 s pause, 5 s timeouts for TLS and OPC UA. / **Modo OT-safe:** `"ot_safe": true` na config do agente: pelo menos uma hora entre verificações (obrigatório), um alvo de cada vez com 2 s de pausa, timeouts de 5 s para TLS e OPC UA.
+
 **Placement (ISA/IEC 62443).** Run the agent inside the OT zone or the DMZ: it only opens outbound connections to the collector, so no inbound firewall rule into the OT zone is needed. / **Colocação:** o agente fica na zona OT ou na DMZ e só faz ligações de saída para o coletor; não é preciso abrir regras de entrada na zona OT.
 
 ## ⚠️ Known limitations / Limitações conhecidas
@@ -888,7 +890,7 @@ Só leitura, nunca escreve nos equipamentos; o agente fica na zona OT ou na DMZ 
 
 - [x] OPC UA server certificates (discovery only, no session) / Certificados de servidores OPC UA (só descoberta, sem sessão)
 - [x] OPC UA PKI stores (local checker) and MQTT/AMQP brokers (TLS checker) documented / Stores PKI OPC UA (checker local) e brokers MQTT/AMQP (checker TLS) documentados
-- [ ] OT-safe mode for the TLS checker (pauses, short timeouts) / Modo OT-safe no checker TLS (pausas, timeouts curtos)
+- [x] OT-safe mode: `ot_safe` (minimum 1 h interval, pauses, short timeouts) / Modo OT-safe: `ot_safe` (intervalo mínimo de 1 h, pausas, timeouts curtos)
 - [ ] Security test against OWASP IoT Top 10 / Teste de segurança segundo o OWASP IoT Top 10
 
 ## 🛡️ Security / Segurança

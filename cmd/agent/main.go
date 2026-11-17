@@ -59,6 +59,9 @@ type Config struct {
 	OPCUA           *opcua.Config `json:"opcua"`
 	Local           *local.Config `json:"local"`
 	IntervalSeconds int           `json:"interval_seconds"`
+	// OTSafe makes the agent gentle on ICS/OT networks: at least one hour
+	// between runs, one target at a time with a 2 s pause, 5 s timeouts.
+	OTSafe bool `json:"ot_safe"`
 }
 
 // loadConfig reads and decodes the JSON config file at path.
@@ -133,6 +136,9 @@ func (c Config) Validate() error {
 	if err := c.Local.Validate(); err != nil {
 		return err
 	}
+	if c.OTSafe && c.IntervalSeconds < otSafeMinInterval {
+		return fmt.Errorf("agent: ot_safe needs interval_seconds of at least %d", otSafeMinInterval)
+	}
 	if c.IntervalSeconds <= 0 {
 		return fmt.Errorf("agent: interval_seconds must be a positive number of seconds")
 	}
@@ -166,10 +172,21 @@ func trustCAFile(p *agent.Pusher, path string) error {
 	return nil
 }
 
+// ot_safe settings.
+const (
+	otSafeMinInterval = 3600
+	otSafePause       = 2 * time.Second
+	otSafeTimeout     = 5 * time.Second
+)
+
 // checkers returns the checkers this agent runs: TLS always, Vault,
 // Azure and AWS when configured.
 func checkers(cfg Config) []checker.Checker {
-	cs := []checker.Checker{tlschecker.New(cfg.TLSTargets)}
+	tc := tlschecker.New(cfg.TLSTargets)
+	if cfg.OTSafe {
+		tc.Timeout, tc.Pause = otSafeTimeout, otSafePause
+	}
+	cs := []checker.Checker{tc}
 	if cfg.Vault != nil {
 		cs = append(cs, vault.New(*cfg.Vault))
 	}
@@ -188,7 +205,14 @@ func checkers(cfg Config) []checker.Checker {
 		}
 	}
 	if cfg.OPCUA != nil {
-		cs = append(cs, opcua.New(*cfg.OPCUA))
+		oc := *cfg.OPCUA
+		if cfg.OTSafe {
+			oc.PauseSeconds = max(oc.PauseSeconds, int(otSafePause/time.Second))
+			if oc.TimeoutSeconds <= 0 || oc.TimeoutSeconds > int(otSafeTimeout/time.Second) {
+				oc.TimeoutSeconds = int(otSafeTimeout / time.Second)
+			}
+		}
+		cs = append(cs, opcua.New(oc))
 	}
 	cs = append(cs, local.Checkers(cfg.Local)...)
 	return cs
