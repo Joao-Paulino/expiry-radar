@@ -174,6 +174,11 @@ func (r StoredRecord) Status() string {
 // reports has done that. A forgotten agent's rows (checker '*', agent
 // clock) are gone until it reports again. Missing an expiry alert is
 // worse than a stale one, so every doubt keeps the row.
+//
+// When several agents currently report the same item, the one expiring
+// first is returned: an endpoint behind a load balancer may still serve
+// an old certificate, and no agent can mask what another one sees by
+// reporting a later date.
 func (s *SQLite) ListCurrent(ctx context.Context) ([]StoredRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		WITH per_agent AS (
@@ -204,11 +209,14 @@ func (s *SQLite) ListCurrent(ctx context.Context) ([]StoredRecord, error) {
 				))
 		)
 		SELECT source, name, kind, expires_at, metadata_json, reported_by, checked_at
-		FROM live l
-		WHERE l.checked_at = (
-			SELECT MAX(checked_at) FROM live y
-			WHERE y.source = l.source AND y.name = l.name AND y.kind = l.kind
+		FROM (
+			SELECT l.*, ROW_NUMBER() OVER (
+				PARTITION BY l.source, l.name, l.kind
+				ORDER BY l.expires_at ASC, l.checked_at DESC, l.reported_by ASC
+			) AS pick
+			FROM live l
 		)
+		WHERE pick = 1
 	`)
 	if err != nil {
 		return nil, err

@@ -200,3 +200,29 @@ func TestListCurrent_ForgottenAgentWithSlowClockComesBack(t *testing.T) {
 		t.Fatalf("agent with a slow clock hidden after reporting again: %v", got)
 	}
 }
+
+// When several agents report the same item, the earliest expiry wins,
+// not the latest report: one endpoint behind a load balancer may still
+// serve the old certificate, and a rogue or misconfigured agent must not
+// be able to mask an expiry another agent sees (pentest BUSL-01).
+func TestListCurrent_EarliestExpiryAcrossAgentsWins(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	t0 := time.Now().Add(-time.Hour)
+	soon := checker.ExpiryRecord{Source: "tls://bank.example:443", Name: "bank.example", Kind: "certificate", ExpiresAt: time.Now().Add(3 * 24 * time.Hour)}
+	far := soon
+	far.ExpiresAt = time.Date(2036, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.SaveResult(ctx, "honest-agent", "tls-checker", []checker.ExpiryRecord{soon}, t0, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveResult(ctx, "rogue-agent", "tls-checker", []checker.ExpiryRecord{far}, t0.Add(time.Minute), true); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := s.ListCurrent(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cur) != 1 || cur[0].ReportedBy != "honest-agent" || !cur[0].ExpiresAt.Equal(soon.ExpiresAt.Truncate(time.Second)) && !cur[0].ExpiresAt.Equal(soon.ExpiresAt) {
+		t.Fatalf("want one row, the earliest expiry from honest-agent, got %+v", cur)
+	}
+}
