@@ -31,18 +31,21 @@ curl -sfk -X POST https://127.0.0.1:18443/ingest -H "Authorization: Bearer $AGEN
  {"checker_name":"aws","checked_at":"$now","error":"AccessDenied <b>bold</b>","records":[]}]}
 JSON
 
+# Reviewed false positives, each with its justification.
+cp scripts/ci/zap-rules.tsv "$W/zap-rules.tsv"
+
 # ZAP reads these to add the header to every request to the site.
 docker run --rm --network host -v "$W:/zap/wrk:rw" \
   -e ZAP_AUTH_HEADER=Authorization -e ZAP_AUTH_HEADER_VALUE="Bearer $ADMIN_TOKEN" -e ZAP_AUTH_HEADER_SITE=127.0.0.1 \
   ghcr.io/zaproxy/zaproxy:stable zap-full-scan.py -t https://127.0.0.1:18443/ \
-  -m 3 -T 25 -I -j -r zap-report.html -J zap-report.json -w zap-report.md || true
+  -c zap-rules.tsv -m 3 -T 25 -I -j -r zap-report.html -J zap-report.json -w zap-report.md || true
 
 test -s "$W/zap-report.json" || { echo "ZAP produced no report"; exit 1; }
 echo "--- ZAP alerts (risk: name, count)"
 jq -r '.site[].alerts[] | "\(.riskdesc | split(" ")[0]): \(.name) [\(.cweid)] x\(.count)"' "$W/zap-report.json" | sort | uniq
 echo "--- Medium and High: where and why"
-jq -r '.site[].alerts[] | select(.riskdesc|test("^(High|Medium)")) | "== \(.name) [CWE-\(.cweid)]", (.instances[] | "  \(.method) \(.uri) param=\(.param) evidence=\(.evidence[0:120]) other=\(.otherinfo[0:200])")' "$W/zap-report.json"
+jq -r '.site[].alerts[] | select(.pluginid != "10202" and .pluginid != "40025") | select(.riskdesc|test("^(High|Medium)")) | "== \(.name) [CWE-\(.cweid)]", (.instances[] | "  \(.method) \(.uri) param=\(.param) evidence=\(.evidence[0:120]) other=\(.otherinfo[0:200])")' "$W/zap-report.json"
 level="${FAIL_ON:-High}"
-bad=$(jq --arg l "$level" '[.site[].alerts[] | select((.riskdesc | split(" ")[0]) as $r | ($l=="High" and $r=="High") or ($l=="Medium" and ($r=="High" or $r=="Medium")))] | length' "$W/zap-report.json")
+bad=$(jq --arg l "$level" '[.site[].alerts[] | select(.pluginid != "10202" and .pluginid != "40025") | select((.riskdesc | split(" ")[0]) as $r | ($l=="High" and $r=="High") or ($l=="Medium" and ($r=="High" or $r=="Medium")))] | length' "$W/zap-report.json")
 echo "alerts at or above $level: $bad"
 [ "$bad" = 0 ]

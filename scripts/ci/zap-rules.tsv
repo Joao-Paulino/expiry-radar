@@ -1,0 +1,2 @@
+10202	IGNORE	(Absence of Anti-CSRF Tokens: false positive. ZAP authenticates with an admin bearer header, which browsers never send cross-site, so no CSRF token is rendered for it. Cookie sessions require csrf_token on every POST: session.TestMiddleware_SessionPOSTRequiresCSRF.)
+40025	IGNORE	(Proxy Disclosure: false positive. No proxy in front of the test collector; TRACE/TRACK/OPTIONS get 405 without echo and no Server or Via header, checked manually.)
