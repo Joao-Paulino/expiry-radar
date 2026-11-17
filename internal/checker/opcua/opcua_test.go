@@ -332,3 +332,27 @@ func TestConfig_RejectsDuplicateEndpoints(t *testing.T) {
 		t.Fatal("duplicate endpoint accepted")
 	}
 }
+
+// OWASP IoT I2: a hostile server announcing a huge chunk must be refused
+// before anything is allocated for it.
+func TestGetEndpoints_RejectsOversizedChunk(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		_, _, _, _ = readChunk(c)                                          // HEL
+		_, _ = c.Write([]byte{'A', 'C', 'K', 'F', 0xff, 0xff, 0xff, 0x7f}) // 2 GiB
+		time.Sleep(time.Second)
+	}()
+	_, err = GetEndpoints(context.Background(), "opc.tcp://"+ln.Addr().String(), 2*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "out of range") {
+		t.Fatalf("err = %v", err)
+	}
+}

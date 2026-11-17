@@ -803,6 +803,8 @@ One record per distinct certificate (servers repeat the same certificate on ever
 
 **OT-safe mode.** `"ot_safe": true` in the agent config: at least one hour between runs (`interval_seconds` ≥ 3600, enforced), one target at a time with a 2 s pause, 5 s timeouts for TLS and OPC UA. / **Modo OT-safe:** `"ot_safe": true` na config do agente: pelo menos uma hora entre verificações (obrigatório), um alvo de cada vez com 2 s de pausa, timeouts de 5 s para TLS e OPC UA.
 
+**Recommended in OT zones: `"ot_safe": true`.** / **Recomendado em zonas OT.**
+
 **Placement (ISA/IEC 62443).** Run the agent inside the OT zone or the DMZ: it only opens outbound connections to the collector, so no inbound firewall rule into the OT zone is needed. / **Colocação:** o agente fica na zona OT ou na DMZ e só faz ligações de saída para o coletor; não é preciso abrir regras de entrada na zona OT.
 
 ## ⚠️ Known limitations / Limitações conhecidas
@@ -823,7 +825,7 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 | ✅ | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
 | ✅ | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
 | ✅ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
-| 🟡 | **M7** | ICS/OT and IIoT on the plant floor: OPC UA certificates (GetEndpoints, no session) and local OPC UA PKI stores; MQTT/AMQP brokers over TLS (8883, 5671); HTTPS on PLCs, HMIs and edge gateways with an OT-safe mode (few connections, long intervals, short timeouts) | ICS/OT e IIoT na fábrica: certificados OPC UA (GetEndpoints, sem sessão) e stores PKI locais do OPC UA; brokers MQTT/AMQP sobre TLS (8883, 5671); HTTPS em PLC, HMI e gateways edge com modo OT-safe (poucas ligações, intervalos longos, timeouts curtos) |
+| ✅ | **M7** | ICS/OT and IIoT on the plant floor: OPC UA certificates (GetEndpoints, no session) and local OPC UA PKI stores; MQTT/AMQP brokers over TLS (8883, 5671); HTTPS on PLCs, HMIs and edge gateways with an OT-safe mode (few connections, long intervals, short timeouts) | ICS/OT e IIoT na fábrica: certificados OPC UA (GetEndpoints, sem sessão) e stores PKI locais do OPC UA; brokers MQTT/AMQP sobre TLS (8883, 5671); HTTPS em PLC, HMI e gateways edge com modo OT-safe (poucas ligações, intervalos longos, timeouts curtos) |
 | ⚪ | **M8** | Cloud IoT: AWS IoT Core device certificates and registered CAs; Azure IoT Hub and DPS X.509 certificates | IoT na cloud: certificados de dispositivo e CAs registadas no AWS IoT Core; certificados X.509 do Azure IoT Hub e DPS |
 | ⚪ | **M9** | SCADA and industrial software licences (vendor by vendor), then other software licences and SaaS subscriptions | Licenças de SCADA e software industrial (fabricante a fabricante), depois outras licenças de software e subscrições SaaS |
 
@@ -886,19 +888,19 @@ Só leitura, nunca escreve nos equipamentos; o agente fica na zona OT ou na DMZ 
 - [x] Security testing on every PR: CodeQL, gosec, OWASP ZAP, fuzzing; pentest report and ASVS L2 / Testes de segurança em cada PR: CodeQL, gosec, OWASP ZAP, fuzzing; relatório de pentest e ASVS L2
 - [x] Supply chain: signed build provenance, SBOM and VEX per binary; OpenSSF Baseline / Cadeia de fornecimento: proveniência assinada, SBOM e VEX por binário; OpenSSF Baseline
 
-**In progress in M7 / Em curso no M7**
+**Done in M7 / Concluído no M7**
 
 - [x] OPC UA server certificates (discovery only, no session) / Certificados de servidores OPC UA (só descoberta, sem sessão)
 - [x] OPC UA PKI stores (local checker) and MQTT/AMQP brokers (TLS checker) documented / Stores PKI OPC UA (checker local) e brokers MQTT/AMQP (checker TLS) documentados
 - [x] OT-safe mode: `ot_safe` (minimum 1 h interval, pauses, short timeouts) / Modo OT-safe: `ot_safe` (intervalo mínimo de 1 h, pausas, timeouts curtos)
-- [ ] Security test against OWASP IoT Top 10 / Teste de segurança segundo o OWASP IoT Top 10
+- [x] Security test against OWASP IoT Top 10 ([report](docs/security/OWASP-IOT-TOP10.md)) / Teste de segurança segundo o OWASP IoT Top 10
 
 ## 🛡️ Security / Segurança
 
 Agents only read expiry metadata and never send private keys or secret values.
 Found a vulnerability? See [SECURITY.md](SECURITY.md) (private reporting).
 Security testing: [pentest report (OWASP WSTG)](docs/security/PENTEST-2026-11.md),
-[ASVS L2 self-assessment](docs/security/ASVS-L2.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
+[ASVS L2 self-assessment](docs/security/ASVS-L2.md), [OWASP IoT Top 10](docs/security/OWASP-IOT-TOP10.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Os agentes só leem metadados de expiração e nunca enviam chaves privadas nem
 valores secretos. Encontraste uma vulnerabilidade? Vê o [SECURITY.md](SECURITY.md)
