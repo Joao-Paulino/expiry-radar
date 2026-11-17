@@ -5,6 +5,7 @@
 ### Know what expires before it breaks production · Saiba o que expira antes de parar a produção
 
 ![CI](https://github.com/Joao-Paulino/expiry-radar/actions/workflows/ci.yml/badge.svg)
+[![OpenSSF Baseline](https://www.bestpractices.dev/projects/16848/baseline)](https://www.bestpractices.dev/projects/16848)
 ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 ![Status](https://img.shields.io/badge/status-milestone%201-orange)
 ![Platforms](https://img.shields.io/badge/agent%20%26%20collector-Windows%20%7C%20Linux%20amd64%20%7C%20arm64-blue)
