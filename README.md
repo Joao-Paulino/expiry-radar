@@ -769,7 +769,12 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 | ✅ | **M4** | AWS: ACM, IAM access keys, Secrets Manager rotation | AWS: ACM, access keys IAM, rotação no Secrets Manager |
 | ✅ | **M5** | GCP: Certificate Manager, Secret Manager, service account keys | GCP: Certificate Manager, Secret Manager, chaves de service accounts |
 | ✅ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
-| ⚪ | Later / Depois | Software licences, SaaS subscriptions, then OT/ICS | Licenças de software, subscrições SaaS e depois OT/ICS |
+| ⚪ | **M7** | ICS/OT and IIoT on the plant floor: OPC UA certificates (GetEndpoints, no session) and local OPC UA PKI stores; MQTT/AMQP brokers over TLS (8883, 5671); HTTPS on PLCs, HMIs and edge gateways with an OT-safe mode (few connections, long intervals, short timeouts) | ICS/OT e IIoT na fábrica: certificados OPC UA (GetEndpoints, sem sessão) e stores PKI locais do OPC UA; brokers MQTT/AMQP sobre TLS (8883, 5671); HTTPS em PLC, HMI e gateways edge com modo OT-safe (poucas ligações, intervalos longos, timeouts curtos) |
+| ⚪ | **M8** | Cloud IoT: AWS IoT Core device certificates and registered CAs; Azure IoT Hub and DPS X.509 certificates | IoT na cloud: certificados de dispositivo e CAs registadas no AWS IoT Core; certificados X.509 do Azure IoT Hub e DPS |
+| ⚪ | **M9** | SCADA and industrial software licences (vendor by vendor), then other software licences and SaaS subscriptions | Licenças de SCADA e software industrial (fabricante a fabricante), depois outras licenças de software e subscrições SaaS |
+
+**OT/IoT principles / Princípios OT/IoT:** read only, never writes to devices; the agent sits in the OT zone or DMZ and only connects out to the collector (one-way conduit, ISA/IEC 62443 zones and conduits); each milestone ends with a security test (OWASP IoT Top 10). /
+Só leitura, nunca escreve nos equipamentos; o agente fica na zona OT ou na DMZ e só faz ligações de saída para o coletor (conduit de sentido único, zonas e conduits do ISA/IEC 62443); cada milestone termina com um teste de segurança (OWASP IoT Top 10).
 
 ✅ done / concluído · 🟡 in progress / em curso · ⚪ planned / planeado
 
