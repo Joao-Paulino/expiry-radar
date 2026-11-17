@@ -327,6 +327,9 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		h.Set("Cross-Origin-Embedder-Policy", "require-corp")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), clipboard-read=()")
+		// Pages and exports list the monitored estate: keep them out of
+		// browser and proxy caches. The static handler sets its own policy.
+		h.Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
 	})
 }
