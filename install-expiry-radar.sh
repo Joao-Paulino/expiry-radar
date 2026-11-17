@@ -97,9 +97,14 @@ generate_certs() {
   COL_HOST=${ANSWER:-${IP:-localhost}}
   # The collector generates its own certificate (no OpenSSL) / O collector gera o certificado (sem OpenSSL)
   "$BIN" gen-cert "$DIR" --host "$COL_HOST"
-  TOKEN_AGENT=$(new_token)
   TOKEN_ADMIN=$(new_token)
   echo -e "${GREEN}[PT] Certificado emitido para: $COL_HOST / [EN] Certificate issued for: $COL_HOST${NC}"
+}
+
+add_agent() { # add_agent <collector-bin> <collector.json> <agent-id>: prints the new token
+  local out
+  out=$("$1" add-agent "$2" "$3") || { echo -e "${RED}[PT] Não foi possível criar o token do agente $3 / [EN] Could not create the token for agent $3${NC}" >&2; exit 1; }
+  echo "$out" | grep -E '^[[:space:]]*[0-9a-f]{64}[[:space:]]*$' | head -1 | tr -d '[:space:]'
 }
 
 define_admin_password() {
@@ -162,12 +167,22 @@ if [ "$OPTION" = "1" ] || [ "$OPTION" = "3" ]; then
   "db_path": "$COL_DIR/radar.db",
   "tls_cert_file": "$COL_DIR/collector.crt",
   "tls_key_file": "$COL_DIR/collector.key",
-  "auth_tokens": ["$TOKEN_AGENT"],
   "admin_tokens": ["$TOKEN_ADMIN"],
   "alert_interval_seconds": 3000,
   "theme": "dark"
 }
 EOF
+
+  # One token per agent: each may only report as itself / Um token por agente
+  if [ "$OPTION" = "3" ]; then DEFAULT_ID="agent-$(hostname)"; else DEFAULT_ID="agent-01"; fi
+  read -rp "[PT] ID do primeiro agente [Enter para $DEFAULT_ID] / [EN] First agent ID: " FIRST_AGENT_ID
+  FIRST_AGENT_ID=${FIRST_AGENT_ID:-$DEFAULT_ID}
+  FIRST_AGENT_TOKEN=$(add_agent "$COL_BIN" "$COL_DIR/collector.json" "$FIRST_AGENT_ID")
+  if [ "$OPTION" = "1" ]; then
+    echo -e "${YELLOW}[PT] Token do agente $FIRST_AGENT_ID (guarda-o para instalar esse agente) / [EN] Token for agent $FIRST_AGENT_ID:${NC}"
+    echo "  $FIRST_AGENT_TOKEN"
+    echo -e "${YELLOW}[PT] Mais agentes / [EN] More agents: sudo $COL_BIN add-agent $COL_DIR/collector.json <id> && sudo systemctl restart expiry-radar-collector${NC}"
+  fi
 
   define_admin_password "$COL_BIN" "$COL_DIR/collector.json"
   echo -e "${YELLOW}[PT] A configurar TOTP do admin... / [EN] Setting admin TOTP...${NC}"
@@ -199,17 +214,23 @@ if [ "$OPTION" = "2" ] || [ "$OPTION" = "3" ]; then
 
   CHECK_COL_DIR=${COL_DIR:-$DEFAULT_COL_DIR}
   if [ -f "$CHECK_COL_DIR/collector.json" ] && [ -f "$CHECK_COL_DIR/collector.crt" ]; then
-    echo -e "${GREEN}[PT] Collector encontrado nesta máquina: a reutilizar certificado e token. / [EN] Local collector found: reusing certificate and token.${NC}"
+    echo -e "${GREEN}[PT] Collector encontrado nesta máquina: certificado copiado, token só deste agente. / [EN] Local collector found: certificate copied, token for this agent only.${NC}"
     cp -f "$CHECK_COL_DIR/collector.crt" "$AGENT_DIR/collector.crt"
-    AGENT_TOKEN=$(sed -n 's/.*"auth_tokens": *\["\([^"]*\)".*/\1/p' "$CHECK_COL_DIR/collector.json")
-    [ -n "$AGENT_TOKEN" ] || { echo -e "${RED}[PT] Não foi possível ler o token do collector.json / [EN] Could not read the token${NC}"; exit 1; }
+    if [ -n "${FIRST_AGENT_TOKEN:-}" ]; then
+      AGENT_ID=$FIRST_AGENT_ID; AGENT_TOKEN=$FIRST_AGENT_TOKEN
+    else
+      # Collector installed earlier: add a token for this agent and reload it
+      AGENT_ID="agent-$(hostname)"
+      AGENT_TOKEN=$(add_agent "$CHECK_COL_DIR/expiry-radar-collector" "$CHECK_COL_DIR/collector.json" "$AGENT_ID")
+      systemctl restart expiry-radar-collector 2>/dev/null || true
+    fi
     COL_CRT="$AGENT_DIR/collector.crt"
-    AGENT_ID="agent-$(hostname)"
     COL_IP=${COL_HOST:-localhost}
   else
     echo -e "${YELLOW}[PT] Collector não encontrado localmente; assume-se remoto. / [EN] Collector not found locally; assuming remote.${NC}"
     read -rp "[PT] IP/nome do Collector / [EN] Collector IP/name: " COL_IP
-    read -rsp "[PT] Token do agente (auth_token) / [EN] Agent token: " AGENT_TOKEN; echo
+    echo -e "${YELLOW}[PT] No collector: sudo expiry-radar-collector add-agent collector.json <id> dá o token deste agente. / [EN] On the collector, add-agent gives this agent's token.${NC}"
+    read -rsp "[PT] Token do agente / [EN] Agent token: " AGENT_TOKEN; echo
     read -rp "[PT] Caminho do collector.crt / [EN] Path to collector.crt: " COL_CRT
     read -rp "[PT] ID do agente (ex: linux-web-01) / [EN] Agent ID: " AGENT_ID
     [ -f "$COL_CRT" ] || { echo -e "${RED}[PT] Certificado não encontrado: $COL_CRT / [EN] Certificate not found${NC}"; exit 1; }

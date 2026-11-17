@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Joao-Paulino/expiry-radar/internal/auth"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/store"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
@@ -33,6 +34,22 @@ func Handler(st store.Store) http.HandlerFunc {
 			}
 			w.WriteHeader(http.StatusBadRequest)
 			return
+		}
+
+		// A token bound to an agent may only report as that agent:
+		// otherwise one compromised host could retire every other
+		// agent's items with empty complete runs.
+		if bound, ok := auth.BoundAgent(ctx); ok {
+			switch batch.AgentID {
+			case "":
+				batch.AgentID = bound
+			case bound:
+			default:
+				log.Printf("ingest: token bound to agent %q tried to report as %q (from %s)",
+					logging.Sanitize(bound), logging.Sanitize(batch.AgentID), logging.Sanitize(r.RemoteAddr))
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 		}
 
 		if batch.AgentID != "" {

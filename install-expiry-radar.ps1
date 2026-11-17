@@ -112,12 +112,24 @@ function Generate-Certs {
         exit 1
     }
 
-    $global:TOKEN_AGENT = New-Token
     $global:TOKEN_ADMIN = New-Token
     $global:COL_HOST = $ip
 
     Write-Host "[PT] Certificado emitido para: $ip" -ForegroundColor Green
     Write-Host "[EN] Certificate issued for: $ip" -ForegroundColor Green
+}
+
+function Add-Agent {
+    # Cria um token só para este agente (collector add-agent) / Creates a token for this agent only
+    param([string]$Bin, [string]$Json, [string]$AgentId)
+    $out = & $Bin add-agent $Json $AgentId
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[PT] Não foi possível criar o token do agente $AgentId." -ForegroundColor Red
+        Write-Host "[EN] Could not create the token for agent $AgentId." -ForegroundColor Red
+        exit 1
+    }
+    $tok = ($out | Where-Object { $_ -match '^\s*[0-9a-f]{64}\s*$' } | Select-Object -First 1)
+    return [pscustomobject]@{ Id = $AgentId; Token = $tok.Trim() }
 }
 
 function Define-AdminPassword {
@@ -162,13 +174,23 @@ if ($OPTION -eq "1" -or $OPTION -eq "3") {
   "db_path": "$colDirJson\\radar.db",
   "tls_cert_file": "$colDirJson\\collector.crt",
   "tls_key_file": "$colDirJson\\collector.key",
-  "auth_tokens": ["$global:TOKEN_AGENT"],
   "admin_tokens": ["$global:TOKEN_ADMIN"],
   "alert_interval_seconds": 3000,
   "theme": "dark"
 }
 "@
     Write-Utf8NoBom -Path "$COL_DIR\collector.json" -Content $json
+
+    # Um token por agente: cada um só pode reportar como ele próprio / One token per agent: each may only report as itself
+    $defaultId = if ($OPTION -eq "3") { "win-agent-$env:COMPUTERNAME" } else { "agent-01" }
+    $firstId = Read-Host "[PT] ID do primeiro agente [Enter para $defaultId] / [EN] First agent ID [Enter for $defaultId]"
+    if ([string]::IsNullOrWhiteSpace($firstId)) { $firstId = $defaultId }
+    $global:FIRST_AGENT = Add-Agent -Bin $COL_BIN -Json "$COL_DIR\collector.json" -AgentId $firstId.Trim()
+    if ($OPTION -eq "1") {
+        Write-Host "[PT] Token do agente $($global:FIRST_AGENT.Id) (guarda-o para instalar esse agente): $($global:FIRST_AGENT.Token)" -ForegroundColor Cyan
+        Write-Host "[EN] Token for agent $($global:FIRST_AGENT.Id) (keep it to install that agent): $($global:FIRST_AGENT.Token)" -ForegroundColor Cyan
+        Write-Host "[PT] Mais agentes: $COL_BIN add-agent $COL_DIR\collector.json <id> e Restart-Service ExpiryRadarCollector" -ForegroundColor Cyan
+    }
 
     Define-AdminPassword -Bin $COL_BIN -Json "$COL_DIR\collector.json"
     
@@ -211,30 +233,33 @@ if ($OPTION -eq "2" -or $OPTION -eq "3") {
     if ((Test-Path "$CHECK_COL_DIR\collector.json") -and (Test-Path "$CHECK_COL_DIR\collector.crt")) {
         Write-Host "[PT] Deteção automática: O Collector está na mesma máquina!" -ForegroundColor Green
         Write-Host "[EN] Auto-detection: Collector is on the same machine!" -ForegroundColor Green
-        Write-Host "[PT] A copiar certificado e reutilizar token..." -ForegroundColor Yellow
-        Write-Host "[EN] Copying certificate and reusing token..." -ForegroundColor Yellow
-        
+        Write-Host "[PT] A copiar o certificado e a usar um token só deste agente..." -ForegroundColor Yellow
+        Write-Host "[EN] Copying the certificate and using a token for this agent only..." -ForegroundColor Yellow
+
         Copy-Item -Path "$CHECK_COL_DIR\collector.crt" -Destination "$AGENT_DIR\collector.crt" -Force
-        
-        # Extrai o token do JSON do collector
-        $colJson = Get-Content "$CHECK_COL_DIR\collector.json" | ConvertFrom-Json
-        $AGENT_TOKEN = $colJson.auth_tokens[0]
-        
-        if (-not $AGENT_TOKEN) {
-            Write-Host "[PT] Erro: Não foi possível ler o token do collector.json." -ForegroundColor Red
-            Write-Host "[EN] Error: Could not read token from collector.json." -ForegroundColor Red
-            exit
+
+        if ($global:FIRST_AGENT) {
+            $AGENT_ID = $global:FIRST_AGENT.Id
+            $AGENT_TOKEN = $global:FIRST_AGENT.Token
+        } else {
+            # Collector já instalado antes: cria um token para este agente e recarrega-o / Collector installed earlier: add a token for this agent and reload it
+            $AGENT_ID = "win-agent-$env:COMPUTERNAME"
+            $a = Add-Agent -Bin "$CHECK_COL_DIR\expiry-radar-collector.exe" -Json "$CHECK_COL_DIR\collector.json" -AgentId $AGENT_ID
+            $AGENT_TOKEN = $a.Token
+            icacls "$CHECK_COL_DIR\collector.json" /inheritance:r /grant "NT AUTHORITY\LocalService:R" /grant "BUILTIN\Administrators:F" | Out-Null
+            Restart-Service ExpiryRadarCollector -ErrorAction SilentlyContinue
         }
 
         $COL_CRT = "$AGENT_DIR\collector.crt"
-        $AGENT_ID = "win-agent-$env:COMPUTERNAME"
         $COL_IP = if ($global:COL_HOST) { $global:COL_HOST } else { "localhost" }
     } else {
         Write-Host "[PT] O Collector não foi encontrado localmente. Assume-se máquina remota." -ForegroundColor Yellow
         Write-Host "[EN] Collector not found locally. Assuming remote machine." -ForegroundColor Yellow
         
         $COL_IP = Read-Host "[PT] IP do Collector / [EN] Collector IP"
-        $AGENT_TOKEN = Read-Host "[PT] Token do Agente (auth_token) / [EN] Agent Token"
+        Write-Host "[PT] No collector: <collector.exe> add-agent collector.json <id> dá o token deste agente." -ForegroundColor Yellow
+        Write-Host "[EN] On the collector: <collector.exe> add-agent collector.json <id> gives this agent's token." -ForegroundColor Yellow
+        $AGENT_TOKEN = Read-Host "[PT] Token do Agente / [EN] Agent Token"
         $COL_CRT = Read-Host "[PT] Caminho do certificado do Collector / [EN] Collector certificate path"
         $AGENT_ID = Read-Host "[PT] ID do Agente / [EN] Agent ID"
     }

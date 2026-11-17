@@ -168,7 +168,7 @@ Schema changes are forward migrations in `internal/collector/db`, applied at sta
 
 ### What is "current"
 
-`store.ListCurrent` takes, for each (source, name, kind), the newest report per agent and then the newest across agents. An item is **gone**, and stops being shown and alerted, only after the checker that reported it has completed **two** error-free runs on that agent without it. One run is not enough, because a load balancer may alternate certificates between requests. Other rules:
+`store.ListCurrent` takes, for each (source, name, kind), the newest report per agent and then, across agents, the one **expiring first** (an endpoint behind a load balancer may still serve an old certificate, and no agent can mask what another one sees). An item is **gone**, and stops being shown and alerted, only after the checker that reported it has completed **two** error-free runs on that agent without it. One run is not enough, because a load balancer may alternate certificates between requests. Other rules:
 
 - A failing run never hides anything, since it may be partial.
 - Rows from before checker names were stored are gone only once every checker on that agent has completed.
@@ -205,7 +205,7 @@ Server-rendered `html/template` pages, with the CSS and a small vanilla JavaScri
 ```mermaid
 flowchart TB
     subgraph TB1["Boundary 1: agent → collector"]
-        a["TLS 1.2+, collector certificate pinned<br/>via collector_ca_file"] --> b["Bearer token (auth_tokens),<br/>constant-time compare"]
+        a["TLS 1.2+, collector certificate pinned<br/>via collector_ca_file"] --> b["Per-agent bearer token (agents),<br/>bound to agent_id, constant-time compare"]
         b --> c["16 MiB body limit, schema validation,<br/>checked_at clamp"]
     end
     subgraph TB2["Boundary 2: browser → dashboard"]
@@ -220,9 +220,9 @@ flowchart TB
 
 | Threat | Mitigation |
 |---|---|
-| Stolen agent token | Can only submit reports, never read data. Tokens are per installation and listed in `auth_tokens`; remove one to revoke it. |
+| Stolen agent token | Can only submit reports, never read data, and only as its own agent: per-agent tokens (`agents`) are bound to an `agent_id`, so a batch claiming another agent is refused (403). Remove the entry to revoke it. Shared `auth_tokens` (older setups) lack this binding and log a warning. |
 | Fake collector | Agents trust only `collector_ca_file`, not the system roots, when it is set. |
-| Fake report hiding an expiry | Items vanish only after two complete runs; future timestamps are clamped. A compromised agent can still lie about its own items, so agents are part of the trust base. |
+| Fake report hiding an expiry | When agents disagree, the earliest expiry wins, so no agent can mask what another sees; items vanish only after two complete runs of the agent that reported them; future timestamps are clamped. A compromised agent can still lie about the items only it reports. |
 | Password guessing | Per-address throttle (5 per 15 min) and account lockout after 20 failures; TOTP required. |
 | Session theft or CSRF | Strict cookie flags, short lifetimes, CSRF tokens, "sign out all sessions" button. |
 | XSS or clickjacking | Contextual escaping by `html/template`; CSP `default-src 'self'` with no inline scripts or styles; `frame-ancestors 'none'`; HSTS. |
@@ -281,7 +281,7 @@ flowchart LR
 ## 11. Known limits
 
 - A single collector with SQLite. This suits thousands of items and tens of agents; there is no built-in high availability. A failed collector loses no data that agents still hold in their queues.
-- A compromised agent can misreport the items it owns.
+- A compromised agent can misreport the items only it reports (with per-agent tokens it cannot touch other agents' items).
 - A batch larger than 16 MiB is refused and stays in the agent's queue; split very large estates across several agents.
 - Thresholds (30 and 7 days) are global per kind and cannot be set per item.
 - Not yet covered: GCP regional secrets, industrial (ICS/OT) devices, and Kubernetes secrets and cert-manager.

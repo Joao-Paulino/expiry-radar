@@ -168,7 +168,7 @@ As alterações ao esquema são migrações progressivas em `internal/collector/
 
 ### O que está "atual"
 
-O `store.ListCurrent` pega, para cada (source, name, kind), no relatório mais recente de cada agente e depois no mais recente entre agentes. Um item é considerado **desaparecido**, e deixa de ser mostrado e alertado, só depois de o checker que o reportava ter feito **duas** execuções completas sem erros nesse agente sem o voltar a reportar. Uma só não chega, porque um load balancer pode alternar certificados entre pedidos. Outras regras:
+O `store.ListCurrent` pega, para cada (source, name, kind), no relatório mais recente de cada agente e depois, entre agentes, no que **expira primeiro** (um endpoint atrás de um load balancer pode ainda servir um certificado antigo, e nenhum agente consegue esconder o que outro vê). Um item é considerado **desaparecido**, e deixa de ser mostrado e alertado, só depois de o checker que o reportava ter feito **duas** execuções completas sem erros nesse agente sem o voltar a reportar. Uma só não chega, porque um load balancer pode alternar certificados entre pedidos. Outras regras:
 
 - Uma execução com erros nunca esconde nada, porque pode estar incompleta.
 - Os registos anteriores ao armazenamento do nome do checker só desaparecem quando todos os checkers desse agente tiverem completado.
@@ -205,7 +205,7 @@ Páginas geradas no servidor com `html/template`, com o CSS e um pequeno ficheir
 ```mermaid
 flowchart TB
     subgraph TB1["Fronteira 1: agente → collector"]
-        a["TLS 1.2+, certificado do collector fixado<br/>via collector_ca_file"] --> b["Bearer token (auth_tokens),<br/>comparação em tempo constante"]
+        a["TLS 1.2+, certificado do collector fixado<br/>via collector_ca_file"] --> b["Bearer token por agente (agents),<br/>ligado ao agent_id, comparação em tempo constante"]
         b --> c["Limite de 16 MiB, validação do esquema,<br/>limite ao checked_at"]
     end
     subgraph TB2["Fronteira 2: browser → painel"]
@@ -220,9 +220,9 @@ flowchart TB
 
 | Ameaça | Mitigação |
 |---|---|
-| Token de agente roubado | Só serve para enviar relatórios, nunca para ler dados. Os tokens são por instalação e estão listados em `auth_tokens`; para revogar um, basta retirá-lo. |
+| Token de agente roubado | Só serve para enviar relatórios, nunca para ler dados, e apenas como o seu próprio agente: os tokens por agente (`agents`) estão ligados a um `agent_id`, e um envio com outro agente é recusado (403). Para revogar, retira a entrada. Os `auth_tokens` partilhados (instalações antigas) não têm esta ligação e geram um aviso. |
 | Collector falso | Quando `collector_ca_file` está definido, os agentes só confiam nesse certificado, não nas raízes do sistema. |
-| Relatório falso a esconder uma expiração | Os itens só desaparecem após duas execuções completas e as datas no futuro são limitadas. Um agente comprometido pode mentir sobre os seus próprios itens, por isso os agentes fazem parte da base de confiança. |
+| Relatório falso a esconder uma expiração | Quando os agentes discordam, ganha a expiração mais próxima, por isso nenhum agente esconde o que outro vê; os itens só desaparecem após duas execuções completas do agente que os reportou; as datas no futuro são limitadas. Um agente comprometido ainda pode mentir sobre os itens que só ele reporta. |
 | Adivinhar a password | Limite por endereço (5 em 15 min) e bloqueio da conta após 20 falhas; TOTP obrigatório. |
 | Roubo de sessão ou CSRF | Cookies com flags restritas, durações curtas, tokens CSRF e botão "terminar todas as sessões". |
 | XSS ou clickjacking | Escape contextual pelo `html/template`; CSP `default-src 'self'` sem scripts nem estilos inline; `frame-ancestors 'none'`; HSTS. |
@@ -281,7 +281,7 @@ flowchart LR
 ## 11. Limitações conhecidas
 
 - Um único collector com SQLite. Chega para milhares de itens e dezenas de agentes; não há alta disponibilidade incluída. Se o collector falhar, não se perdem os dados que os agentes ainda têm nas suas filas.
-- Um agente comprometido pode reportar mal os itens que lhe pertencem.
+- Um agente comprometido pode reportar mal os itens que só ele reporta (com tokens por agente, não consegue mexer nos itens dos outros).
 - Um lote maior do que 16 MiB é recusado e fica na fila do agente; num parque muito grande, divide os alvos por vários agentes.
 - Os limiares (30 e 7 dias) são globais por tipo e não se podem definir por item.
 - Ainda não coberto: segredos regionais do GCP, dispositivos industriais (ICS/OT) e segredos do Kubernetes e cert-manager.

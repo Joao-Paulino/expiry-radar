@@ -330,3 +330,32 @@ func TestRun_UnreachableSSOProviderDoesNotBlockStartup(t *testing.T) {
 		t.Fatalf("down provider: %v %v", resp.StatusCode, err)
 	}
 }
+
+// Per-agent tokens (pentest BUSL-02): each binds one agent ID; they may
+// replace the shared auth_tokens entirely.
+func TestConfig_Validate_AgentCredentials(t *testing.T) {
+	strong := "0123456789abcdef0123456789abcdef"
+	base := server.Config{DBPath: "radar.db", ListenAddr: "127.0.0.1:0", AdminTokens: []string{strong + "admin"},
+		TLSCertFile: "c", TLSKeyFile: "k",
+		Agents: []server.AgentCredential{{ID: "web-01", Token: strong + "w"}, {ID: "db-01", Token: strong + "d"}}}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("per-agent only config rejected: %v", err)
+	}
+	cases := map[string]func(c *server.Config){
+		"no agent credential at all": func(c *server.Config) { c.Agents = nil },
+		"empty id":                   func(c *server.Config) { c.Agents[0].ID = "" },
+		"duplicate id":               func(c *server.Config) { c.Agents[1].ID = "web-01" },
+		"short token":                func(c *server.Config) { c.Agents[0].Token = "short" },
+		"token shared by two agents": func(c *server.Config) { c.Agents[1].Token = c.Agents[0].Token },
+		"token also an admin token":  func(c *server.Config) { c.Agents[0].Token = c.AdminTokens[0] },
+		"token also a shared token":  func(c *server.Config) { c.AuthTokens = []string{c.Agents[0].Token} },
+	}
+	for name, mutate := range cases {
+		c := base
+		c.Agents = append([]server.AgentCredential(nil), base.Agents...)
+		mutate(&c)
+		if c.Validate() == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
