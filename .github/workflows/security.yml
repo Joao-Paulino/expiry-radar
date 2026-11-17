@@ -36,6 +36,11 @@ jobs:
       - uses: github/codeql-action/analyze@v3
         with:
           category: codeql-go
+          output: codeql-results
+      - name: CodeQL findings (summary)
+        run: |
+          jq -r '.runs[].results[] | "\(.level) \(.ruleId) \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine) | \(.message.text[0:160])"' codeql-results/*.sarif | sort | uniq
+          echo "total: $(jq '[.runs[].results[]] | length' codeql-results/*.sarif)"
 
   gosec:
     runs-on: ubuntu-latest
