@@ -801,11 +801,13 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 ## 🛡️ Security / Segurança
 
 Agents only read expiry metadata and never send private keys or secret values.
-Found a vulnerability? Please open a private security advisory on this repository.
+Found a vulnerability? See [SECURITY.md](SECURITY.md) (private reporting).
+Security testing: [pentest report (OWASP WSTG)](docs/security/PENTEST-2026-11.md),
+[ASVS L2 self-assessment](docs/security/ASVS-L2.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Os agentes só leem metadados de expiração e nunca enviam chaves privadas nem
-valores secretos. Encontraste uma vulnerabilidade? Abre um security advisory
-privado neste repositório.
+valores secretos. Encontraste uma vulnerabilidade? Vê o [SECURITY.md](SECURITY.md)
+(reporte privado). Os relatórios de testes de segurança estão em [docs/security](docs/security/).
 
 ## 📜 Licence / Licença
 
