@@ -38,8 +38,8 @@ type encoder struct{ b []byte }
 func (e *encoder) u8(v byte)    { e.b = append(e.b, v) }
 func (e *encoder) u16(v uint16) { e.b = binary.LittleEndian.AppendUint16(e.b, v) }
 func (e *encoder) u32(v uint32) { e.b = binary.LittleEndian.AppendUint32(e.b, v) }
-func (e *encoder) i32(v int32)  { e.u32(uint32(v)) }
-func (e *encoder) i64(v int64)  { e.b = binary.LittleEndian.AppendUint64(e.b, uint64(v)) }
+func (e *encoder) i32(v int32)  { e.u32(uint32(v)) }                                       // #nosec G115 -- two's complement wire encoding
+func (e *encoder) i64(v int64)  { e.b = binary.LittleEndian.AppendUint64(e.b, uint64(v)) } // #nosec G115 -- two's complement wire encoding
 
 // str encodes s; the empty string is encoded as null.
 func (e *encoder) str(s string) {
@@ -47,8 +47,17 @@ func (e *encoder) str(s string) {
 		e.i32(-1)
 		return
 	}
-	e.i32(int32(len(s)))
+	e.length(len(s))
 	e.b = append(e.b, s...)
+}
+
+// length encodes a string or byte string length. Requests only carry
+// short URLs and policy names; anything longer than maxFieldLen is a bug.
+func (e *encoder) length(n int) {
+	if n > maxFieldLen {
+		panic("opcua: field too long to encode")
+	}
+	e.i32(int32(n)) // #nosec G115 -- bounded by maxFieldLen above
 }
 
 // bytes encodes b; nil is encoded as null.
@@ -57,7 +66,7 @@ func (e *encoder) bytes(b []byte) {
 		e.i32(-1)
 		return
 	}
-	e.i32(int32(len(b)))
+	e.length(len(b))
 	e.b = append(e.b, b...)
 }
 
@@ -131,11 +140,11 @@ func (d *decoder) u32() uint32 {
 	return 0
 }
 
-func (d *decoder) i32() int32 { return int32(d.u32()) }
+func (d *decoder) i32() int32 { return int32(d.u32()) } // #nosec G115 -- two's complement wire decoding
 
 func (d *decoder) i64() int64 {
 	if v := d.take(8); v != nil {
-		return int64(binary.LittleEndian.Uint64(v))
+		return int64(binary.LittleEndian.Uint64(v)) // #nosec G115 -- two's complement wire decoding
 	}
 	return 0
 }

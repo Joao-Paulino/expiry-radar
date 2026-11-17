@@ -48,11 +48,12 @@ func GetEndpoints(ctx context.Context, endpointURL string, timeout time.Duration
 	if err := hello(conn, endpointURL); err != nil {
 		return nil, err
 	}
-	channelID, tokenID, err := openChannel(conn, uint32(timeout/time.Millisecond))
+	timeoutMs := uint32(min(timeout, time.Hour) / time.Millisecond) // #nosec G115 -- clamped to one hour
+	channelID, tokenID, err := openChannel(conn, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
-	eps, err := getEndpoints(conn, channelID, tokenID, endpointURL, uint32(timeout/time.Millisecond))
+	eps, err := getEndpoints(conn, channelID, tokenID, endpointURL, timeoutMs)
 	closeChannel(conn, channelID, tokenID)
 	return eps, err
 }
@@ -62,7 +63,10 @@ func writeMsg(w io.Writer, typ string, body []byte) error {
 	hdr := make([]byte, 8, 8+len(body))
 	copy(hdr, typ)
 	hdr[3] = 'F'
-	binary.LittleEndian.PutUint32(hdr[4:], uint32(8+len(body)))
+	if len(body) > maxFieldLen {
+		return errors.New("opcua: request too large")
+	}
+	binary.LittleEndian.PutUint32(hdr[4:], uint32(8+len(body))) // #nosec G115 -- bounded above
 	_, err := w.Write(append(hdr, body...))
 	return err
 }
