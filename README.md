@@ -227,6 +227,8 @@ go install github.com/Joao-Paulino/expiry-radar/cmd/agent@latest
 
 `collector.json`
 
+Every option with fake values: [examples/collector.full.json](examples/collector.full.json). / Todas as opções com valores fictícios.
+
 ```json
 {
   "db_path": "/var/lib/expiry-radar/radar.db",
@@ -339,7 +341,7 @@ Substitui o nome DNS e o IP pelos que os agentes vão usar. Depois copia o
 The dashboard's **Agents** section shows every agent and checker with last seen, last success and failures.
 A secção **Agents** do painel mostra cada agente e verificador com a última vez visto, último sucesso e falhas.
 
-### 🪪 SSO (Microsoft Entra ID, Google)
+### 🪪 SSO (Microsoft Entra ID, Google, Okta, any OIDC IdP)
 
 Any OpenID Connect provider can be added, several at once; each gets a button on the login page. The local Administrator (password + TOTP) stays as the break-glass account.
 Qualquer fornecedor OpenID Connect pode ser adicionado, vários ao mesmo tempo; cada um tem um botão na página de login. O Administrator local (password + TOTP) fica como conta de emergência.
@@ -364,6 +366,8 @@ Qualquer fornecedor OpenID Connect pode ser adicionado, vários ao mesmo tempo; 
 | ↩️ Redirect URI | Register `<public_url>/auth/<name>/callback` with the provider | Regista `<public_url>/auth/<name>/callback` no fornecedor |
 | 🏢 Entra ID | App registration (single tenant), web redirect URI, client secret in a file (`chmod 600`). Authorize with **groups** (`groups` claim: token configuration → groups) or **app roles** (`roles` claim). Microsoft advises against authorizing on email | Registo de aplicação (single tenant), redirect URI web, client secret num ficheiro (`chmod 600`). Autoriza por **grupos** (claim `groups`: token configuration → groups) ou **app roles** (claim `roles`). A Microsoft desaconselha autorizar pelo email |
 | 🔵 Google | OAuth client (web application). Google tokens carry no groups: use `allowed_emails` (only **verified** emails count) | Cliente OAuth (aplicação web). Os tokens Google não trazem grupos: usa `allowed_emails` (só contam emails **verificados**) |
+| 🟣 Okta | OIDC web application; issuer `https://<org>.okta.com/oauth2/default`. For `allowed_groups`, add a `groups` claim to the authorization server (filter, e.g. starts with `ExpiryRadar`) | Aplicação web OIDC; para `allowed_groups`, junta um claim `groups` ao authorization server |
+| 🌐 Any OIDC IdP | Keycloak (tested in CI), Auth0, Ping, JumpCloud, Authentik...: anything with OIDC discovery | Qualquer IdP com descoberta OIDC |
 | 🚫 Multi-tenant | `/common`, `/organizations` and `/consumers` issuers are refused: use your tenant ID | Emissores `/common`, `/organizations` e `/consumers` são recusados: usa o ID do teu tenant |
 | 👥 200+ groups | Entra omits `groups` when a user has more than 200: use app roles or assign groups to the application | O Entra omite `groups` quando o utilizador tem mais de 200: usa app roles ou atribui grupos à aplicação |
 | ⏱️ Sessions | SSO sessions last at most `sso_session_hours` (default 1, max 24); removing someone from the allowed Entra group/role, or from `allowed_emails`, blocks their next login | As sessões SSO duram no máximo `sso_session_hours` (por omissão 1, máx. 24); retirar alguém do grupo/role do Entra autorizado, ou de `allowed_emails`, bloqueia o login seguinte |
@@ -462,6 +466,8 @@ ligação estar encriptada. O certificado do servidor é verificado, com TLS 1.2
 ### 🛰️ Agent / Agente
 
 `agent.json`
+
+Every option with fake values: [examples/agent.full.json](examples/agent.full.json). / Todas as opções com valores fictícios.
 
 ```json
 {

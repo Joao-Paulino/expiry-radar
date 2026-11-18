@@ -1,0 +1,84 @@
+{
+  "collector_url": "https://radar.example.com:8443",
+  "collector_ca_file": "/etc/expiry-radar/collector-ca.pem",
+  "token": "3f8a1c0d9e2b47a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2",
+  "agent_id": "web-01",
+  "queue_path": "/var/lib/expiry-radar/queue.jsonl",
+  "interval_seconds": 3600,
+  "ot_safe": false,
+
+  "tls_targets": [
+    { "host": "www.example.com", "port": 443 },
+    { "host": "mail.example.com", "port": 25, "start_tls": "smtp" },
+    { "host": "mqtt.plant.example.com", "port": 8883 },
+    { "host": "rabbit.plant.example.com", "port": 5671 }
+  ],
+
+  "local": {
+    "cert_paths": ["/etc/ssl/certs/myapp", "/etc/letsencrypt/live", "/opt/opcua-server/pki"],
+    "windows_cert_stores": ["My", "WebHosting"]
+  },
+
+  "opcua": {
+    "targets": [
+      { "endpoint": "opc.tcp://plc-01.plant.example.com:4840" },
+      { "endpoint": "opc.tcp://scada-01.plant.example.com:4840/UA/Server" }
+    ],
+    "timeout_seconds": 10,
+    "pause_seconds": 2
+  },
+
+  "vault": {
+    "address": "https://vault.example.com:8200",
+    "ca_file": "/etc/expiry-radar/vault-ca.pem",
+    "namespace": "",
+    "auth": { "approle": { "role_id": "44444444-4444-4444-4444-444444444444", "secret_id_file": "/etc/expiry-radar/vault-secret-id" } },
+    "pki_mounts": ["pki", "pki_int"],
+    "kv_mounts": ["secret"],
+    "kv_expiry_key": "expires_at",
+    "approle_mounts": ["approle"],
+    "check_tokens": false,
+    "token_min_ttl_hours": 24,
+    "lease_prefixes": [],
+    "lease_min_ttl_hours": 24
+  },
+
+  "azure": {
+    "tenant_id": "00000000-0000-0000-0000-000000000000",
+    "client_id": "55555555-5555-5555-5555-555555555555",
+    "auth": "managed_identity",
+    "key_vaults": ["kv-prod-weu", "kv-shared"],
+    "subscriptions": ["66666666-6666-6666-6666-666666666666"],
+    "discover_key_vaults": false,
+    "app_registrations": true,
+    "service_principals": true,
+    "managed_certificates": true
+  },
+
+  "aws": {
+    "auth": "instance_role",
+    "regions": ["eu-west-1", "us-east-1"],
+    "assume_roles": [{ "role_arn": "arn:aws:iam::222222222222:role/expiry-radar-read", "external_id": "example-external-id" }],
+    "services": ["acm", "iam_server_certificates", "access_keys", "secrets_manager"],
+    "access_key_max_age_days": 90,
+    "secret_max_age_days": 0
+  },
+
+  "gcp": {
+    "auth": "metadata",
+    "organization": "123456789012",
+    "folders": [],
+    "projects": [],
+    "services": ["certificate_manager", "compute_ssl", "service_account_keys", "secret_manager"],
+    "key_max_age_days": 90
+  },
+
+  "vmware": {
+    "url": "https://vcenter.example.com",
+    "username": "expiry-radar@vsphere.local",
+    "password_file": "/etc/expiry-radar/vcenter.pw",
+    "ca_file": "/etc/expiry-radar/vmca-root.pem",
+    "esxi_hosts": true,
+    "licenses": true
+  }
+}
