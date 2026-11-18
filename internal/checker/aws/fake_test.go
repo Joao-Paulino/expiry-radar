@@ -31,32 +31,35 @@ const (
 // fakeAWS serves STS, Roles Anywhere, ACM and IAM over TLS and the
 // instance metadata / container credential endpoints over plain HTTP.
 type fakeAWS struct {
-	srv, meta   *httptest.Server
-	mu          sync.Mutex
-	calls       []string // "service action region accesskey"
-	forms       []map[string]string
-	raHeaders   http.Header
-	raQuery     string
-	raBody      string
-	credCalls   int
-	acm         map[string][]map[string]any // "account/region" -> certificate summaries
-	acmFail     string                      // "account/region" answering an error
-	iotCerts    map[string][]map[string]any // "account/region" -> IoT certificate summaries (ListCertificates)
-	iotDescribe map[string]map[string]any   // certificateId -> DescribeCertificate certificateDescription
-	serverCerts map[string][]map[string]string
-	credReport  map[string]string           // account -> CSV
-	secrets     map[string][]map[string]any // "account/region" -> SecretListEntry
-	versions    map[string][]map[string]any // secret ARN -> versions
-	reportPolls int                         // GenerateCredentialReport answers STARTED this many times first
-	reportGone  int                         // GetCredentialReport answers ReportExpired this many times first
-	imdsToken   string
-	throttle    int    // ACM answers ThrottlingException this many times first
-	raRegion    string // region the Roles Anywhere request was sent to
-	relAuth     string // Authorization header seen on the ECS relative URI
+	srv, meta     *httptest.Server
+	mu            sync.Mutex
+	calls         []string // "service action region accesskey"
+	forms         []map[string]string
+	raHeaders     http.Header
+	raQuery       string
+	raBody        string
+	credCalls     int
+	acm           map[string][]map[string]any // "account/region" -> certificate summaries
+	acmFail       string                      // "account/region" answering an error
+	iotCerts      map[string][]map[string]any // "account/region" -> IoT certificate summaries (ListCertificates)
+	iotDescribe   map[string]map[string]any   // certificateId -> DescribeCertificate certificateDescription
+	iotCACerts    map[string][]map[string]any // "account/region" -> IoT CA certificate summaries (ListCACertificates)
+	iotDescCA     map[string]map[string]any   // caCertificateId -> DescribeCACertificate certificateDescription
+	iotLoopMarker bool                        // simulate a server that never terminates ListCertificates pagination
+	serverCerts   map[string][]map[string]string
+	credReport    map[string]string           // account -> CSV
+	secrets       map[string][]map[string]any // "account/region" -> SecretListEntry
+	versions      map[string][]map[string]any // secret ARN -> versions
+	reportPolls   int                         // GenerateCredentialReport answers STARTED this many times first
+	reportGone    int                         // GetCredentialReport answers ReportExpired this many times first
+	imdsToken     string
+	throttle      int    // ACM answers ThrottlingException this many times first
+	raRegion      string // region the Roles Anywhere request was sent to
+	relAuth       string // Authorization header seen on the ECS relative URI
 }
 
 func newFakeAWS(t *testing.T) *fakeAWS {
-	f := &fakeAWS{acm: map[string][]map[string]any{}, serverCerts: map[string][]map[string]string{}, credReport: map[string]string{}, secrets: map[string][]map[string]any{}, versions: map[string][]map[string]any{}, iotCerts: map[string][]map[string]any{}, iotDescribe: map[string]map[string]any{}, imdsToken: "imds-tok"}
+	f := &fakeAWS{acm: map[string][]map[string]any{}, serverCerts: map[string][]map[string]string{}, credReport: map[string]string{}, secrets: map[string][]map[string]any{}, versions: map[string][]map[string]any{}, iotCerts: map[string][]map[string]any{}, iotDescribe: map[string]map[string]any{}, iotCACerts: map[string][]map[string]any{}, iotDescCA: map[string]map[string]any{}, imdsToken: "imds-tok"}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(f.serveAPI))
 	f.meta = httptest.NewServer(http.HandlerFunc(f.serveMeta))
 	t.Cleanup(func() { f.srv.Close(); f.meta.Close() })
@@ -242,6 +245,37 @@ func (f *fakeAWS) serveAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]any{"certificateDescription": desc})
+	case strings.HasPrefix(r.URL.Path, "/cacertificates/"): // IoT Core DescribeCACertificate
+		f.calls = append(f.calls, "iot DescribeCACertificate "+region+" "+ak)
+		if service != "iot" {
+			http.Error(w, "bad scope", 400)
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/cacertificates/")
+		desc, ok := f.iotDescCA[id]
+		if !ok {
+			http.Error(w, `{"__type":"ResourceNotFoundException"}`, 404)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"certificateDescription": desc})
+	case r.URL.Path == "/cacertificates": // IoT Core ListCACertificates
+		key := accountOf(ak) + "/" + region
+		f.calls = append(f.calls, "iot ListCACertificates "+region+" "+ak)
+		if service != "iot" {
+			http.Error(w, "bad scope", 400)
+			return
+		}
+		items := f.iotCACerts[key]
+		marker := r.URL.Query().Get("marker")
+		if marker == "p2" {
+			json.NewEncoder(w).Encode(map[string]any{"certificates": items[1:]})
+			return
+		}
+		out := map[string]any{"certificates": items[:min(1, len(items))]}
+		if len(items) > 1 {
+			out["nextMarker"] = "p2"
+		}
+		json.NewEncoder(w).Encode(out)
 	case r.URL.Path == "/certificates": // IoT Core ListCertificates
 		key := accountOf(ak) + "/" + region
 		f.calls = append(f.calls, "iot ListCertificates "+region+" "+ak)
@@ -252,6 +286,12 @@ func (f *fakeAWS) serveAPI(w http.ResponseWriter, r *http.Request) {
 		items := f.iotCerts[key]
 		marker := r.URL.Query().Get("marker")
 		if marker == "p2" {
+			if f.iotLoopMarker {
+				// Misbehaving/hostile server: keeps handing back the
+				// same marker instead of terminating the page.
+				json.NewEncoder(w).Encode(map[string]any{"certificates": items[1:2], "nextMarker": "p2"})
+				return
+			}
 			json.NewEncoder(w).Encode(map[string]any{"certificates": items[1:]})
 			return
 		}

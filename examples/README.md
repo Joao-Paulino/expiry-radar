@@ -10,7 +10,7 @@ Todos os valores são fictícios. Cada ficheiro é verificado pelos testes, por 
 | [agent/web-tls.json](agent/web-tls.json) | Websites, mail (SMTP STARTTLS) and local certificate files / Sites, email e certificados locais |
 | [agent/windows-iis.json](agent/windows-iis.json) | Windows server: IIS, RDP, Exchange, SQL Server certificates (certificate store) / Servidor Windows |
 | [agent/azure.json](agent/azure.json) | Azure: Key Vault, App Registrations, Enterprise Apps (SAML), managed certificates, IoT Hub/DPS CA certificates |
-| [agent/aws.json](agent/aws.json) | AWS: ACM, IAM server certificates, access key age, Secrets Manager rotation, IoT Core device certificates (registered CAs not yet covered), multi-account |
+| [agent/aws.json](agent/aws.json) | AWS: ACM, IAM server certificates, access key age, Secrets Manager rotation, IoT Core device certificates and registered CAs, multi-account |
 | [agent/gcp.json](agent/gcp.json) | GCP: Certificate Manager, SSL certificates, service account keys, Secret Manager, whole organization |
 | [agent/vault.json](agent/vault.json) | HashiCorp Vault: PKI, KV v2, AppRole secret IDs, tokens, leases |
 | [agent/vmware.json](agent/vmware.json) | VMware: vCenter and ESXi certificates, vSphere licences |
