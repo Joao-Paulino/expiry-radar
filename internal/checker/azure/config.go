@@ -31,6 +31,9 @@ type Config struct {
 	// Front Door (Standard/Premium) and Application Gateway certificates
 	// in Subscriptions via ARM (Reader).
 	ManagedCertificates bool `json:"managed_certificates"`
+	// IoTCertificates checks IoT Hub and Device Provisioning Service
+	// (DPS) CA certificates in Subscriptions via ARM (Reader).
+	IoTCertificates bool `json:"iot_certificates"`
 	// DiscoverKeyVaults lists every Key Vault in Subscriptions (then
 	// each needs Key Vault Reader); off, only KeyVaults are checked.
 	DiscoverKeyVaults bool `json:"discover_key_vaults"`
@@ -75,8 +78,8 @@ func (c *Config) Validate() error {
 	if c.TenantID != "" && !tenantRe.MatchString(c.TenantID) {
 		return fmt.Errorf("azure: invalid tenant_id %q", c.TenantID)
 	}
-	if (c.ManagedCertificates || c.DiscoverKeyVaults) && len(c.Subscriptions) == 0 {
-		return errors.New("azure: managed_certificates and discover_key_vaults need subscriptions")
+	if (c.ManagedCertificates || c.IoTCertificates || c.DiscoverKeyVaults) && len(c.Subscriptions) == 0 {
+		return errors.New("azure: managed_certificates, iot_certificates and discover_key_vaults need subscriptions")
 	}
 	if len(c.Subscriptions) > 0 && !c.ManagedCertificates && !c.DiscoverKeyVaults {
 		return errors.New("azure: subscriptions are used by discover_key_vaults or managed_certificates; set one")

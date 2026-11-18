@@ -1,0 +1,69 @@
+package azure
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+)
+
+func iotFake(t *testing.T) *fakeAzure {
+	f := newFake(t)
+	sub := "/subscriptions/" + guid
+	soon := time.Now().Add(20 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	f.arm[sub+"/providers/Microsoft.Devices/IotHubs"] = []map[string]any{
+		{"id": sub + "/resourceGroups/rg-iot/providers/Microsoft.Devices/IotHubs/myhub", "name": "myhub"},
+	}
+	f.arm[sub+"/resourceGroups/rg-iot/providers/Microsoft.Devices/IotHubs/myhub/certificates"] = []map[string]any{
+		{"id": sub + "/resourceGroups/rg-iot/providers/Microsoft.Devices/IotHubs/myhub/certificates/devicecert", "name": "devicecert",
+			"properties": map[string]any{"subject": "CN=devicecert", "expiry": soon, "thumbprint": "AB12", "isVerified": false}},
+		{"id": sub + "/resourceGroups/rg-iot/providers/Microsoft.Devices/IotHubs/myhub/certificates/pending", "name": "pending",
+			"properties": map[string]any{"subject": "CN=pending", "thumbprint": "CD34"}}, // no expiry yet: not issued
+	}
+	f.arm[sub+"/providers/Microsoft.Devices/provisioningServices"] = []map[string]any{
+		{"id": sub + "/resourceGroups/rg-iot/providers/Microsoft.Devices/provisioningServices/mydps", "name": "mydps"},
+	}
+	f.arm[sub+"/resourceGroups/rg-iot/providers/Microsoft.Devices/provisioningServices/mydps/certificates"] = []map[string]any{
+		{"id": sub + "/resourceGroups/rg-iot/providers/Microsoft.Devices/provisioningServices/mydps/certificates/dpsroot", "name": "dpsroot",
+			"properties": map[string]any{"subject": "CN=dpsroot", "expiry": "2027-06-01T00:00:00+00:00", "thumbprint": "EF56", "isVerified": true}},
+	}
+	return f
+}
+
+func TestCheck_IoTCertificates(t *testing.T) {
+	f := iotFake(t)
+	recs, err := newTestChecker(t, f, Config{Subscriptions: []string{guid}, IoTCertificates: true}).Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]map[string]string{}
+	exp := map[string]time.Time{}
+	for _, r := range recs {
+		if err := r.Validate(); err != nil {
+			t.Fatalf("invalid record %+v: %v", r, err)
+		}
+		if r.Kind != "certificate" || !strings.HasPrefix(r.Source, "azure://arm/subscriptions/") {
+			t.Fatalf("record %+v", r)
+		}
+		got[r.Metadata["service"]+"|"+r.Name] = r.Metadata
+		exp[r.Metadata["service"]+"|"+r.Name] = r.ExpiresAt
+	}
+	want := []string{"iot_hub|devicecert", "dps|dpsroot"}
+	for _, w := range want {
+		if got[w] == nil {
+			t.Errorf("missing %s in %v", w, got)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("want 2 records (the not-yet-issued certificate has no expiry): %v", got)
+	}
+	if got["iot_hub|devicecert"]["thumbprint"] != "AB12" || got["iot_hub|devicecert"]["resource_group"] != "rg-iot" || got["iot_hub|devicecert"]["hub"] != "myhub" {
+		t.Fatalf("iot hub metadata %v", got["iot_hub|devicecert"])
+	}
+	if got["dps|dpsroot"]["thumbprint"] != "EF56" || got["dps|dpsroot"]["dps"] != "mydps" {
+		t.Fatalf("dps metadata %v", got["dps|dpsroot"])
+	}
+	if !exp["dps|dpsroot"].Equal(time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("dps expiry %v", exp["dps|dpsroot"])
+	}
+}
