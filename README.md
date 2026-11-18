@@ -585,7 +585,7 @@ ligação estar encriptada. O certificado do servidor é verificado, com TLS 1.2
 
 `agent.json`
 
-Every option with fake values: [examples/agent.full.json](examples/agent.full.json). / Todas as opções com valores fictícios.
+Every option with fake values: [examples/agent.full.json](examples/agent.full.json); ready-made per scenario (Azure, AWS, GCP, Vault, VMware, Windows/IIS, OT/ICS, IIoT/IoT): [examples/](examples/). / Todas as opções com valores fictícios; exemplos prontos por cenário em [examples/](examples/).
 
 ```json
 {
