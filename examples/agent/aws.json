@@ -1,0 +1,30 @@
+{
+  "collector_url": "https://radar.example.com:8443",
+  "collector_ca_file": "/etc/expiry-radar/collector-ca.pem",
+  "token": "3f8a1c0d9e2b47a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2",
+  "agent_id": "aws-01",
+  "queue_path": "/var/lib/expiry-radar/queue.jsonl",
+  "interval_seconds": 3600,
+  "tls_targets": [],
+  "aws": {
+    "auth": "instance_role",
+    "regions": [
+      "eu-west-1",
+      "us-east-1"
+    ],
+    "assume_roles": [
+      {
+        "role_arn": "arn:aws:iam::222222222222:role/expiry-radar-read",
+        "external_id": "example-external-id"
+      }
+    ],
+    "services": [
+      "acm",
+      "iam_server_certificates",
+      "access_keys",
+      "secrets_manager"
+    ],
+    "access_key_max_age_days": 90,
+    "secret_max_age_days": 0
+  }
+}

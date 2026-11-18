@@ -1,0 +1,29 @@
+{
+  "collector_url": "https://radar.example.com:8443",
+  "collector_ca_file": "/etc/expiry-radar/collector-ca.pem",
+  "token": "3f8a1c0d9e2b47a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2",
+  "agent_id": "web-01",
+  "queue_path": "/var/lib/expiry-radar/queue.jsonl",
+  "interval_seconds": 3600,
+  "tls_targets": [
+    {
+      "host": "www.example.com",
+      "port": 443
+    },
+    {
+      "host": "mail.example.com",
+      "port": 25,
+      "start_tls": "smtp"
+    },
+    {
+      "host": "intranet.example.com",
+      "port": 8443
+    }
+  ],
+  "local": {
+    "cert_paths": [
+      "/etc/ssl/certs/myapp",
+      "/etc/letsencrypt/live"
+    ]
+  }
+}

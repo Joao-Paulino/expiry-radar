@@ -1,0 +1,22 @@
+{
+  "collector_url": "https://radar.example.com:8443",
+  "collector_ca_file": "/etc/expiry-radar/collector-ca.pem",
+  "token": "3f8a1c0d9e2b47a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2",
+  "agent_id": "gcp-01",
+  "queue_path": "/var/lib/expiry-radar/queue.jsonl",
+  "interval_seconds": 3600,
+  "tls_targets": [],
+  "gcp": {
+    "auth": "metadata",
+    "organization": "123456789012",
+    "folders": [],
+    "projects": [],
+    "services": [
+      "certificate_manager",
+      "compute_ssl",
+      "service_account_keys",
+      "secret_manager"
+    ],
+    "key_max_age_days": 90
+  }
+}

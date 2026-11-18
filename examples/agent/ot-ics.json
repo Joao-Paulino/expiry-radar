@@ -1,0 +1,40 @@
+{
+  "collector_url": "https://radar.example.com:8443",
+  "collector_ca_file": "/etc/expiry-radar/collector-ca.pem",
+  "token": "3f8a1c0d9e2b47a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2",
+  "agent_id": "ot-plant-01",
+  "queue_path": "/var/lib/expiry-radar/queue.jsonl",
+  "interval_seconds": 3600,
+  "ot_safe": true,
+  "tls_targets": [
+    {
+      "host": "hmi-line3.plant.example.com",
+      "port": 443
+    },
+    {
+      "host": "historian.plant.example.com",
+      "port": 443
+    }
+  ],
+  "opcua": {
+    "targets": [
+      {
+        "endpoint": "opc.tcp://plc-01.plant.example.com:4840"
+      },
+      {
+        "endpoint": "opc.tcp://scada-01.plant.example.com:4840/UA/Server"
+      },
+      {
+        "endpoint": "opc.tcp://mes-01.plant.example.com:4840"
+      }
+    ],
+    "timeout_seconds": 5,
+    "pause_seconds": 2
+  },
+  "local": {
+    "cert_paths": [
+      "/opt/opcua-server/pki/own/certs",
+      "/opt/opcua-server/pki/trusted/certs"
+    ]
+  }
+}

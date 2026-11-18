@@ -1,0 +1,35 @@
+{
+  "collector_url": "https://radar.example.com:8443",
+  "collector_ca_file": "/etc/expiry-radar/collector-ca.pem",
+  "token": "3f8a1c0d9e2b47a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2",
+  "agent_id": "vault-01",
+  "queue_path": "/var/lib/expiry-radar/queue.jsonl",
+  "interval_seconds": 3600,
+  "tls_targets": [],
+  "vault": {
+    "address": "https://vault.example.com:8200",
+    "ca_file": "/etc/expiry-radar/vault-ca.pem",
+    "namespace": "",
+    "auth": {
+      "approle": {
+        "role_id": "44444444-4444-4444-4444-444444444444",
+        "secret_id_file": "/etc/expiry-radar/vault-secret-id"
+      }
+    },
+    "pki_mounts": [
+      "pki",
+      "pki_int"
+    ],
+    "kv_mounts": [
+      "secret"
+    ],
+    "kv_expiry_key": "expires_at",
+    "approle_mounts": [
+      "approle"
+    ],
+    "check_tokens": false,
+    "token_min_ttl_hours": 24,
+    "lease_prefixes": [],
+    "lease_min_ttl_hours": 24
+  }
+}

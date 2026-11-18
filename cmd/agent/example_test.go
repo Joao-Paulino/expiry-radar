@@ -21,7 +21,18 @@ import (
 // examples/agent.full.json documents every option; it must stay a valid
 // config with no unknown or misspelled field.
 func TestExampleConfigIsValid(t *testing.T) {
-	b, err := os.ReadFile("../../examples/agent.full.json")
+	files, _ := filepath.Glob("../../examples/agent/*.json")
+	files = append(files, "../../examples/agent.full.json")
+	if len(files) < 2 {
+		t.Fatal("no scenario examples found")
+	}
+	for _, f := range files {
+		t.Run(filepath.Base(f), func(t *testing.T) { checkExample(t, f) })
+	}
+}
+
+func checkExample(t *testing.T, path string) {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
