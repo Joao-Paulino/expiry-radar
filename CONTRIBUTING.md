@@ -6,6 +6,7 @@ Obrigado pela ajuda. Issues e pull requests são bem-vindos em inglês ou portug
 ## Reporting bugs and asking for features
 
 Open a [GitHub issue](https://github.com/Joao-Paulino/expiry-radar/issues) with the version (`collector version` / `agent version`), the platform, what you expected and what happened. Remove tokens, hostnames and IP addresses you do not want public.
+Questions, ideas and "does it support X?" go to [Discussions](https://github.com/Joao-Paulino/expiry-radar/discussions). / Perguntas e ideias vão para as Discussions.
 **Security problems go through [SECURITY.md](SECURITY.md), never a public issue.**
 
 ## Development

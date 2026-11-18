@@ -53,7 +53,7 @@ powershell -ExecutionPolicy Bypass -File .\install-expiry-radar.ps1
 
 > ⭐ **Useful? Star the repo** so others in SecOps and OT find it. / **Útil? Dá uma estrela** para que outros em SecOps e OT o encontrem.
 >
-> 💬 **What expires in your environment that we don't cover yet?** [Open an issue](https://github.com/Joao-Paulino/expiry-radar/issues/new) and tell us. / **O que expira no teu ambiente e ainda não cobrimos?** Abre uma issue e diz-nos.
+> 💬 **What expires in your environment that we don't cover yet?** [Tell us in Discussions](https://github.com/Joao-Paulino/expiry-radar/discussions). / **O que expira no teu ambiente e ainda não cobrimos?** Conta-nos nas Discussions.
 >
 > 🏭 **Running OPC UA, MQTT or SCADA?** Early feedback from OT engineers is especially welcome. / **Tens OPC UA, MQTT ou SCADA?** O feedback de quem trabalha em OT é especialmente bem-vindo.
 
