@@ -7,12 +7,49 @@
 ![CI](https://github.com/Joao-Paulino/expiry-radar/actions/workflows/ci.yml/badge.svg)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/16848/baseline)](https://www.bestpractices.dev/projects/16848)
 ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
-![Status](https://img.shields.io/badge/status-milestone%201-orange)
+[![Release](https://img.shields.io/github/v/release/Joao-Paulino/expiry-radar)](https://github.com/Joao-Paulino/expiry-radar/releases/latest)
 ![Platforms](https://img.shields.io/badge/agent%20%26%20collector-Windows%20%7C%20Linux%20amd64%20%7C%20arm64-blue)
 ![Lang](https://img.shields.io/badge/lang-PT%20%7C%20EN-green)
 ![Licence](https://img.shields.io/badge/licence-MIT-lightgrey)
 
+**For infra and SecOps teams in hybrid environments: one dashboard for everything that expires (TLS certificates, cloud secrets and keys, Vault, VMware licences, OPC UA in OT), with no exporters and no home-made scripts. Free and open source.**
+
+**Para equipas de infra e SecOps em ambientes híbridos: um painel para tudo o que expira (certificados TLS, segredos e chaves na cloud, Vault, licenças VMware, OPC UA em OT), sem exporters nem scripts caseiros. Gratuito e open source.**
+
+<img src="docs/img/demo.gif" alt="Expiry Radar dashboard: search and theme switch" width="900">
+
 </div>
+
+<details>
+<summary>📸 Screenshots: dark and light theme / tema escuro e claro</summary>
+
+![Dashboard, dark theme](docs/img/dashboard-dark.png)
+![Dashboard, light theme](docs/img/dashboard-light.png)
+
+</details>
+
+## ⚡ Try it in 3 minutes / Experimenta em 3 minutos
+
+The installers download the latest release, verify its SHA-256, create the TLS certificate, the admin password with TOTP and the first agent token, and start everything as a service.
+Os instaladores descarregam a última versão, verificam o SHA-256, criam o certificado TLS, a password de administração com TOTP e o token do primeiro agente, e arrancam tudo como serviço.
+
+**Linux** (systemd):
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/Joao-Paulino/expiry-radar/main/install-expiry-radar.sh
+less install-expiry-radar.sh        # read it first / lê primeiro
+sudo bash install-expiry-radar.sh
+```
+
+**Windows** (PowerShell as Administrator / como Administrador):
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/Joao-Paulino/expiry-radar/main/install-expiry-radar.ps1 -OutFile install-expiry-radar.ps1
+notepad .\install-expiry-radar.ps1  # read it first / lê primeiro
+powershell -ExecutionPolicy Bypass -File .\install-expiry-radar.ps1
+```
+
+**Docker Compose:** [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) (collector + agent). Then open / Depois abre `https://<host>:8443`. Every option: [examples/](examples/).
 
 ---
 
