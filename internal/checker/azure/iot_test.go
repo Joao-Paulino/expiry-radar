@@ -71,3 +71,19 @@ func TestCheck_IoTCertificates(t *testing.T) {
 		t.Fatalf("dps expiry %v", exp["dps|dpsroot"])
 	}
 }
+
+// A hub ID that escapes its own resource group (path traversal via "..")
+// must be rejected by safeResourceID before being used to build the
+// /certificates sub-URL, and reported as an error rather than silently
+// skipped or followed.
+func TestCheck_IoTHostileHubID(t *testing.T) {
+	f := newFake(t)
+	sub := "/subscriptions/" + guid
+	f.arm[sub+"/providers/Microsoft.Devices/IotHubs"] = []map[string]any{
+		{"id": sub + "/resourceGroups/rg-iot/providers/Microsoft.Devices/IotHubs/../../other", "name": "evilhub"},
+	}
+	_, err := newTestChecker(t, f, Config{Subscriptions: []string{guid}, IoTCertificates: true}).Check(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "unexpected resource id") {
+		t.Fatalf("want an 'unexpected resource id' error, got %v", err)
+	}
+}
