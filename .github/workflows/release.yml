@@ -1,9 +1,12 @@
 name: Release
 
-# A tag v* (pushed, or created by publishing a release in the GitHub
-# UI) publishes the release assets (binaries, SHA256SUMS, provenance)
-# and multi-arch images on GHCR. Running it by hand only builds, so the
-# pipeline can be checked without publishing anything.
+# Pushing a tag v* builds, scans and publishes the release: images on
+# GHCR, then a DRAFT release with every asset (binaries, SBOM, VEX,
+# LICENSE, SHA256SUMS), which is published only once complete. This works
+# with GitHub immutable releases: a published release is never modified.
+# Release notes come from docs/releases/<tag>.md (generated if missing).
+# Running it by hand only builds, so the pipeline can be checked without
+# publishing anything.
 #
 # Gate: every binary is scanned with govulncheck before anything is
 # attested or published, and the images are built from those same
@@ -11,15 +14,12 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       go-version:
         description: Go toolchain (build-only runs; e.g. to test the gate)
         default: "1.26.x"
 
-# A release published in the UI fires both events; run them one at a time.
 concurrency:
   group: release-${{ github.ref }}
 
@@ -132,9 +132,22 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        # Create the release, or add the assets if it was created in the UI.
+        # Draft first, every asset attached, then publish: a published
+        # release is never modified (immutable releases).
         # LICENSE ships with every release (OpenSSF OSPS-LE-03.02).
         run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
           cp LICENSE dist/LICENSE
-          gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag \
-            || gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          notes=(--generate-notes)
+          if [ -f "docs/releases/${tag}.md" ]; then notes=(--notes-file "docs/releases/${tag}.md"); fi
+          if state=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$state" != "true" ]; then
+              echo "::error::release $tag is already published; publish by pushing the tag, not from the UI"
+              exit 1
+            fi
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* --draft --verify-tag --title "$tag" "${notes[@]}"
+          fi
+          gh release edit "$tag" --draft=false
