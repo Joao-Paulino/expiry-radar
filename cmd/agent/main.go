@@ -15,6 +15,7 @@ import (
 	awscheck "github.com/Joao-Paulino/expiry-radar/internal/checker/aws"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/gcp"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/inventory"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/local"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/opcua"
 	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
@@ -56,9 +57,12 @@ type Config struct {
 	// on Windows, the LocalMachine certificate stores).
 	// OPCUA, when set, reports OPC UA server certificates (discovery
 	// only: no session, no reads or writes).
-	OPCUA           *opcua.Config `json:"opcua"`
-	Local           *local.Config `json:"local"`
-	IntervalSeconds int           `json:"interval_seconds"`
+	OPCUA *opcua.Config `json:"opcua"`
+	// Inventory, when set, reports dates kept in CSV/JSON files: device
+	// end of support, firmware support, contracts, domains.
+	Inventory       *inventory.Config `json:"inventory"`
+	Local           *local.Config     `json:"local"`
+	IntervalSeconds int               `json:"interval_seconds"`
 	// OTSafe makes the agent gentle on ICS/OT networks: at least one hour
 	// between runs, one target at a time with a 2 s pause, 5 s timeouts.
 	OTSafe bool `json:"ot_safe"`
@@ -117,6 +121,11 @@ func (c Config) Validate() error {
 	}
 	if c.GCP != nil {
 		if err := c.GCP.Validate(); err != nil {
+			return err
+		}
+	}
+	if c.Inventory != nil {
+		if err := c.Inventory.Validate(); err != nil {
 			return err
 		}
 	}
@@ -213,6 +222,9 @@ func checkers(cfg Config) []checker.Checker {
 			}
 		}
 		cs = append(cs, opcua.New(oc))
+	}
+	if cfg.Inventory != nil {
+		cs = append(cs, inventory.New(*cfg.Inventory))
 	}
 	cs = append(cs, local.Checkers(cfg.Local)...)
 	return cs

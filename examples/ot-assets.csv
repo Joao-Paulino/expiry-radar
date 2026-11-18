@@ -1,0 +1,6 @@
+name,source,kind,expires_at,owner,vendor,model,firmware
+Refrigeration controller Store 12,10.20.1.15,end_of_support,2025-12-31,facilities,ExampleVendor,RC-800,3.1
+PLC Line 3,plc-03.plant.example.com,firmware_support,2027-06-30,ot-team,ExampleVendor,PLC-1500,2.9
+HMI Line 3,hmi-line3.plant.example.com,end_of_support,2028-03-31,ot-team,ExampleVendor,HMI-15,17.0
+Historian server,historian.plant.example.com,support_contract,2027-01-15,ot-team,ExampleVendor,,
+example.com,registrar,domain,2027-08-15,it-ops,,,

@@ -36,5 +36,10 @@
       "/opt/opcua-server/pki/own/certs",
       "/opt/opcua-server/pki/trusted/certs"
     ]
+  },
+  "inventory": {
+    "files": [
+      "/etc/expiry-radar/ot-assets.csv"
+    ]
   }
 }

@@ -7,6 +7,7 @@ import (
 	awscheck "github.com/Joao-Paulino/expiry-radar/internal/checker/aws"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/gcp"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/inventory"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/local"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/opcua"
 	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
@@ -289,5 +290,20 @@ func TestConfig_OTSafe(t *testing.T) {
 				t.Errorf("opcua not gentle: pause %v timeout %v", p, to)
 			}
 		}
+	}
+}
+
+func TestCheckers_IncludesInventoryWhenConfigured(t *testing.T) {
+	cfg := Config{CollectorURL: "https://c", Token: "t", AgentID: "a", QueuePath: "/q", IntervalSeconds: 60,
+		Inventory: &inventory.Config{Files: []string{"/etc/expiry-radar/ot-assets.csv"}}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid inventory config rejected: %v", err)
+	}
+	if names := checkerNames(checkers(cfg)); names != "tls-checker,inventory" {
+		t.Fatalf("with inventory: %q", names)
+	}
+	cfg.Inventory.Files = []string{"/etc/expiry-radar/assets.xlsx"}
+	if cfg.Validate() == nil {
+		t.Fatal("xlsx accepted")
 	}
 }

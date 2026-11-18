@@ -14,7 +14,8 @@ Todos os valores são fictícios. Cada ficheiro é verificado pelos testes, por 
 | [agent/gcp.json](agent/gcp.json) | GCP: Certificate Manager, SSL certificates, service account keys, Secret Manager, whole organization |
 | [agent/vault.json](agent/vault.json) | HashiCorp Vault: PKI, KV v2, AppRole secret IDs, tokens, leases |
 | [agent/vmware.json](agent/vmware.json) | VMware: vCenter and ESXi certificates, vSphere licences |
-| [agent/ot-ics.json](agent/ot-ics.json) | ICS/OT: OPC UA servers (PLC, SCADA, MES), HMI and historian HTTPS, OPC UA PKI stores, `ot_safe` |
+| [agent/ot-ics.json](agent/ot-ics.json) | ICS/OT: OPC UA servers (PLC, SCADA, MES), HMI and historian HTTPS, OPC UA PKI stores, device end of support (inventory), `ot_safe` |
+| [ot-assets.csv](ot-assets.csv) | Inventory file: device end of support, firmware support, contracts, domains / Ficheiro de inventário |
 | [agent/iiot-iot.json](agent/iiot-iot.json) | IIoT/IoT: MQTT and AMQP brokers, edge gateways, broker certificate files, `ot_safe` |
 
 One agent can combine several scenarios: merge the sections you need into one file. / Um agente pode juntar vários cenários: junta as secções que precisas num só ficheiro.
