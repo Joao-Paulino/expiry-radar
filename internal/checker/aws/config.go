@@ -42,8 +42,8 @@ var (
 	regionRe  = regexp.MustCompile(`^(us|eu|ap|ca|sa|me|af|il|mx)-[a-z]+-\d$`)
 	roleARNRe = regexp.MustCompile(`^arn:aws:iam::\d{12}:role/[\w+=,.@/-]{1,512}$`)
 	raARNRe   = regexp.MustCompile(`^arn:aws:rolesanywhere:([a-z0-9-]+):\d{12}:(trust-anchor|profile)/[\w-]+$`)
-	services  = map[string]bool{"acm": true, "iam_server_certificates": true, "access_keys": true, "secrets_manager": true}
-	regional  = map[string]bool{"acm": true, "secrets_manager": true}
+	services  = map[string]bool{"acm": true, "iam_server_certificates": true, "access_keys": true, "secrets_manager": true, "iot_core": true}
+	regional  = map[string]bool{"acm": true, "secrets_manager": true, "iot_core": true}
 )
 
 func (c *Config) services() []string {
@@ -107,7 +107,7 @@ func (c *Config) Validate() error {
 		needRegions = needRegions || regional[s]
 	}
 	if needRegions && len(c.Regions) == 0 {
-		return errors.New("aws: regions are required for acm and secrets_manager")
+		return errors.New("aws: regions are required for acm, secrets_manager and iot_core")
 	}
 	for _, r := range append(append([]string{}, c.Regions...), c.Region) {
 		if r != "" && !regionRe.MatchString(r) {

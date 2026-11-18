@@ -37,6 +37,7 @@ type endpoints struct {
 	rolesAnywhere func(region string) string
 	acm           func(region string) string
 	secrets       func(region string) string
+	iot           func(region string) string
 	iam           string
 }
 
@@ -48,6 +49,7 @@ func defaultEndpoints() endpoints {
 		rolesAnywhere: func(r string) string { return "https://rolesanywhere." + r + ".amazonaws.com" },
 		acm:           func(r string) string { return "https://acm." + r + ".amazonaws.com" },
 		secrets:       func(r string) string { return "https://secretsmanager." + r + ".amazonaws.com" },
+		iot:           func(r string) string { return "https://iot." + r + ".amazonaws.com" },
 		iam:           "https://iam.amazonaws.com",
 	}
 }
