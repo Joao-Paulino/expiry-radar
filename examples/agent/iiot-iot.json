@@ -25,5 +25,23 @@
       "/etc/mosquitto/certs",
       "/etc/rabbitmq/tls"
     ]
+  },
+  "aws": {
+    "auth": "instance_role",
+    "regions": [
+      "eu-west-1"
+    ],
+    "services": [
+      "iot_core"
+    ]
+  },
+  "azure": {
+    "tenant_id": "00000000-0000-0000-0000-000000000000",
+    "client_id": "55555555-5555-5555-5555-555555555555",
+    "auth": "managed_identity",
+    "subscriptions": [
+      "66666666-6666-6666-6666-666666666666"
+    ],
+    "iot_certificates": true
   }
 }

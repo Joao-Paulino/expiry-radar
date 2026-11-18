@@ -22,7 +22,8 @@
       "acm",
       "iam_server_certificates",
       "access_keys",
-      "secrets_manager"
+      "secrets_manager",
+      "iot_core"
     ],
     "access_key_max_age_days": 90,
     "secret_max_age_days": 0

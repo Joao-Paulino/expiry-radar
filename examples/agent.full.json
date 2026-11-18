@@ -88,7 +88,8 @@
     "discover_key_vaults": false,
     "app_registrations": true,
     "service_principals": true,
-    "managed_certificates": true
+    "managed_certificates": true,
+    "iot_certificates": true
   },
   "aws": {
     "auth": "instance_role",
@@ -106,7 +107,8 @@
       "acm",
       "iam_server_certificates",
       "access_keys",
-      "secrets_manager"
+      "secrets_manager",
+      "iot_core"
     ],
     "access_key_max_age_days": 90,
     "secret_max_age_days": 0
