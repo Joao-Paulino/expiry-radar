@@ -20,6 +20,7 @@
     "discover_key_vaults": false,
     "app_registrations": true,
     "service_principals": true,
-    "managed_certificates": true
+    "managed_certificates": true,
+    "iot_certificates": true
   }
 }

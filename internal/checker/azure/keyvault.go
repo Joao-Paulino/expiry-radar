@@ -269,6 +269,13 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 			errs = append(errs, err)
 		}
 	}
+	if c.cfg.IoTCertificates {
+		recs, err := c.checkIoT(ctx, src)
+		records = append(records, recs...)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if len(c.cfg.KeyVaults) == 0 && !c.cfg.DiscoverKeyVaults {
 		return records, errors.Join(errs...)
 	}

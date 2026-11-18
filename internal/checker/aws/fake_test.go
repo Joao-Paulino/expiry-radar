@@ -41,6 +41,8 @@ type fakeAWS struct {
 	credCalls   int
 	acm         map[string][]map[string]any // "account/region" -> certificate summaries
 	acmFail     string                      // "account/region" answering an error
+	iotCerts    map[string][]map[string]any // "account/region" -> IoT certificate summaries (ListCertificates)
+	iotDescribe map[string]map[string]any   // certificateId -> DescribeCertificate certificateDescription
 	serverCerts map[string][]map[string]string
 	credReport  map[string]string           // account -> CSV
 	secrets     map[string][]map[string]any // "account/region" -> SecretListEntry
@@ -54,7 +56,7 @@ type fakeAWS struct {
 }
 
 func newFakeAWS(t *testing.T) *fakeAWS {
-	f := &fakeAWS{acm: map[string][]map[string]any{}, serverCerts: map[string][]map[string]string{}, credReport: map[string]string{}, secrets: map[string][]map[string]any{}, versions: map[string][]map[string]any{}, imdsToken: "imds-tok"}
+	f := &fakeAWS{acm: map[string][]map[string]any{}, serverCerts: map[string][]map[string]string{}, credReport: map[string]string{}, secrets: map[string][]map[string]any{}, versions: map[string][]map[string]any{}, iotCerts: map[string][]map[string]any{}, iotDescribe: map[string]map[string]any{}, imdsToken: "imds-tok"}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(f.serveAPI))
 	f.meta = httptest.NewServer(http.HandlerFunc(f.serveMeta))
 	t.Cleanup(func() { f.srv.Close(); f.meta.Close() })
@@ -227,6 +229,37 @@ func (f *fakeAWS) serveAPI(w http.ResponseWriter, r *http.Request) {
 			out["NextToken"] = "p2"
 		}
 		json.NewEncoder(w).Encode(out)
+	case strings.HasPrefix(r.URL.Path, "/certificates/"): // IoT Core DescribeCertificate
+		f.calls = append(f.calls, "iot DescribeCertificate "+region+" "+ak)
+		if service != "iot" {
+			http.Error(w, "bad scope", 400)
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/certificates/")
+		desc, ok := f.iotDescribe[id]
+		if !ok {
+			http.Error(w, `{"__type":"ResourceNotFoundException"}`, 404)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"certificateDescription": desc})
+	case r.URL.Path == "/certificates": // IoT Core ListCertificates
+		key := accountOf(ak) + "/" + region
+		f.calls = append(f.calls, "iot ListCertificates "+region+" "+ak)
+		if service != "iot" {
+			http.Error(w, "bad scope", 400)
+			return
+		}
+		items := f.iotCerts[key]
+		marker := r.URL.Query().Get("marker")
+		if marker == "p2" {
+			json.NewEncoder(w).Encode(map[string]any{"certificates": items[1:]})
+			return
+		}
+		out := map[string]any{"certificates": items[:min(1, len(items))]}
+		if len(items) > 1 {
+			out["nextMarker"] = "p2"
+		}
+		json.NewEncoder(w).Encode(out)
 	default: // Query API: STS and IAM
 		vals := map[string]string{}
 		for k, v := range r.URL.Query() {
@@ -318,6 +351,7 @@ func (f *fakeAWS) endpoints() endpoints {
 		rolesAnywhere: func(r string) string { f.raRegion = r; return f.srv.URL },
 		acm:           func(string) string { return f.srv.URL },
 		secrets:       func(string) string { return f.srv.URL },
+		iot:           func(string) string { return f.srv.URL },
 		iam:           f.srv.URL,
 	}
 }
