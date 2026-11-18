@@ -1053,14 +1053,41 @@ Só leitura, nunca escreve nos equipamentos; o agente fica na zona OT ou na DMZ 
 
 ## 🛡️ Security / Segurança
 
-Agents only read expiry metadata and never send private keys or secret values.
-Found a vulnerability? See [SECURITY.md](SECURITY.md) (private reporting).
-Security testing: [pentest report (OWASP WSTG)](docs/security/PENTEST-2026-11.md),
-[ASVS L2 self-assessment](docs/security/ASVS-L2.md), [OWASP IoT Top 10](docs/security/OWASP-IOT-TOP10.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
+A tool that watches your secrets must be the most boring thing in your network to attack. / Uma ferramenta que vigia os teus segredos tem de ser a coisa mais aborrecida de atacar na tua rede.
 
-Os agentes só leem metadados de expiração e nunca enviam chaves privadas nem
-valores secretos. Encontraste uma vulnerabilidade? Vê o [SECURITY.md](SECURITY.md)
-(reporte privado). Os relatórios de testes de segurança estão em [docs/security](docs/security/).
+| | By design / Por desenho |
+|---|---|
+| 🙈 | **Never reads secret values**: only names, dates and issuers. Private keys are never opened / **Nunca lê valores secretos**: só nomes, datas e emissores |
+| 👀 | **Read only** everywhere: cloud roles, Vault policies, vCenter, OPC UA (discovery only, no session) / **Só leitura** em todo o lado |
+| 🚪 | **Agents listen on no port**: outbound HTTPS only, so no inbound firewall rule into OT zones / **Os agentes não abrem portas**: só HTTPS de saída |
+| 🔑 | **Per-agent tokens** bound to the agent ID; admin login with PBKDF2 (600k), TOTP and lockout, or SSO (OIDC with PKCE) / **Tokens por agente**; login com PBKDF2, TOTP e bloqueio, ou SSO |
+| 🧱 | Strict CSP, HSTS, CSRF tokens, `SameSite=Strict` sessions, request size limits / CSP estrita, HSTS, CSRF, sessões `SameSite=Strict` |
+
+| | Tested on every pull request / Testado em cada pull request |
+|---|---|
+| 🔍 | **CodeQL** (security-extended) and **gosec** as blocking gates / como bloqueio |
+| 🕷️ | **OWASP ZAP** active scans of the dashboard and the agent API, seeded with hostile data / scans ativos com dados hostis |
+| 🎲 | **Fuzzing** of every parser that reads external input (ingest, logs, certificates, OPC UA, inventory) / de todos os parsers de input externo |
+| 🧪 | End-to-end tests on Linux, Windows and macOS, SSO against a real Keycloak / Testes de ponta a ponta e SSO contra Keycloak real |
+
+| | Assessed / Avaliado |
+|---|---|
+| 🎯 | [Pentest report (OWASP WSTG)](docs/security/PENTEST-2026-11.md): 3 findings, all fixed and retested / 3 falhas, todas corrigidas e retestadas |
+| ✅ | [OWASP ASVS L2 self-assessment](docs/security/ASVS-L2.md) |
+| 🏭 | [OWASP IoT Top 10](docs/security/OWASP-IOT-TOP10.md) for the agent in ICS/OT networks / para o agente em redes ICS/OT |
+| 🏅 | [OpenSSF Best Practices Baseline](https://www.bestpractices.dev/projects/16848) |
+
+| | Supply chain / Cadeia de fornecimento |
+|---|---|
+| 📦 | **Immutable releases**: nothing changes after publication / **Releases imutáveis**: nada muda depois de publicado |
+| ✍️ | **Signed build provenance** (Sigstore, SLSA): `gh attestation verify <file> --repo Joao-Paulino/expiry-radar` |
+| 🧾 | **SBOM** (CycloneDX) and **VEX** (OpenVEX) for every binary; `SHA256SUMS` checked by the installers / para cada binário |
+| 🚫 | **govulncheck gate**: no release ships with a known reachable vulnerability / nenhuma release sai com vulnerabilidades conhecidas |
+| 🧩 | Minimal dependencies: Go standard library plus 4 modules (OIDC, OAuth2, SQLite, x/sys); distroless, non-root images / Dependências mínimas; imagens distroless sem root |
+
+**Found a vulnerability?** Report it privately: [SECURITY.md](SECURITY.md). Acknowledgement within 3 working days. / **Encontraste uma vulnerabilidade?** Reporta em privado. Resposta em 3 dias úteis.
+
+Contributing / Contribuir: [CONTRIBUTING.md](CONTRIBUTING.md) · Governance / Governação: [GOVERNANCE.md](GOVERNANCE.md)
 
 ## 📜 Licence / Licença
 
