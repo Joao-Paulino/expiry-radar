@@ -331,6 +331,15 @@ e da respetiva chave privada (`tls_key_file`), ambos em PEM. O certificado tem
 de incluir no Subject Alternative Name (SAN) o endereço que os agentes usam em
 `collector_url`: o Go ignora o CN.
 
+**Which one? / Qual escolher?**
+
+| Your situation / A tua situação | Choose / Escolhe |
+|---|---|
+| Public DNS name, collector reachable from the internet / Nome DNS público, collector acessível da internet | **A. Public CA** (Let's Encrypt) |
+| Company PKI (e.g. Microsoft AD CS) / PKI da empresa | **B. Internal CA** |
+| Lab, home or isolated network / Laboratório, casa ou rede isolada | **C. Self-signed** |
+| Fastest way to start / Forma mais rápida de começar | **C. Self-signed**, move to A or B later / e mudas para A ou B depois |
+
 | Option / Opção | EN | PT |
 |---|---|---|
 | **A. Public CA** (e.g. Let's Encrypt) | Best when the collector has a public DNS name. Agents trust it with no extra setting. | O melhor quando o collector tem nome DNS público. Os agentes confiam sem configuração extra. |
@@ -360,6 +369,9 @@ sudo RENEWED_LINEAGE=/etc/letsencrypt/live/collector.example.com /etc/letsencryp
 # tls_cert_file: /etc/expiry-radar/collector.crt   tls_key_file: /etc/expiry-radar/collector.key
 ```
 
+✅ Agents trust it with no setting; certbot renews it. ⚠️ Needs a public DNS name and, with `--standalone`, port 80 reachable during validation.
+✅ Os agentes confiam sem configuração; o certbot renova-o. ⚠️ Precisa de nome DNS público e, com `--standalone`, da porta 80 acessível durante a validação.
+
 **B. Internal CA / CA interna** (company PKI, e.g. Microsoft AD CS / PKI da empresa)
 
 Create a key and a request, have your CA sign it, and put the issued certificate **followed by the intermediate CA** in `collector.crt`:
@@ -379,6 +391,9 @@ sudo chmod 640 /etc/expiry-radar/collector.key /etc/expiry-radar/collector.crt
 Agents trust it automatically if the root CA is in the system trust store (domain-joined Windows usually is); otherwise set `collector_ca_file` to the root CA certificate.
 Os agentes confiam automaticamente se a CA raiz estiver no repositório de confiança do sistema (num Windows no domínio normalmente está); senão aponta o `collector_ca_file` para o certificado da CA raiz.
 
+✅ Fits company security policy, no external dependency. ⚠️ Agents outside the domain need `collector_ca_file`.
+✅ Integra-se na política de segurança da empresa, sem dependências externas. ⚠️ Agentes fora do domínio precisam do `collector_ca_file`.
+
 **C. Self-signed / Autoassinado** (no OpenSSL needed: the collector generates it / sem OpenSSL: o collector gera-o)
 
 ```bash
@@ -392,6 +407,9 @@ ECDSA P-256, 365 days (`--days N`), `localhost` and `127.0.0.1` always included;
 
 Substitui o nome DNS e o IP pelos que os agentes vão usar. Depois copia o
 `collector.crt` (nunca o `.key`) para cada agente e aponta o `collector_ca_file` para ele.
+
+✅ Quick, no external dependency, works on any network. ⚠️ Every agent needs `collector_ca_file`, and browsers warn when opening the dashboard.
+✅ Rápido, sem dependências externas, funciona em qualquer rede. ⚠️ Cada agente precisa do `collector_ca_file` e os browsers mostram aviso ao abrir o painel.
 
 > 💡 The collector loads its certificate at startup: restart it after renewing.
 > Add the collector itself to an agent's `tls_targets` and Expiry Radar will warn
