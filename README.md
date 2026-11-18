@@ -113,6 +113,7 @@ Use Expiry Radar alongside these tools, not instead of them. / Usa o Expiry Rada
 ## 🧭 How it works / Como funciona
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"darkMode": true, "background": "#0b1220", "primaryColor": "#152238", "primaryTextColor": "#e6edf3", "primaryBorderColor": "#4c8dff", "lineColor": "#8fb3ff", "secondaryColor": "#101a2c", "tertiaryColor": "#0f1828", "clusterBkg": "#0f1828", "clusterBorder": "#27406b", "edgeLabelBackground": "#0b1220", "titleColor": "#c9d7ee", "fontFamily": "Inter, Segoe UI, Helvetica, Arial, sans-serif"}}}%%
 flowchart TB
   subgraph SRC["What expires / O que expira"]
     TLS["🔐 TLS endpoints<br/>HTTPS · SMTP · MQTT · AMQP"]
