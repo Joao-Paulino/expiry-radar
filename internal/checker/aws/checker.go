@@ -197,6 +197,11 @@ func (c *Checker) Check(ctx context.Context) ([]checker.ExpiryRecord, error) {
 					if err != nil {
 						errs = append(errs, fmt.Errorf("account %s iot core %s: %w", t.account, region, err))
 					}
+					caRecs, err := c.listIoTCACertificates(ctx, cr, t.account, region)
+					records = append(records, caRecs...)
+					if err != nil {
+						errs = append(errs, fmt.Errorf("account %s iot core CA %s: %w", t.account, region, err))
+					}
 				}
 			}
 		}
