@@ -931,6 +931,31 @@ One record per distinct certificate (servers repeat the same certificate on ever
 
 **Placement (ISA/IEC 62443).** Run the agent inside the OT zone or the DMZ: it only opens outbound connections to the collector, so no inbound firewall rule into the OT zone is needed. / **Colocação:** o agente fica na zona OT ou na DMZ e só faz ligações de saída para o coletor; não é preciso abrir regras de entrada na zona OT.
 
+### 📋 Inventory: end of support, firmware, contracts / Inventário: fim de suporte, firmware, contratos
+
+Some dates no API exposes: a controller's end of support, a firmware's end of security updates, a support contract, a warranty, a domain. Keep them in a CSV or JSON file and the agent alerts on them like any certificate. It only reads the file: **it never contacts the devices**.
+Há datas que nenhuma API expõe: o fim de suporte de um controlador, o fim das atualizações de segurança de um firmware, um contrato de suporte, uma garantia, um domínio. Guarda-as num ficheiro CSV ou JSON e o agente alerta como para qualquer certificado. Só lê o ficheiro: **nunca contacta os equipamentos**.
+
+```json
+"inventory": { "files": ["/etc/expiry-radar/ot-assets.csv"] }
+```
+
+```csv
+name,source,kind,expires_at,owner,vendor,model,firmware
+Refrigeration controller Store 12,10.20.1.15,end_of_support,2025-12-31,facilities,ExampleVendor,RC-800,3.1
+PLC Line 3,plc-03.plant.example.com,firmware_support,2027-06-30,ot-team,ExampleVendor,PLC-1500,2.9
+```
+
+| | EN | PT |
+|---|---|---|
+| Required / Obrigatório | `name`, `expires_at` (`YYYY-MM-DD` or RFC 3339) | `name`, `expires_at` |
+| Optional / Opcional | `source` (default `inventory://<file>`), `kind` (default `end_of_support`; e.g. `firmware_support`, `support_contract`, `warranty`, `domain`) | Idem |
+| Other columns / Outras colunas | Become metadata (owner, vendor, model, firmware...) | Passam a metadados |
+| JSON | Array of `{"name", "source", "kind", "expires_at", "metadata": {}}` | Idem |
+| Errors / Erros | A bad row is reported with its line number; the other rows still count. Excel's UTF-8 BOM is accepted | Uma linha inválida é reportada com o número; as outras contam na mesma |
+
+Example / Exemplo: [examples/ot-assets.csv](examples/ot-assets.csv).
+
 ## ⚠️ Known limitations / Limitações conhecidas
 
 | EN | PT |
@@ -952,7 +977,7 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 | ✅ | **M7** | ICS/OT and IIoT on the plant floor: OPC UA certificates (GetEndpoints, no session) and local OPC UA PKI stores; MQTT/AMQP brokers over TLS (8883, 5671); HTTPS on PLCs, HMIs and edge gateways with an OT-safe mode (few connections, long intervals, short timeouts) | ICS/OT e IIoT na fábrica: certificados OPC UA (GetEndpoints, sem sessão) e stores PKI locais do OPC UA; brokers MQTT/AMQP sobre TLS (8883, 5671); HTTPS em PLC, HMI e gateways edge com modo OT-safe (poucas ligações, intervalos longos, timeouts curtos) |
 | ⚪ | **M8** | Cloud IoT: AWS IoT Core device certificates and registered CAs; Azure IoT Hub and DPS X.509 certificates | IoT na cloud: certificados de dispositivo e CAs registadas no AWS IoT Core; certificados X.509 do Azure IoT Hub e DPS |
 | ⚪ | **M9** | SCADA and industrial software licences (vendor by vendor), then other software licences and SaaS subscriptions | Licenças de SCADA e software industrial (fabricante a fabricante), depois outras licenças de software e subscrições SaaS |
-| ⚪ | **M10** | End of support and firmware for OT/IoT devices: vendor end-of-life and end-of-security-updates dates per device model and firmware version (read from the device where possible, otherwise from an inventory file), so an unsupported controller is flagged before it becomes the way in | Fim de suporte e firmware de equipamentos OT/IoT: datas de fim de vida e de fim de atualizações de segurança por modelo e versão de firmware (lidas do equipamento quando possível, senão de um ficheiro de inventário), para que um controlador sem suporte seja assinalado antes de se tornar a porta de entrada |
+| 🟡 | **M10** | End of support and firmware for OT/IoT devices: vendor end-of-life and end-of-security-updates dates per device model and firmware version (read from the device where possible, otherwise from an inventory file), so an unsupported controller is flagged before it becomes the way in | Fim de suporte e firmware de equipamentos OT/IoT: datas de fim de vida e de fim de atualizações de segurança por modelo e versão de firmware (lidas do equipamento quando possível, senão de um ficheiro de inventário), para que um controlador sem suporte seja assinalado antes de se tornar a porta de entrada |
 | ⚪ | **M11** | Teams: roles mapped to IdP groups (viewer, operator, admin); audit log of every change (who muted, re-owned or forgot what, when and why); alerts routed by owner to each team's channel; mute with an expiry date and a mandatory reason (e.g. change ticket) | Equipas: papéis mapeados aos grupos do IdP (viewer, operator, admin); registo de auditoria de cada alteração (quem silenciou, mudou o dono ou esqueceu o quê, quando e porquê); alertas encaminhados pelo dono para o canal de cada equipa; silêncio com data de fim e motivo obrigatório (ex.: ticket de mudança) |
 
 **OT/IoT principles / Princípios OT/IoT:** read only, never writes to devices; the agent sits in the OT zone or DMZ and only connects out to the collector (one-way conduit, ISA/IEC 62443 zones and conduits); each milestone ends with a security test (OWASP IoT Top 10). /
@@ -1020,6 +1045,11 @@ Só leitura, nunca escreve nos equipamentos; o agente fica na zona OT ou na DMZ 
 - [x] OPC UA PKI stores (local checker) and MQTT/AMQP brokers (TLS checker) documented / Stores PKI OPC UA (checker local) e brokers MQTT/AMQP (checker TLS) documentados
 - [x] OT-safe mode: `ot_safe` (minimum 1 h interval, pauses, short timeouts) / Modo OT-safe: `ot_safe` (intervalo mínimo de 1 h, pausas, timeouts curtos)
 - [x] Security test against OWASP IoT Top 10 ([report](docs/security/OWASP-IOT-TOP10.md)) / Teste de segurança segundo o OWASP IoT Top 10
+
+**In progress in M10 / Em curso no M10**
+
+- [x] Inventory checker: end of support, firmware support, contracts and domains from CSV/JSON files / Checker de inventário: fim de suporte, firmware, contratos e domínios a partir de ficheiros CSV/JSON
+- [ ] Read model and firmware version from the device where a safe read-only protocol allows it / Ler modelo e versão de firmware do equipamento quando um protocolo seguro e só de leitura o permitir
 
 ## 🛡️ Security / Segurança
 
