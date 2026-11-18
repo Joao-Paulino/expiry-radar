@@ -345,6 +345,40 @@ sudo certbot certonly --standalone -d collector.example.com
 # tls_key_file:  /etc/letsencrypt/live/collector.example.com/privkey.pem
 ```
 
+The collector runs as the `expiry-radar` user, which cannot read `/etc/letsencrypt` (the key is root-only). Copy the files on every renewal with a deploy hook, then restart:
+O collector corre como o utilizador `expiry-radar`, que não consegue ler `/etc/letsencrypt` (a chave só é legível pelo root). Copia os ficheiros em cada renovação com um deploy hook e reinicia:
+
+```bash
+sudo tee /etc/letsencrypt/renewal-hooks/deploy/expiry-radar.sh >/dev/null <<'HOOK'
+#!/bin/sh
+install -o root -g expiry-radar -m 640 "$RENEWED_LINEAGE/fullchain.pem" /etc/expiry-radar/collector.crt
+install -o root -g expiry-radar -m 640 "$RENEWED_LINEAGE/privkey.pem"   /etc/expiry-radar/collector.key
+systemctl restart expiry-radar-collector
+HOOK
+sudo chmod 755 /etc/letsencrypt/renewal-hooks/deploy/expiry-radar.sh
+sudo RENEWED_LINEAGE=/etc/letsencrypt/live/collector.example.com /etc/letsencrypt/renewal-hooks/deploy/expiry-radar.sh   # first copy / primeira cópia
+# tls_cert_file: /etc/expiry-radar/collector.crt   tls_key_file: /etc/expiry-radar/collector.key
+```
+
+**B. Internal CA / CA interna** (company PKI, e.g. Microsoft AD CS / PKI da empresa)
+
+Create a key and a request, have your CA sign it, and put the issued certificate **followed by the intermediate CA** in `collector.crt`:
+Cria uma chave e um pedido, pede à tua CA que o assine e põe o certificado emitido **seguido da CA intermédia** no `collector.crt`:
+
+```bash
+sudo openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -keyout /etc/expiry-radar/collector.key -out collector.csr \
+  -subj "/CN=collector.example.com" \
+  -addext "subjectAltName=DNS:collector.example.com,IP:10.0.0.10"
+# Microsoft AD CS (Windows): certreq -submit -attrib "CertificateTemplate:WebServer" collector.csr collector.cer
+cat collector.cer intermediate-ca.pem | sudo tee /etc/expiry-radar/collector.crt >/dev/null
+sudo chown root:expiry-radar /etc/expiry-radar/collector.key /etc/expiry-radar/collector.crt
+sudo chmod 640 /etc/expiry-radar/collector.key /etc/expiry-radar/collector.crt
+```
+
+Agents trust it automatically if the root CA is in the system trust store (domain-joined Windows usually is); otherwise set `collector_ca_file` to the root CA certificate.
+Os agentes confiam automaticamente se a CA raiz estiver no repositório de confiança do sistema (num Windows no domínio normalmente está); senão aponta o `collector_ca_file` para o certificado da CA raiz.
+
 **C. Self-signed / Autoassinado** (no OpenSSL needed: the collector generates it / sem OpenSSL: o collector gera-o)
 
 ```bash
