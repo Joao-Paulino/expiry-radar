@@ -372,6 +372,14 @@ sudo RENEWED_LINEAGE=/etc/letsencrypt/live/collector.example.com /etc/letsencryp
 ✅ Agents trust it with no setting; certbot renews it. ⚠️ Needs a public DNS name and, with `--standalone`, port 80 reachable during validation.
 ✅ Os agentes confiam sem configuração; o certbot renova-o. ⚠️ Precisa de nome DNS público e, com `--standalone`, da porta 80 acessível durante a validação.
 
+Rebuilding the collector often (labs, CI) can hit Let's Encrypt rate limits. Any ACME CA works the same way, for example ZeroSSL (free; create EAB credentials in its dashboard):
+Recriar o collector muitas vezes (laboratórios, CI) pode esbarrar nos limites do Let's Encrypt. Qualquer CA ACME funciona da mesma forma, por exemplo a ZeroSSL (gratuita; cria as credenciais EAB no painel dela):
+
+```bash
+sudo certbot certonly --standalone -d collector.example.com \
+  --server https://acme.zerossl.com/v2/DV90 --eab-kid <EAB_KID> --eab-hmac-key <EAB_HMAC_KEY>
+```
+
 **B. Internal CA / CA interna** (company PKI, e.g. Microsoft AD CS / PKI da empresa)
 
 Create a key and a request, have your CA sign it, and put the issued certificate **followed by the intermediate CA** in `collector.crt`:
@@ -408,8 +416,23 @@ ECDSA P-256, 365 days (`--days N`), `localhost` and `127.0.0.1` always included;
 Substitui o nome DNS e o IP pelos que os agentes vão usar. Depois copia o
 `collector.crt` (nunca o `.key`) para cada agente e aponta o `collector_ca_file` para ele.
 
+**Agents with B or C / Agentes com B ou C:** copy the CA certificate (B: the root CA, C: `collector.crt`) to **every** agent once, and point `agent.json` at it:
+copia o certificado da CA (B: a CA raiz, C: o `collector.crt`) para **cada** agente uma vez e aponta o `agent.json` para ele:
+
+```json
+{
+  "collector_url": "https://collector.example.com:8443",
+  "collector_ca_file": "/etc/expiry-radar/collector-ca.pem"
+}
+```
+
+Windows: `"collector_ca_file": "C:\\ExpiryRadar\\agent\\collector-ca.pem"`. Skip it only when the CA is already in the system trust store. With C, renewing the self-signed certificate means copying it to every agent again. / Só dispensas isto se a CA já estiver no repositório de confiança do sistema. Com C, renovar o certificado autoassinado obriga a copiá-lo de novo para cada agente.
+
 ✅ Quick, no external dependency, works on any network. ⚠️ Every agent needs `collector_ca_file`, and browsers warn when opening the dashboard.
 ✅ Rápido, sem dependências externas, funciona em qualquer rede. ⚠️ Cada agente precisa do `collector_ca_file` e os browsers mostram aviso ao abrir o painel.
+
+> 🔐 The dashboard login (password + TOTP, or SSO) works the same with A, B or C, but TLS is what protects it. With a self-signed certificate, compare the fingerprint the first time (`openssl x509 -in collector.crt -noout -fingerprint -sha256`) instead of clicking through the browser warning.
+> O login do painel (password + TOTP, ou SSO) funciona igual com A, B ou C, mas é o TLS que o protege. Com um certificado autoassinado, compara a impressão digital da primeira vez em vez de aceitar o aviso do browser às cegas.
 
 > 💡 The collector loads its certificate at startup: restart it after renewing.
 > Add the collector itself to an agent's `tls_targets` and Expiry Radar will warn
