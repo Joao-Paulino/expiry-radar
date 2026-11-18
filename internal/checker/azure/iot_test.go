@@ -10,7 +10,11 @@ import (
 func iotFake(t *testing.T) *fakeAzure {
 	f := newFake(t)
 	sub := "/subscriptions/" + guid
-	soon := time.Now().Add(20 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	// Real IoT Hub/DPS certificate "expiry" values are serialized as
+	// RFC 7231 ("RFC1123") strings (e.g. "Sat, 31 Dec 2039 23:59:59 GMT"),
+	// per the .NET SDK's DateTimeRfc1123JsonConverter on
+	// CertificateProperties.Expiry - not RFC 3339.
+	soon := time.Now().Add(20 * 24 * time.Hour).UTC().Format(time.RFC1123)
 	f.arm[sub+"/providers/Microsoft.Devices/IotHubs"] = []map[string]any{
 		{"id": sub + "/resourceGroups/rg-iot/providers/Microsoft.Devices/IotHubs/myhub", "name": "myhub"},
 	}
@@ -25,7 +29,7 @@ func iotFake(t *testing.T) *fakeAzure {
 	}
 	f.arm[sub+"/resourceGroups/rg-iot/providers/Microsoft.Devices/provisioningServices/mydps/certificates"] = []map[string]any{
 		{"id": sub + "/resourceGroups/rg-iot/providers/Microsoft.Devices/provisioningServices/mydps/certificates/dpsroot", "name": "dpsroot",
-			"properties": map[string]any{"subject": "CN=dpsroot", "expiry": "2027-06-01T00:00:00+00:00", "thumbprint": "EF56", "isVerified": true}},
+			"properties": map[string]any{"subject": "CN=dpsroot", "expiry": "Tue, 01 Jun 2027 00:00:00 GMT", "thumbprint": "EF56", "isVerified": true}},
 	}
 	return f
 }

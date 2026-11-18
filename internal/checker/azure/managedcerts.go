@@ -32,6 +32,13 @@ func parseARMTime(s string) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t.UTC(), nil
 	}
+	// Some ARM resource types (e.g. IoT Hub / DPS certificate "expiry")
+	// serialize dates as RFC 7231 ("RFC1123") strings via .NET's
+	// DateTimeRfc1123JsonConverter, e.g. "Sat, 31 Dec 2039 23:59:59 GMT",
+	// rather than RFC 3339.
+	if t, err := time.Parse(time.RFC1123, s); err == nil {
+		return t.UTC(), nil
+	}
 	return time.Parse("2006-01-02T15:04:05", s)
 }
 
