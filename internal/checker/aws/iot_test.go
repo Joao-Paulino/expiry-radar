@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -45,10 +46,14 @@ func TestCheck_IoTCore(t *testing.T) {
 	if rec.Metadata["account"] != acct1 || rec.Metadata["region"] != "eu-west-1" || rec.Metadata["certificate_mode"] != "DEFAULT" {
 		t.Fatalf("metadata: %+v", rec.Metadata)
 	}
+	describeCalls := 0
 	for _, c := range f.calls {
-		if c == "iot DescribeCertificate eu-west-1 ASIA-BASE" {
-			continue
+		if strings.HasPrefix(c, "iot DescribeCertificate ") {
+			describeCalls++
 		}
+	}
+	if describeCalls != 1 {
+		t.Fatalf("want exactly 1 DescribeCertificate call (revoked cert must be skipped before describing), got %d: %v", describeCalls, f.calls)
 	}
 }
 

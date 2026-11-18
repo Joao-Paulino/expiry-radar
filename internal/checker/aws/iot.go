@@ -97,7 +97,7 @@ func (c *Checker) describeIoTCertificate(ctx context.Context, cr credentials, ac
 	}
 	return &checker.ExpiryRecord{
 		Source: "aws://iot/" + account + "/" + region + "/" + id, Name: id, Kind: "certificate",
-		ExpiresAt: time.Unix(int64(*na), 0).UTC(),
+		ExpiresAt: unix(na),
 		Metadata:  map[string]string{"account": account, "region": region, "status": out.CertificateDescription.Status, "certificate_mode": mode},
 	}, nil
 }
