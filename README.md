@@ -112,14 +112,43 @@ Use Expiry Radar alongside these tools, not instead of them. / Usa o Expiry Rada
 
 ## 🧭 How it works / Como funciona
 
+```mermaid
+flowchart TB
+  subgraph SRC["What expires / O que expira"]
+    TLS["🔐 TLS endpoints<br/>HTTPS · SMTP · MQTT · AMQP"]
+    CLOUD["☁️ Azure · AWS · GCP<br/>secrets, keys, certificates"]
+    VAULT["🗝️ HashiCorp Vault<br/>PKI · KV · AppRole · leases"]
+    VMW["🖥️ vCenter · ESXi<br/>certificates · licences"]
+    OPC["🏭 OPC UA servers<br/>PLC · SCADA · MES"]
+    LOCAL["📁 Local files · Windows stores<br/>📋 inventory: end of support"]
+  end
+
+  subgraph AG["Agents, one per zone / Agentes, um por zona"]
+    A1["agent · IT / cloud"]
+    A2["agent · OT zone or DMZ<br/>ot_safe"]
+  end
+
+  subgraph COL["Collector"]
+    DB[("SQLite<br/>history")]
+    UI["Dashboard<br/>SSO · password + TOTP"]
+    RULES["Alert engine<br/>owners · mutes"]
+  end
+
+  TLS & CLOUD & VAULT & VMW --> A1
+  OPC & LOCAL --> A2
+  A1 -- "HTTPS, outbound only<br/>per-agent token<br/>local queue if offline" --> COL
+  A2 -- "HTTPS, outbound only" --> COL
+  RULES --> N["🔔 Slack · Teams<br/>webhook · email"]
+  UI --> U["👥 SecOps · SRE · OT"]
+  DB --> X["📤 JSON · CSV export"]
 ```
- hosts / VMs                                 central
-┌────────────┐   HTTPS + bearer token   ┌──────────────────────┐
-│   agent    │ ───────────────────────▶ │      collector       │
-│ TLS checks │   (local queue if the    │ SQLite · dashboard   │
-└────────────┘    collector is down)    │ alerts · JSON/CSV    │
-                                        └──────────────────────┘
-```
+
+| | EN | PT |
+|---|---|---|
+| 👀 **Agents** | Read only. Run next to what they check (a server, a cloud account, the OT zone). Never listen on a port; push metadata over HTTPS and queue it locally if the collector is down | Só leitura. Correm junto ao que verificam. Nunca abrem portas; enviam metadados por HTTPS e guardam em fila local se o collector estiver em baixo |
+| 🧠 **Collector** | One per organization. Stores history, keeps the earliest date when agents disagree, runs the alert engine and the dashboard | Um por organização. Guarda o histórico, fica com a data mais próxima quando os agentes discordam, corre os alertas e o painel |
+| 🔔 **Alerts** | 30 and 7 days before, expired, plus failing checkers and silent agents; deduplicated, with reminders | 30 e 7 dias antes, expirado, verificadores em falha e agentes silenciosos; sem duplicados, com lembretes |
+| 🔒 **Trust** | Each agent has its own token bound to its ID; no secret value ever leaves the agent | Cada agente tem o seu token ligado ao ID; nenhum valor secreto sai do agente |
 
 ## 📦 Install / Instalar
 
