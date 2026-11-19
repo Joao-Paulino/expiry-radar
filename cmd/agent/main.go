@@ -16,6 +16,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/azure"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/gcp"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/inventory"
+	"github.com/Joao-Paulino/expiry-radar/internal/checker/licensing"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/local"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/opcua"
 	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
@@ -60,8 +61,11 @@ type Config struct {
 	OPCUA *opcua.Config `json:"opcua"`
 	// Inventory, when set, reports dates kept in CSV/JSON files: device
 	// end of support, firmware support, contracts, domains.
-	Inventory       *inventory.Config `json:"inventory"`
-	Local           *local.Config     `json:"local"`
+	Inventory *inventory.Config `json:"inventory"`
+	Local     *local.Config     `json:"local"`
+	// Licensing, when set, checks third-party software license files
+	// (see README).
+	Licensing       *licensing.Config `json:"licensing"`
 	IntervalSeconds int               `json:"interval_seconds"`
 	// OTSafe makes the agent gentle on ICS/OT networks: at least one hour
 	// between runs, one target at a time with a 2 s pause, 5 s timeouts.
@@ -143,6 +147,9 @@ func (c Config) Validate() error {
 		}
 	}
 	if err := c.Local.Validate(); err != nil {
+		return err
+	}
+	if err := c.Licensing.Validate(); err != nil {
 		return err
 	}
 	if c.OTSafe && c.IntervalSeconds < otSafeMinInterval {
@@ -227,6 +234,7 @@ func checkers(cfg Config) []checker.Checker {
 		cs = append(cs, inventory.New(*cfg.Inventory))
 	}
 	cs = append(cs, local.Checkers(cfg.Local)...)
+	cs = append(cs, licensing.Checkers(cfg.Licensing)...)
 	return cs
 }
 
