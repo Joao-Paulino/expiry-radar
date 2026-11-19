@@ -212,7 +212,14 @@ func parseFlexLMDate(s string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("unrecognized expiration date %q (want D-mon-YYYY)", s)
 	}
 	month := strings.ToUpper(parts[1][:1]) + strings.ToLower(parts[1][1:])
-	t, err := time.Parse("2-Jan-2006", parts[0]+"-"+month+"-"+parts[2])
+	year := parts[2]
+	// Per the FLEXlm FAQ (Q3.5), a 2-digit year always means 19xx; only
+	// year 2000 and beyond must spell out all 4 digits. No pivot, no
+	// ambiguity.
+	if len(year) == 2 {
+		year = "19" + year
+	}
+	t, err := time.Parse("2-Jan-2006", parts[0]+"-"+month+"-"+year)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("unrecognized expiration date %q (want D-mon-YYYY): %w", s, err)
 	}
