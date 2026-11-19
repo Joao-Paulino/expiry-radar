@@ -993,8 +993,8 @@ Example / Exemplo: [examples/ot-assets.csv](examples/ot-assets.csv).
 
 ### 🔑 Software licensing: FlexLM / Licenciamento de software: FlexLM
 
-FlexLM/FlexNet (Flexera) license files (`.lic`/`.dat`): each `FEATURE`/`INCREMENT` line's expiration date. Local files only — querying a running license daemon (`lmgrd`/`lmstat`) over the network is not supported. A license whose expiration is `permanent` or `0` (non-expiring) is skipped.
-Ficheiros de licença FlexLM/FlexNet (`.lic`/`.dat`): a data de expiração de cada linha `FEATURE`/`INCREMENT`. Só ficheiros locais — consultar um daemon de licenças (`lmgrd`/`lmstat`) pela rede não é suportado. Uma licença com expiração `permanent` ou `0` (sem expirar) é ignorada.
+FlexLM/FlexNet (Flexera) license files (`.lic`/`.dat`): each `FEATURE`/`INCREMENT` line's expiration date. Local files only — querying a running license daemon (`lmgrd`/`lmstat`) over the network is not supported. A license whose expiration is `permanent` or a zero year (`0`, `00`, `000`, `0000`) is skipped (non-expiring). A 2-digit year is read as 19xx (per the FLEXlm FAQ); years 2000+ must use all 4 digits.
+Ficheiros de licença FlexLM/FlexNet (`.lic`/`.dat`): a data de expiração de cada linha `FEATURE`/`INCREMENT`. Só ficheiros locais — consultar um daemon de licenças (`lmgrd`/`lmstat`) pela rede não é suportado. Uma licença com expiração `permanent` ou um ano a zeros (`0`, `00`, `000`, `0000`) é ignorada (sem expirar). Um ano de 2 dígitos é lido como 19xx (conforme a FAQ do FLEXlm); anos a partir de 2000 têm de usar 4 dígitos.
 
 ```json
 "licensing": { "flexlm_license_files": ["/opt/flexlm/licenses/vendor.lic"] }

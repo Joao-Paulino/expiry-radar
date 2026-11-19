@@ -143,6 +143,27 @@ func TestConfig_Validate(t *testing.T) {
 // year of 0/00/000/0000 in the expiration field also means
 // "never expires" (same as the literal "permanent" keyword) - not
 // just a bare "0" with no date shape at all.
+// Per the FLEXlm FAQ (Q3.5): "Dates in the 20th century (19xx) can be
+// abbreviated to the last 2 digits of the year"; only 2000-and-later
+// dates must spell out all 4 digits. So a 2-digit year always means
+// 19xx, never 20xx - no pivot, no ambiguity.
+func TestCheck_FlexLM_TwoDigitYearIs19xx(t *testing.T) {
+	path := writeLicFile(t, `FEATURE legacy_tool vd 1.0 1-jan-95 1 CODE1
+`)
+	recs, err := Checkers(&Config{FlexLMLicenseFiles: []string{path}})[0].Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := byName(recs)
+	rec, ok := m["legacy_tool"]
+	if !ok {
+		t.Fatalf("want a record for legacy_tool, got %v", recs)
+	}
+	if !rec.ExpiresAt.Equal(time.Date(1995, time.January, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("want a 2-digit year to mean 19xx, got expiry: %v", rec.ExpiresAt)
+	}
+}
+
 func TestCheck_FlexLM_ZeroYearIsPermanent(t *testing.T) {
 	path := writeLicFile(t, `FEATURE f1 vd 1.0 01-jan-0000 1 CODE1
 FEATURE f2 vd 1.0 1-jan-00 1 CODE2
