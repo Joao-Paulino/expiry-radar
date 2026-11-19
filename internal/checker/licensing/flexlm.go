@@ -4,15 +4,22 @@
 package licensing
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
 )
+
+// maxFileBytes caps how large a FlexLM license file we'll read, in
+// line with the inventory checker's cap for hand-edited operator
+// files (internal/checker/inventory).
+const maxFileBytes = 10 << 20
 
 // Config is the "licensing" section of the agent configuration.
 type Config struct {
@@ -60,7 +67,8 @@ func (f *flexlmChecker) Check(ctx context.Context) ([]checker.ExpiryRecord, erro
 	var errs []error
 	for _, path := range f.paths {
 		if ctx.Err() != nil {
-			return recs, ctx.Err()
+			errs = append(errs, ctx.Err())
+			break
 		}
 		fr, err := parseFlexLMFile(path)
 		if err != nil {
@@ -83,8 +91,15 @@ func parseFlexLMFile(path string) ([]checker.ExpiryRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if len(data) > maxFileBytes {
+		return nil, fmt.Errorf("%s: file is %d bytes, exceeds the %d byte limit for a license file", path, len(data), maxFileBytes)
+	}
+	// Editors and PowerShell's Out-File often prepend a UTF-8 BOM.
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+
 	var recs []checker.ExpiryRecord
 	var errs []error
+	seen := map[string]int{} // occurrence count per feature name, for a unique Source when a name repeats
 	for _, line := range joinFlexLMContinuations(string(data)) {
 		f, ok, err := parseFeatureLine(line)
 		if err != nil {
@@ -94,8 +109,13 @@ func parseFlexLMFile(path string) ([]checker.ExpiryRecord, error) {
 		if !ok || f.permanent {
 			continue
 		}
+		source := "flexlm://" + path + "/" + f.name
+		if n := seen[f.name]; n > 0 {
+			source += "#" + strconv.Itoa(n+1)
+		}
+		seen[f.name]++
 		recs = append(recs, checker.ExpiryRecord{
-			Source: "flexlm://" + path + "/" + f.name, Name: f.name, Kind: "license",
+			Source: source, Name: f.name, Kind: "license",
 			ExpiresAt: f.expiry,
 			Metadata:  map[string]string{"vendor_daemon": f.vendor, "version": f.version, "count": f.count},
 		})
@@ -111,6 +131,13 @@ func joinFlexLMContinuations(data string) []string {
 	var cur strings.Builder
 	for _, raw := range strings.Split(data, "\n") {
 		raw = strings.TrimRight(raw, "\r")
+		// A comment line (outside of an already-started continuation)
+		// is never a continuation marker, even if it ends in "\" (e.g.
+		// a Windows path mentioned in the comment).
+		if cur.Len() == 0 && strings.HasPrefix(strings.TrimSpace(raw), "#") {
+			lines = append(lines, raw)
+			continue
+		}
 		if strings.HasSuffix(raw, "\\") {
 			cur.WriteString(strings.TrimSuffix(raw, "\\"))
 			cur.WriteByte(' ')
@@ -144,7 +171,7 @@ func parseFeatureLine(line string) (flexlmFeature, bool, error) {
 	}
 	f := flexlmFeature{name: fields[1], vendor: fields[2], version: fields[3], count: fields[5]}
 	exp := fields[4]
-	if exp == "0" || strings.EqualFold(exp, "permanent") {
+	if strings.EqualFold(exp, "permanent") || isZeroYearExpiration(exp) {
 		f.permanent = true
 		return f, true, nil
 	}
@@ -154,6 +181,26 @@ func parseFeatureLine(line string) (flexlmFeature, bool, error) {
 	}
 	f.expiry = t
 	return f, true, nil
+}
+
+// isZeroYearExpiration reports whether exp is a FlexLM non-expiring
+// date: the literal "0", or a D-mon-YYYY date whose year component is
+// all zeros (0, 00, 000, or 0000) - all documented non-expiring forms
+// per Revenera's FlexNet Publisher License Administration Guide.
+func isZeroYearExpiration(exp string) bool {
+	if exp == "0" {
+		return true
+	}
+	parts := strings.SplitN(exp, "-", 3)
+	if len(parts) != 3 || parts[2] == "" {
+		return false
+	}
+	for _, r := range parts[2] {
+		if r != '0' {
+			return false
+		}
+	}
+	return true
 }
 
 // parseFlexLMDate parses a FlexLM expiration date: D-mon-YYYY, with a

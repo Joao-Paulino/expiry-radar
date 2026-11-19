@@ -139,6 +139,105 @@ func TestConfig_Validate(t *testing.T) {
 	}
 }
 
+// Per Revenera's FlexNet Publisher License Administration Guide, a
+// year of 0/00/000/0000 in the expiration field also means
+// "never expires" (same as the literal "permanent" keyword) - not
+// just a bare "0" with no date shape at all.
+func TestCheck_FlexLM_ZeroYearIsPermanent(t *testing.T) {
+	path := writeLicFile(t, `FEATURE f1 vd 1.0 01-jan-0000 1 CODE1
+FEATURE f2 vd 1.0 1-jan-00 1 CODE2
+`)
+	recs, err := Checkers(&Config{FlexLMLicenseFiles: []string{path}})[0].Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("want no records for zero-year (never expires) licenses: %v", recs)
+	}
+}
+
+// Real license files routinely carry more than one FEATURE/INCREMENT
+// line for the same feature name (a renewal appended next to the old
+// grant). Each must get a distinct Source, or the collector's
+// (source, name, kind) keying silently collapses them into one -
+// and if the stale/expired one sorts first, the renewed one becomes
+// invisible forever.
+func TestCheck_FlexLM_DuplicateFeatureNameGetsDistinctSources(t *testing.T) {
+	path := writeLicFile(t, `FEATURE widget vd 1.0 01-Jan-2020 1 OLD
+FEATURE widget vd 2.0 01-Jan-2030 1 NEW
+`)
+	recs, err := Checkers(&Config{FlexLMLicenseFiles: []string{path}})[0].Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("want 2 records for the 2 widget grants: %v", recs)
+	}
+	if recs[0].Source == recs[1].Source {
+		t.Fatalf("want distinct Source for each grant, got the same for both: %q", recs[0].Source)
+	}
+}
+
+// A comment or SERVER/VENDOR line that happens to end in a literal
+// backslash (e.g. a Windows path in a comment) must not be treated as
+// a FlexLM line-continuation marker - only FEATURE/INCREMENT entries
+// legitimately continue across lines.
+func TestCheck_FlexLM_BackslashInCommentIsNotAContinuation(t *testing.T) {
+	path := writeLicFile(t, "# see C:\\vendor\\notes\\\n"+
+		"FEATURE f1 vd 1.0 01-Jan-2030 1 CODE1\n")
+	recs, err := Checkers(&Config{FlexLMLicenseFiles: []string{path}})[0].Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 1 || recs[0].Name != "f1" {
+		t.Fatalf("want the FEATURE line after the comment still parsed: %v", recs)
+	}
+}
+
+// Windows editors and PowerShell's Out-File often prepend a UTF-8 BOM
+// (the agent's own JSON config loader already strips one for the same
+// reason); a FlexLM file with one must not lose its first entry.
+func TestCheck_FlexLM_UTF8BOMStripped(t *testing.T) {
+	path := writeLicFile(t, "\xef\xbb\xbfFEATURE f1 vd 1.0 01-Jan-2030 1 CODE1\n")
+	recs, err := Checkers(&Config{FlexLMLicenseFiles: []string{path}})[0].Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 1 || recs[0].Name != "f1" {
+		t.Fatalf("want the BOM-prefixed FEATURE line parsed: %v", recs)
+	}
+}
+
+// fakeCtx's Err() starts nil and turns non-nil after a fixed number
+// of calls, simulating a context cancelled partway through a
+// multi-file run without any real concurrency/timing.
+type fakeCtx struct {
+	context.Context
+	callsUntilDone int
+	calls          int
+}
+
+func (f *fakeCtx) Err() error {
+	f.calls++
+	if f.calls > f.callsUntilDone {
+		return context.Canceled
+	}
+	return nil
+}
+
+// If the context is cancelled partway through a multi-file run,
+// errors already collected from earlier files must not be discarded
+// in favor of a bare ctx.Err().
+func TestCheck_FlexLM_ContextCancelledKeepsPriorErrors(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.lic")
+	ok := writeLicFile(t, "FEATURE f1 vd 1.0 01-Jan-2030 1 CODE1\n")
+	ctx := &fakeCtx{Context: context.Background(), callsUntilDone: 1} // nil on path 1's check, cancelled before path 2
+	recs, err := Checkers(&Config{FlexLMLicenseFiles: []string{missing, ok}})[0].Check(ctx)
+	if err == nil || !strings.Contains(err.Error(), "missing.lic") {
+		t.Fatalf("want the first file's error preserved alongside the cancellation, got recs=%v err=%v", recs, err)
+	}
+}
+
 func TestCheckers_NilConfig(t *testing.T) {
 	if cs := Checkers(nil); cs != nil {
 		t.Fatalf("want nil checkers for nil config, got %v", cs)
