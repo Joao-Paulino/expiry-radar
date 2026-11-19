@@ -17,5 +17,6 @@ Todos os valores são fictícios. Cada ficheiro é verificado pelos testes, por 
 | [agent/ot-ics.json](agent/ot-ics.json) | ICS/OT: OPC UA servers (PLC, SCADA, MES), HMI and historian HTTPS, OPC UA PKI stores, device end of support (inventory), `ot_safe` |
 | [ot-assets.csv](ot-assets.csv) | Inventory file: device end of support, firmware support, contracts, domains / Ficheiro de inventário |
 | [agent/iiot-iot.json](agent/iiot-iot.json) | IIoT/IoT: MQTT and AMQP brokers, edge gateways, broker certificate files, AWS IoT Core device certificates / Azure IoT Hub and DPS CA certificates, `ot_safe` |
+| [agent/scada-licensing.json](agent/scada-licensing.json) | SCADA/industrial software licensing: FlexLM license files, `ot_safe` |
 
 One agent can combine several scenarios: merge the sections you need into one file. / Um agente pode juntar vários cenários: junta as secções que precisas num só ficheiro.
