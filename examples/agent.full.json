@@ -36,6 +36,11 @@
       "WebHosting"
     ]
   },
+  "licensing": {
+    "flexlm_license_files": [
+      "/opt/flexlm/licenses/vendor.lic"
+    ]
+  },
   "opcua": {
     "targets": [
       {

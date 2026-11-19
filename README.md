@@ -991,6 +991,18 @@ PLC Line 3,plc-03.plant.example.com,firmware_support,2027-06-30,ot-team,ExampleV
 
 Example / Exemplo: [examples/ot-assets.csv](examples/ot-assets.csv).
 
+### 🔑 Software licensing: FlexLM / Licenciamento de software: FlexLM
+
+FlexLM/FlexNet (Flexera) license files (`.lic`/`.dat`): each `FEATURE`/`INCREMENT` line's expiration date. Local files only — querying a running license daemon (`lmgrd`/`lmstat`) over the network is not supported. A license whose expiration is `permanent` or `0` (non-expiring) is skipped.
+Ficheiros de licença FlexLM/FlexNet (`.lic`/`.dat`): a data de expiração de cada linha `FEATURE`/`INCREMENT`. Só ficheiros locais — consultar um daemon de licenças (`lmgrd`/`lmstat`) pela rede não é suportado. Uma licença com expiração `permanent` ou `0` (sem expirar) é ignorada.
+
+```json
+"licensing": { "flexlm_license_files": ["/opt/flexlm/licenses/vendor.lic"] }
+```
+
+Other licensing systems (CodeMeter, Sentinel RMS/HASP, cloud-based SaaS subscriptions) are not covered yet — open an issue naming the vendor and, ideally, a sample (anonymized) response or license file.
+Outros sistemas de licenciamento (CodeMeter, Sentinel RMS/HASP, subscrições SaaS na cloud) ainda não são cobertos — abre uma issue a indicar o fabricante e, idealmente, um exemplo (anonimizado) de resposta ou ficheiro de licença.
+
 ## ⚠️ Known limitations / Limitações conhecidas
 
 | EN | PT |
@@ -1011,7 +1023,7 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 | ✅ | **M6** | VMware: vCenter/ESXi certificates and licences | VMware: certificados e licenças vCenter/ESXi |
 | ✅ | **M7** | ICS/OT and IIoT on the plant floor: OPC UA certificates (GetEndpoints, no session) and local OPC UA PKI stores; MQTT/AMQP brokers over TLS (8883, 5671); HTTPS on PLCs, HMIs and edge gateways with an OT-safe mode (few connections, long intervals, short timeouts) | ICS/OT e IIoT na fábrica: certificados OPC UA (GetEndpoints, sem sessão) e stores PKI locais do OPC UA; brokers MQTT/AMQP sobre TLS (8883, 5671); HTTPS em PLC, HMI e gateways edge com modo OT-safe (poucas ligações, intervalos longos, timeouts curtos) |
 | ✅ | **M8** | Cloud IoT: AWS IoT Core device certificates and registered CAs; Azure IoT Hub and DPS X.509 CA certificates | IoT na cloud: certificados de dispositivo e CAs registadas no AWS IoT Core; certificados CA X.509 do Azure IoT Hub e DPS |
-| ⚪ | **M9** | SCADA and industrial software licences (vendor by vendor), then other software licences and SaaS subscriptions | Licenças de SCADA e software industrial (fabricante a fabricante), depois outras licenças de software e subscrições SaaS |
+| 🟡 | **M9** | SCADA and industrial software licences (vendor by vendor): FlexLM done; CodeMeter, Sentinel RMS/HASP and SaaS subscriptions on request | Licenças de SCADA e software industrial (fabricante a fabricante): FlexLM feito; CodeMeter, Sentinel RMS/HASP e subscrições SaaS a pedido |
 | 🟡 | **M10** | End of support and firmware for OT/IoT devices: vendor end-of-life and end-of-security-updates dates per device model and firmware version (read from the device where possible, otherwise from an inventory file), so an unsupported controller is flagged before it becomes the way in | Fim de suporte e firmware de equipamentos OT/IoT: datas de fim de vida e de fim de atualizações de segurança por modelo e versão de firmware (lidas do equipamento quando possível, senão de um ficheiro de inventário), para que um controlador sem suporte seja assinalado antes de se tornar a porta de entrada |
 | ⚪ | **M11** | Teams: roles mapped to IdP groups (viewer, operator, admin); audit log of every change (who muted, re-owned or forgot what, when and why); alerts routed by owner to each team's channel; mute with an expiry date and a mandatory reason (e.g. change ticket) | Equipas: papéis mapeados aos grupos do IdP (viewer, operator, admin); registo de auditoria de cada alteração (quem silenciou, mudou o dono ou esqueceu o quê, quando e porquê); alertas encaminhados pelo dono para o canal de cada equipa; silêncio com data de fim e motivo obrigatório (ex.: ticket de mudança) |
 
