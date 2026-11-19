@@ -1024,9 +1024,10 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 | ✅ | **M7** | ICS/OT and IIoT on the plant floor: OPC UA certificates (GetEndpoints, no session) and local OPC UA PKI stores; MQTT/AMQP brokers over TLS (8883, 5671); HTTPS on PLCs, HMIs and edge gateways with an OT-safe mode (few connections, long intervals, short timeouts) | ICS/OT e IIoT na fábrica: certificados OPC UA (GetEndpoints, sem sessão) e stores PKI locais do OPC UA; brokers MQTT/AMQP sobre TLS (8883, 5671); HTTPS em PLC, HMI e gateways edge com modo OT-safe (poucas ligações, intervalos longos, timeouts curtos) |
 | ✅ | **M8** | Cloud IoT: AWS IoT Core device certificates and registered CAs; Azure IoT Hub and DPS X.509 CA certificates | IoT na cloud: certificados de dispositivo e CAs registadas no AWS IoT Core; certificados CA X.509 do Azure IoT Hub e DPS |
 | ✅ | **M9** | SCADA and industrial software licences: FlexLM license-file expiry checking | Licenças de SCADA e software industrial: verificação de expiração de ficheiros de licença FlexLM |
-| 🟡 | **M10** | End of support and firmware for OT/IoT devices: vendor end-of-life and end-of-security-updates dates per device model and firmware version (read from the device where possible, otherwise from an inventory file), so an unsupported controller is flagged before it becomes the way in | Fim de suporte e firmware de equipamentos OT/IoT: datas de fim de vida e de fim de atualizações de segurança por modelo e versão de firmware (lidas do equipamento quando possível, senão de um ficheiro de inventário), para que um controlador sem suporte seja assinalado antes de se tornar a porta de entrada |
+| ✅ | **M10** | End of support and firmware for OT/IoT devices, from an inventory file: vendor end-of-life and end-of-security-updates dates per device model and firmware version | Fim de suporte e firmware de equipamentos OT/IoT, a partir de um ficheiro de inventário: datas de fim de vida e de fim de atualizações de segurança por modelo e versão de firmware |
 | ⚪ | **M11** | Teams: roles mapped to IdP groups (viewer, operator, admin); audit log of every change (who muted, re-owned or forgot what, when and why); alerts routed by owner to each team's channel; mute with an expiry date and a mandatory reason (e.g. change ticket) | Equipas: papéis mapeados aos grupos do IdP (viewer, operator, admin); registo de auditoria de cada alteração (quem silenciou, mudou o dono ou esqueceu o quê, quando e porquê); alertas encaminhados pelo dono para o canal de cada equipa; silêncio com data de fim e motivo obrigatório (ex.: ticket de mudança) |
 | ⚪ | **M12** | Additional software licensing vendors, on request: CodeMeter, Sentinel RMS/HASP, SaaS subscriptions | Fabricantes de licenciamento adicionais, a pedido: CodeMeter, Sentinel RMS/HASP, subscrições SaaS |
+| ⚪ | **M13** | Read device model and firmware version directly from the equipment, where a safe read-only protocol allows it (vendor by vendor, on request) | Ler modelo e versão de firmware diretamente do equipamento, quando um protocolo seguro e só de leitura o permitir (fabricante a fabricante, a pedido) |
 
 **OT/IoT principles / Princípios OT/IoT:** read only, never writes to devices; the agent sits in the OT zone or DMZ and only connects out to the collector (one-way conduit, ISA/IEC 62443 zones and conduits); each milestone ends with a security test (OWASP IoT Top 10). /
 Só leitura, nunca escreve nos equipamentos; o agente fica na zona OT ou na DMZ e só faz ligações de saída para o coletor (conduit de sentido único, zonas e conduits do ISA/IEC 62443); cada milestone termina com um teste de segurança (OWASP IoT Top 10).
@@ -1100,10 +1101,10 @@ Só leitura, nunca escreve nos equipamentos; o agente fica na zona OT ou na DMZ 
 - [x] AWS IoT Core registered CA certificates: `ListCACertificates` + `DescribeCACertificate`, inactive ones skipped before the describe call / CAs registadas no AWS IoT Core: `ListCACertificates` + `DescribeCACertificate`, as inativas são ignoradas antes do describe
 - [x] Azure IoT Hub and Device Provisioning Service (DPS) CA certificates / Certificados de CA do Azure IoT Hub e do Device Provisioning Service (DPS)
 
-**In progress in M10 / Em curso no M10**
+**Done in M10 / Concluído no M10**
 
 - [x] Inventory checker: end of support, firmware support, contracts and domains from CSV/JSON files / Checker de inventário: fim de suporte, firmware, contratos e domínios a partir de ficheiros CSV/JSON
-- [ ] Read model and firmware version from the device where a safe read-only protocol allows it / Ler modelo e versão de firmware do equipamento quando um protocolo seguro e só de leitura o permitir
+- Reading model/firmware version directly from the device is tracked as M13 (vendor by vendor, on request) / Ler modelo e versão de firmware diretamente do equipamento passa a ser o M13 (fabricante a fabricante, a pedido)
 
 ## 🛡️ Security / Segurança
 
