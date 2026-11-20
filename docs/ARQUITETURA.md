@@ -71,6 +71,7 @@ internal/
   auth/             middleware de bearer token para /ingest
   collector/
     server/         ligação geral: validação da config, rotas, servidor TLS, ciclos em segundo plano
+    certwatch/      recarrega o certificado TLS do próprio collector do disco quando é renovado, sem reiniciar, sem exec
     ingest/         POST /ingest: validar e guardar um lote
     store/          persistência SQLite; lógica do "o que está atual"
     db/             migrações do esquema
@@ -266,7 +267,7 @@ flowchart TB
 
 - **Plataformas.** Linux amd64 e arm64, Windows amd64 e imagens de contentor para os dois binários (`ghcr.io/joao-paulino/expiry-radar-{agent,collector}`).
 - **Serviços.** No Windows, o `install-service` regista um serviço nativo com arranque automático, reinício em caso de falha, saída para o Event Log e `LocalService` por omissão. No Linux, uma unit systemd endurecida corre com um utilizador próprio (`NoNewPrivileges`, `ProtectSystem=strict`). Os dois instaladores verificam os downloads contra o `SHA256SUMS`.
-- **Certificados.** O `collector gen-cert` cria um certificado autoassinado ECDSA P-256 sem OpenSSL. Também se pode usar um certificado emitido por uma CA.
+- **Certificados.** O `collector gen-cert` cria um certificado autoassinado ECDSA P-256 sem OpenSSL. Também se pode usar um certificado emitido por uma CA (Let's Encrypt, uma PKI interna). De qualquer forma, o `internal/collector/certwatch` vigia a data de modificação de `tls_cert_file`/`tls_key_file` (verificada a cada minuto) e recarrega o certificado em memória quando muda, por isso uma renovação — feita por um cron ou pelo próprio timer do certbot, fora do collector — nunca precisa de um reinício. O collector só lê estes dois ficheiros: nunca executa um script, nunca fala com um fornecedor de DNS nem guarda credenciais de DNS, por isso a automação de TLS do M14 não acrescenta nenhuma superfície de ataque nova ao processo. Um par novo inválido (por exemplo uma renovação que escreveu o certificado novo antes da chave) é rejeitado e continua a servir-se o certificado anterior, ainda válido.
 - **Cópias de segurança.** Guarda a `radar.db` (com o collector parado, ou com `sqlite3 .backup`) e os ficheiros de config. Reinstalar com os instaladores põe a pasta antiga de lado em vez de a apagar.
 
 ## 9. Build, testes e release

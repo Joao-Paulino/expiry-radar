@@ -384,20 +384,22 @@ sudo certbot certonly --standalone -d collector.example.com
 # tls_key_file:  /etc/letsencrypt/live/collector.example.com/privkey.pem
 ```
 
-The collector runs as the `expiry-radar` user, which cannot read `/etc/letsencrypt` (the key is root-only). Copy the files on every renewal with a deploy hook, then restart:
-O collector corre como o utilizador `expiry-radar`, que não consegue ler `/etc/letsencrypt` (a chave só é legível pelo root). Copia os ficheiros em cada renovação com um deploy hook e reinicia:
+The collector runs as the `expiry-radar` user, which cannot read `/etc/letsencrypt` (the key is root-only). Copy the files on every renewal with a deploy hook — **no restart needed**: the collector checks `tls_cert_file`/`tls_key_file` for changes every minute and reloads the certificate in memory, so a renewal takes effect without downtime:
+O collector corre como o utilizador `expiry-radar`, que não consegue ler `/etc/letsencrypt` (a chave só é legível pelo root). Copia os ficheiros em cada renovação com um deploy hook — **sem precisar de reiniciar**: o collector verifica `tls_cert_file`/`tls_key_file` a cada minuto e recarrega o certificado em memória, por isso uma renovação tem efeito sem downtime:
 
 ```bash
 sudo tee /etc/letsencrypt/renewal-hooks/deploy/expiry-radar.sh >/dev/null <<'HOOK'
 #!/bin/sh
 install -o root -g expiry-radar -m 640 "$RENEWED_LINEAGE/fullchain.pem" /etc/expiry-radar/collector.crt
 install -o root -g expiry-radar -m 640 "$RENEWED_LINEAGE/privkey.pem"   /etc/expiry-radar/collector.key
-systemctl restart expiry-radar-collector
 HOOK
 sudo chmod 755 /etc/letsencrypt/renewal-hooks/deploy/expiry-radar.sh
 sudo RENEWED_LINEAGE=/etc/letsencrypt/live/collector.example.com /etc/letsencrypt/renewal-hooks/deploy/expiry-radar.sh   # first copy / primeira cópia
 # tls_cert_file: /etc/expiry-radar/collector.crt   tls_key_file: /etc/expiry-radar/collector.key
 ```
+
+> 🔄 **No exec, no cron inside the collector.** The collector only ever reads these two files; it never runs a script, talks to a DNS provider or holds any DNS credential. Renewal (certbot, DNS-01 or otherwise) stays entirely external and unchanged — the collector just notices the new file and keeps serving, or keeps the old certificate if the new one is briefly invalid mid-renewal.
+> **Sem execução, sem cron dentro do collector.** O collector só lê estes dois ficheiros; nunca corre um script, nem fala com um fornecedor de DNS, nem guarda nenhuma credencial de DNS. A renovação (certbot, DNS-01 ou outra) continua inteiramente externa e inalterada — o collector só nota o ficheiro novo e continua a servir, ou mantém o certificado antigo se o novo estiver brevemente inválido a meio da renovação.
 
 ✅ Agents trust it with no setting; certbot renews it. ⚠️ Needs a public DNS name and, with `--standalone`, port 80 reachable during validation.
 ✅ Os agentes confiam sem configuração; o certbot renova-o. ⚠️ Precisa de nome DNS público e, com `--standalone`, da porta 80 acessível durante a validação.
@@ -464,13 +466,17 @@ Windows: `"collector_ca_file": "C:\\ExpiryRadar\\agent\\collector-ca.pem"`. Skip
 > 🔐 The dashboard login (password + TOTP, or SSO) works the same with A, B or C, but TLS is what protects it. With a self-signed certificate, compare the fingerprint the first time (`openssl x509 -in collector.crt -noout -fingerprint -sha256`) instead of clicking through the browser warning.
 > O login do painel (password + TOTP, ou SSO) funciona igual com A, B ou C, mas é o TLS que o protege. Com um certificado autoassinado, compara a impressão digital da primeira vez em vez de aceitar o aviso do browser às cegas.
 
-> 💡 The collector loads its certificate at startup: restart it after renewing.
-> Add the collector itself to an agent's `tls_targets` and Expiry Radar will warn
-> you before its own certificate expires.
+> 💡 The collector reloads its certificate from disk automatically (checked every
+> minute) whenever it changes, so renewing it needs no restart. Add the collector
+> itself to an agent's `tls_targets` and Expiry Radar will warn you before its
+> own certificate expires — the same "control what expires" logic applied to
+> the collector itself.
 >
-> 💡 O collector carrega o certificado no arranque: reinicia-o depois de o renovar.
+> 💡 O collector recarrega o certificado do disco automaticamente (verificado a
+> cada minuto) sempre que muda, por isso renová-lo não precisa de reiniciar.
 > Junta o próprio collector aos `tls_targets` de um agente e o Expiry Radar avisa-te
-> antes de o seu próprio certificado expirar.
+> antes de o seu próprio certificado expirar — a mesma lógica de "controlar o que
+> expira" aplicada ao próprio collector.
 
 ### 🔔 Alerts / Alertas
 

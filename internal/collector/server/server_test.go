@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -413,5 +414,63 @@ func TestConfig_Validate_AgentCredentials(t *testing.T) {
 		if c.Validate() == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// TestRun_ReloadsRenewedCertificateWithoutRestart proves the
+// collector picks up a certificate renewed on disk (as certbot would
+// after a Let's Encrypt DNS-01 renewal) without needing to be
+// restarted — M14: trusted TLS, part 1 (hot-reload).
+func TestRun_ReloadsRenewedCertificateWithoutRestart(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := testhelpers.WriteSelfSignedCertForTest(t, dir)
+	cfg := server.Config{
+		DBPath:             filepath.Join(dir, "radar.db"),
+		ListenAddr:         "127.0.0.1:0",
+		AuthTokens:         []string{"agent-token-0123456789abcdef0123456789"},
+		AdminTokens:        []string{"admin-token-0123456789abcdef0123456789"},
+		TLSCertFile:        certFile,
+		TLSKeyFile:         keyFile,
+		CertReloadInterval: 20 * time.Millisecond,
+	}
+	addr, stop, err := testhelpers.StartForTest(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+
+	peerCert := func() *x509.Certificate {
+		conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true}) // #nosec G402 -- test dials its own throwaway cert
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		defer conn.Close()
+		return conn.ConnectionState().PeerCertificates[0]
+	}
+
+	first := peerCert()
+
+	// Simulate a renewal: a new self-signed pair written to the same
+	// paths, with a clearly newer modification time.
+	testhelpers.WriteSelfSignedCertForTest(t, dir)
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(certFile, future, future); err != nil {
+		t.Fatalf("chtimes cert: %v", err)
+	}
+	if err := os.Chtimes(keyFile, future, future); err != nil {
+		t.Fatalf("chtimes key: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	var second *x509.Certificate
+	for time.Now().Before(deadline) {
+		second = peerCert()
+		if !second.Equal(first) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if second.Equal(first) {
+		t.Fatal("collector kept serving the old certificate after renewal; want it reloaded without a restart")
 	}
 }
