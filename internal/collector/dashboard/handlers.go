@@ -7,6 +7,7 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/audit"
@@ -215,7 +216,7 @@ func NewMux(st store.Store, rs rules.Store, a *audit.Store, opts ...Options) *ht
 		}
 
 		muted := r.FormValue("muted") == "on"
-		reason := r.FormValue("mute_reason")
+		reason := strings.TrimSpace(r.FormValue("mute_reason"))
 		if muted && reason == "" {
 			http.Error(w, "a mute requires a reason", http.StatusBadRequest)
 			return
@@ -262,12 +263,18 @@ func NewMux(st store.Store, rs rules.Store, a *audit.Store, opts ...Options) *ht
 		if a != nil {
 			actor := session.Actor(ctx)
 			target := rule.Source + "|" + rule.Name + "|" + rule.Kind
-			if !found || prev.Muted != rule.Muted {
+			prevActive := found && prev.Muted
+			muteChanged := prevActive != rule.Muted
+			// While still muted, a changed reason or expiry is a
+			// prolongation and must leave a trace too, not just a
+			// flip between muted and unmuted.
+			stillMutedButChanged := prevActive && rule.Muted && (prev.MuteReason != rule.MuteReason || !prev.MuteUntil.Equal(rule.MuteUntil))
+			if muteChanged || stillMutedButChanged {
 				action := "unmute"
 				if rule.Muted {
 					action = "mute"
 				}
-				if err := a.Log(ctx, actor, action, target, boolStr(found && prev.Muted), boolStr(rule.Muted), rule.MuteReason); err != nil {
+				if err := a.Log(ctx, actor, action, target, boolStr(prevActive), boolStr(rule.Muted), rule.MuteReason); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}

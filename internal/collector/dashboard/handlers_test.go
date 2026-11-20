@@ -200,6 +200,75 @@ func TestMux_PostRules_WritesAuditEntry(t *testing.T) {
 	}
 }
 
+// TestMux_PostRules_OwnerOnlyChangeDoesNotLogSpuriousUnmute proves
+// saving just an owner on a never-muted item logs an "owner" entry
+// only, not a false "unmute" (the item was never muted to begin with).
+func TestMux_PostRules_OwnerOnlyChangeDoesNotLogSpuriousUnmute(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "radar.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	a := &audit.Store{DB: database, Now: time.Now}
+	rs := rules.NewSQLite(database)
+	mux := NewMux(&fakeStore{}, rs, a)
+
+	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "owner": {"joao"}}
+	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("got %d, want 303", rec.Code)
+	}
+
+	entries, err := a.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Action != "owner" {
+		t.Fatalf("got entries %+v, want exactly one \"owner\" entry", entries)
+	}
+}
+
+// TestMux_PostRules_ExtendingAnActiveMuteIsLogged proves changing the
+// reason or expiry of an already-muted item is recorded too, so a
+// mute can't be silently prolonged without a trace.
+func TestMux_PostRules_ExtendingAnActiveMuteIsLogged(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "radar.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	a := &audit.Store{DB: database, Now: time.Now}
+	rs := rules.NewSQLite(database)
+	mux := NewMux(&fakeStore{}, rs, a)
+
+	post := func(until string) {
+		form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "muted": {"on"}, "mute_reason": {"renewing"}}
+		if until != "" {
+			form.Set("mute_until", until)
+		}
+		req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("got %d, want 303", rec.Code)
+		}
+	}
+	post("2027-01-01")   // first mute
+	post("2027-06-01")   // extend the expiry while still muted
+
+	entries, err := a.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d audit entries, want 2 (initial mute + the extension)", len(entries))
+	}
+}
+
 func TestMux_ExportJSON_ReturnsValidArray(t *testing.T) {
 	st := &fakeStore{current: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "a", Name: "b", Kind: "certificate", ExpiresAt: time.Now()}}}}
 	mux := NewMux(st, &fakeRulesStore{}, nil)
