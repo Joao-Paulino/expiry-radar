@@ -296,7 +296,8 @@ func (h *Handlers) callback(w http.ResponseWriter, r *http.Request) {
 	if who == "" {
 		who = idt.Subject
 	}
-	id, _, err := h.Sessions.CreateWithLifetime(ctx, who, h.SessionLifetime)
+	role := RoleFor(p, claims)
+	id, _, err := h.Sessions.CreateWithLifetime(ctx, who, role, h.SessionLifetime)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

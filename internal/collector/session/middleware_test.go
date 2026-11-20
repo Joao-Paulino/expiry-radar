@@ -49,7 +49,7 @@ func TestMiddleware_WrongBearerIs401(t *testing.T) {
 
 func TestMiddleware_SessionGETExposesCSRF(t *testing.T) {
 	st, _ := newTestStore(t)
-	id, s, _ := st.Create(context.Background(), "admin")
+	id, s, _ := st.Create(context.Background(), "admin", RoleAdmin)
 	var csrf string
 	h := Middleware(st, []string{adminToken}, handlerRecordingCSRF(&csrf))
 	req := httptest.NewRequest("GET", "/", nil)
@@ -65,7 +65,7 @@ func TestMiddleware_SessionGETExposesCSRF(t *testing.T) {
 // a session cookie carries who is logged in, for an audit log to use.
 func TestMiddleware_SessionExposesActor(t *testing.T) {
 	st, _ := newTestStore(t)
-	id, _, _ := st.Create(context.Background(), "alice@example.com")
+	id, _, _ := st.Create(context.Background(), "alice@example.com", RoleViewer)
 	var got string
 	h := Middleware(st, []string{adminToken}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = Actor(r.Context())
@@ -120,7 +120,7 @@ func TestMiddleware_UnauthenticatedAPIIs401(t *testing.T) {
 
 func TestMiddleware_SessionPOSTRequiresCSRF(t *testing.T) {
 	st, _ := newTestStore(t)
-	id, s, _ := st.Create(context.Background(), "admin")
+	id, s, _ := st.Create(context.Background(), "admin", RoleAdmin)
 	var csrf string
 	h := Middleware(st, []string{adminToken}, handlerRecordingCSRF(&csrf))
 	for name, tc := range map[string]struct {
@@ -163,7 +163,7 @@ func TestMiddleware_ExpiredSessionCookieIsUnauthenticated(t *testing.T) {
 // the log with the client address, and never the token itself.
 func TestMiddleware_LogsCSRFRejection(t *testing.T) {
 	st, _ := newTestStore(t)
-	id, s, _ := st.Create(context.Background(), "admin")
+	id, s, _ := st.Create(context.Background(), "admin", RoleAdmin)
 	var b strings.Builder
 	log.SetOutput(&b)
 	defer log.SetOutput(os.Stderr)

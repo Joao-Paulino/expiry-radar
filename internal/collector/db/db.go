@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
     created_at INTEGER NOT NULL,
     last_seen_at INTEGER NOT NULL,
     max_age_seconds INTEGER NOT NULL DEFAULT 28800, -- absolute lifetime
-    actor TEXT NOT NULL DEFAULT '' -- "admin", or the SSO identity
+    actor TEXT NOT NULL DEFAULT '', -- "admin", or the SSO identity
+    role TEXT NOT NULL DEFAULT '' -- "admin", "operator" or "viewer"
 );
 
 -- Pending SSO logins: state (hashed), nonce and PKCE verifier; 10 min, single use.
@@ -154,6 +155,15 @@ func migrate(database *sql.DB) error {
 		return err
 	}
 	if err := addColumnIfMissing(database, "admin_sessions", "actor", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	// A pre-RBAC session (created before this column existed) gets ''
+	// here, which RoleAtLeast treats as satisfying nothing: it fails
+	// closed on any gated route until that browser logs in again (at
+	// most the session's own lifetime, max 8h) and gets a real role
+	// assigned. No session row or any other data is dropped by this
+	// migration; addColumnIfMissing only ever adds a column.
+	if err := addColumnIfMissing(database, "admin_sessions", "role", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := addColumnIfMissing(database, "rules", "mute_reason", "TEXT NOT NULL DEFAULT ''"); err != nil {

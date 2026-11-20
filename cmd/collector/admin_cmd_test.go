@@ -43,7 +43,7 @@ func openStores(t *testing.T, dbPath string) (*admin.Store, *session.Store) {
 func TestSetAdminPassword_StoresHashAndRevokesSessions(t *testing.T) {
 	cfgPath, dbPath := writeTestConfig(t)
 	as, ss := openStores(t, dbPath)
-	id, _, _ := ss.Create(context.Background(), "admin")
+	id, _, _ := ss.Create(context.Background(), "admin", session.RoleAdmin)
 
 	var out bytes.Buffer
 	in := strings.NewReader("correct horse battery staple\ncorrect horse battery staple\n")
@@ -86,7 +86,7 @@ var secretRe = regexp.MustCompile(`secret=([A-Z2-7]+)`)
 func TestSetAdminTOTP_ConfirmsCodeAndPrintsRecoveryCodes(t *testing.T) {
 	cfgPath, dbPath := writeTestConfig(t)
 	as, ss := openStores(t, dbPath)
-	id, _, _ := ss.Create(context.Background(), "admin")
+	id, _, _ := ss.Create(context.Background(), "admin", session.RoleAdmin)
 	now := time.Unix(1_700_000_000, 0)
 
 	// The secret is printed before the code is read, so feed the code

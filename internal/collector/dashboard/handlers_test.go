@@ -90,6 +90,7 @@ func TestMux_PostRules_UpsertsAndRedirects(t *testing.T) {
 		"mute_reason": {"renewing next sprint, ticket OPS-123"}, "mute_until": {"2027-01-15"}}
 	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleOperator))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusSeeOther {
@@ -119,6 +120,7 @@ func TestMux_PostRules_InvalidMuteUntilDoesNotEchoInput(t *testing.T) {
 		"mute_reason": {"r"}, "mute_until": {payload}}
 	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleOperator))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -138,6 +140,7 @@ func TestMux_PostRules_MuteWithoutReasonIsRejected(t *testing.T) {
 	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "muted": {"on"}}
 	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleOperator))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -157,6 +160,7 @@ func TestMux_PostRules_UnmutingClearsReasonAndUntil(t *testing.T) {
 	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "owner": {"joao"}}
 	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleOperator))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusSeeOther {
@@ -183,6 +187,7 @@ func TestMux_PostRules_WritesAuditEntry(t *testing.T) {
 	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "muted": {"on"}, "mute_reason": {"renewing"}}
 	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleOperator))
 	req = req.WithContext(session.WithActor(req.Context(), "alice@example.com"))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -216,6 +221,7 @@ func TestMux_PostRules_OwnerOnlyChangeDoesNotLogSpuriousUnmute(t *testing.T) {
 	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "owner": {"joao"}}
 	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleOperator))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusSeeOther {
@@ -251,6 +257,7 @@ func TestMux_PostRules_ExtendingAnActiveMuteIsLogged(t *testing.T) {
 		}
 		req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req = req.WithContext(session.WithRole(req.Context(), session.RoleOperator))
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		if rec.Code != http.StatusSeeOther {
@@ -335,6 +342,71 @@ func (f *fakeStore) ForgetAgent(ctx context.Context, agentID string) error {
 	return nil
 }
 
+// TestMux_PostRules_ViewerIsForbidden proves a viewer cannot mute or
+// re-own anything; RBAC gates this route at operator and above.
+func TestMux_PostRules_ViewerIsForbidden(t *testing.T) {
+	rs := &fakeRulesStore{}
+	mux := NewMux(&fakeStore{}, rs, nil)
+	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "owner": {"joao"}}
+	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleViewer))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("got %d, want 403", rec.Code)
+	}
+	if rs.upserted != (rules.Rule{}) {
+		t.Fatal("a forbidden request still upserted a rule")
+	}
+}
+
+// TestMux_ForgetAgent_OperatorIsForbidden proves forgetting an agent
+// needs the admin role: it is destructive (the agent's whole history
+// of checker health disappears), unlike muting or re-owning.
+func TestMux_ForgetAgent_OperatorIsForbidden(t *testing.T) {
+	st := &fakeStore{}
+	req := httptest.NewRequest("POST", "/agents/forget", strings.NewReader("agent_id=old-web"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleOperator))
+	rec := httptest.NewRecorder()
+	NewMux(st, &fakeRulesStore{}, nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("got %d, want 403", rec.Code)
+	}
+	if len(st.forgotten) != 0 {
+		t.Fatal("a forbidden request still forgot the agent")
+	}
+}
+
+// TestMux_ForgetAgent_WritesAuditEntry proves forgetting an agent is
+// recorded, since it is a destructive, admin-only action.
+func TestMux_ForgetAgent_WritesAuditEntry(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "radar.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	a := &audit.Store{DB: database, Now: time.Now}
+	st := &fakeStore{}
+	req := httptest.NewRequest("POST", "/agents/forget", strings.NewReader("agent_id=old-web"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleAdmin))
+	req = req.WithContext(session.WithActor(req.Context(), "admin"))
+	rec := httptest.NewRecorder()
+	NewMux(st, &fakeRulesStore{}, a).ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("got %d, want 303", rec.Code)
+	}
+	entries, err := a.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Actor != "admin" || entries[0].Action != "forget_agent" || entries[0].Target != "old-web" {
+		t.Fatalf("got entries %+v", entries)
+	}
+}
+
 // TestMux_ForgetAgent proves a decommissioned agent can be removed from
 // the dashboard, which stops its alerts.
 func TestMux_ForgetAgent(t *testing.T) {
@@ -342,6 +414,7 @@ func TestMux_ForgetAgent(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/agents/forget", strings.NewReader("agent_id=old-web"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleAdmin))
 	NewMux(st, &fakeRulesStore{}, nil).ServeHTTP(rec, req)
 	if rec.Code != http.StatusSeeOther || len(st.forgotten) != 1 || st.forgotten[0] != "old-web" {
 		t.Fatalf("code=%d forgotten=%v", rec.Code, st.forgotten)

@@ -12,6 +12,7 @@ import (
 
 type csrfKey struct{}
 type actorKey struct{}
+type roleKey struct{}
 
 // CSRFToken returns the CSRF token of the session that authenticated
 // the request, or "" for bearer-token requests.
@@ -34,6 +35,23 @@ func Actor(ctx context.Context) string {
 // Middleware.
 func WithActor(ctx context.Context, actor string) context.Context {
 	return context.WithValue(ctx, actorKey{}, actor)
+}
+
+// Role returns the role of the request that authenticated it: the
+// session's Role for a cookie-authenticated request, RoleAdmin for a
+// bearer-token request (admin_tokens predate RBAC and keep full
+// access), or "" when the request isn't authenticated at all (should
+// not happen past Middleware). For gating mutating routes.
+func Role(ctx context.Context) string {
+	v, _ := ctx.Value(roleKey{}).(string)
+	return v
+}
+
+// WithRole returns a context carrying role, as Middleware sets it.
+// Exported so handlers can be unit-tested without going through
+// Middleware.
+func WithRole(ctx context.Context, role string) context.Context {
+	return context.WithValue(ctx, roleKey{}, role)
 }
 
 func validBearer(r *http.Request, tokens []string) (present, ok bool) {
@@ -68,7 +86,9 @@ func Middleware(st *Store, adminTokens []string, next http.Handler) http.Handler
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, "admin-token")))
+			ctx := context.WithValue(r.Context(), actorKey{}, "admin-token")
+			ctx = context.WithValue(ctx, roleKey{}, RoleAdmin)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 
@@ -89,6 +109,7 @@ func Middleware(st *Store, adminTokens []string, next http.Handler) http.Handler
 				}
 				ctx := context.WithValue(r.Context(), csrfKey{}, sess.CSRFToken)
 				ctx = context.WithValue(ctx, actorKey{}, sess.Actor)
+				ctx = context.WithValue(ctx, roleKey{}, sess.Role)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}

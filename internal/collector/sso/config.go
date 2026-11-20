@@ -18,6 +18,19 @@ type ProviderConfig struct {
 	AllowedEmails    []string `json:"allowed_emails"` // verified emails only
 	AllowedGroups    []string `json:"allowed_groups"` // "groups" claim (Entra object IDs)
 	AllowedRoles     []string `json:"allowed_roles"`  // "roles" claim (Entra app roles)
+
+	// RBAC (see RoleFor): a user who passes Authorize above (the
+	// login gate) is then assigned a role by matching these against
+	// the "groups"/"roles" claims. When none of the four are set for
+	// this provider, every authorized user keeps today's behavior —
+	// full admin access — so adding RBAC to one provider never
+	// silently restricts another. AdminGroups/AdminRoles are checked
+	// before OperatorGroups/OperatorRoles; a user matching neither
+	// falls through to a read-only viewer role.
+	AdminGroups    []string `json:"admin_groups"`
+	AdminRoles     []string `json:"admin_roles"`
+	OperatorGroups []string `json:"operator_groups"`
+	OperatorRoles  []string `json:"operator_roles"`
 }
 
 var nameRe = regexp.MustCompile(`^[a-z0-9-]+$`)

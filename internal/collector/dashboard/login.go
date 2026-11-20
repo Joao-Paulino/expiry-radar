@@ -103,7 +103,7 @@ func LoginHandlers(auth *admin.Authenticator, sessions *session.Store, a *audit.
 				log.Printf("dashboard: dropping the previous session failed: %s", logging.Sanitize(err.Error()))
 			}
 		}
-		id, _, err := sessions.Create(ctx, "admin")
+		id, _, err := sessions.Create(ctx, "admin", session.RoleAdmin)
 		if err != nil {
 			log.Printf("dashboard: session create error: %s", logging.Sanitize(err.Error()))
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -134,6 +134,10 @@ func LoginHandlers(auth *admin.Authenticator, sessions *session.Store, a *audit.
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	})
 	revokeAll = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !session.RoleAtLeast(session.Role(r.Context()), session.RoleAdmin) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		if err := sessions.DeleteAll(r.Context()); err != nil {
 			log.Printf("dashboard: revoke-all error: %s", logging.Sanitize(err.Error()))
 			http.Error(w, "internal error", http.StatusInternalServerError)
