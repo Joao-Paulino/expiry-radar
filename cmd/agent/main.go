@@ -22,6 +22,7 @@ import (
 	tlschecker "github.com/Joao-Paulino/expiry-radar/internal/checker/tls"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vault"
 	"github.com/Joao-Paulino/expiry-radar/internal/checker/vmware"
+	"github.com/Joao-Paulino/expiry-radar/internal/configperm"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 	"github.com/Joao-Paulino/expiry-radar/internal/service"
 	"log"
@@ -74,6 +75,9 @@ type Config struct {
 
 // loadConfig reads and decodes the JSON config file at path.
 func loadConfig(path string) (Config, error) {
+	if err := configperm.Check(path); err != nil {
+		return Config{}, err
+	}
 	data, err := os.ReadFile(path) // #nosec G304 -- path comes from the operator's own configuration, not from remote input
 	if err != nil {
 		return Config{}, err
