@@ -105,6 +105,38 @@ func TestEngine_Evaluate_ExpiredMuteNoLongerMarkedMuted(t *testing.T) {
 	}
 }
 
+// TestEngine_Evaluate_SetsOwnerFromRule proves a notification carries
+// the record's owner (when a rule sets one), so delivery can route it
+// to that owner's own channel instead of the global ones.
+func TestEngine_Evaluate_SetsOwnerFromRule(t *testing.T) {
+	st := &fakeStore{current: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "a", Name: "b", Kind: "certificate", ExpiresAt: time.Now().Add(1 * time.Hour)}}}}
+	rs := &fakeRulesStore{rule: rules.Rule{Source: "a", Name: "b", Kind: "certificate", Owner: "equipa-infra"}, found: true}
+	e := &Engine{Store: st, Rules: rs, Thresholds: DefaultThresholds()}
+	notifications, err := e.Evaluate(context.Background(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 1 || notifications[0].Owner != "equipa-infra" {
+		t.Fatalf("got %+v, want Owner=equipa-infra", notifications)
+	}
+}
+
+// TestEngine_Evaluate_NoRuleMeansNoOwner proves a record with no rule
+// at all (never muted or re-owned) gets an empty Owner, so it falls
+// back to the global channels rather than erroring.
+func TestEngine_Evaluate_NoRuleMeansNoOwner(t *testing.T) {
+	st := &fakeStore{current: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "a", Name: "b", Kind: "certificate", ExpiresAt: time.Now().Add(1 * time.Hour)}}}}
+	rs := &fakeRulesStore{}
+	e := &Engine{Store: st, Rules: rs, Thresholds: DefaultThresholds()}
+	notifications, err := e.Evaluate(context.Background(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 1 || notifications[0].Owner != "" {
+		t.Fatalf("got %+v, want empty Owner", notifications)
+	}
+}
+
 func healthOnly(ns []Notification) map[string]Notification {
 	m := map[string]Notification{}
 	for _, n := range ns {

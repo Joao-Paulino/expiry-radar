@@ -67,6 +67,11 @@ type Config struct {
 	SlackWebhookURL string                `json:"slack_webhook_url"`
 	TeamsWebhookURL string                `json:"teams_webhook_url"`
 	Email           notifiers.EmailConfig `json:"email"`
+	// OwnerRoutes sends a record's expiry alert to its own owner's
+	// channels instead of the global ones above, when the record's
+	// rules.Rule.Owner matches a route's Owner. An owner with no
+	// matching route still falls back to the global channels.
+	OwnerRoutes []OwnerRoute `json:"owner_routes"`
 	// Theme is the dashboard's default colour scheme: "auto" (follow
 	// the OS, the default), "dark" or "light"; each browser may override it.
 	Theme       string `json:"theme"`
@@ -78,6 +83,18 @@ type Config struct {
 	Ready chan<- string `json:"-"`
 	// Done, if non-nil, signals Run to stop serving and return.
 	Done <-chan struct{} `json:"-"`
+}
+
+// OwnerRoute sends TypeExpiry alerts for a record whose rules.Rule.Owner
+// matches Owner to these channels instead of the global ones, and only
+// to these — never also to the global channels, so a routed owner's
+// items never duplicate into the general one.
+type OwnerRoute struct {
+	Owner           string                `json:"owner"`
+	WebhookURL      string                `json:"webhook_url"`
+	SlackWebhookURL string                `json:"slack_webhook_url"`
+	TeamsWebhookURL string                `json:"teams_webhook_url"`
+	Email           notifiers.EmailConfig `json:"email"`
 }
 
 // EffectiveAlertInterval returns AlertInterval when it's set directly
@@ -197,31 +214,83 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
+	seenOwners := map[string]bool{}
+	for _, r := range c.OwnerRoutes {
+		if r.Owner == "" {
+			return fmt.Errorf("server: every owner_routes entry needs an owner")
+		}
+		if seenOwners[r.Owner] {
+			return fmt.Errorf("server: owner %q is listed twice in owner_routes", r.Owner)
+		}
+		seenOwners[r.Owner] = true
+		if r.WebhookURL == "" && r.SlackWebhookURL == "" && r.TeamsWebhookURL == "" && r.Email.SMTPHost == "" {
+			return fmt.Errorf("server: owner_routes entry %q needs at least one channel (webhook_url, slack_webhook_url, teams_webhook_url or email)", r.Owner)
+		}
+		if r.Email.SMTPHost != "" {
+			if err := r.Email.Validate(); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
-func buildNotifiers(cfg Config) []notifiers.Notifier {
+// channels is the set of notification channels one config block (the
+// global one, or one OwnerRoute) can configure.
+type channels struct {
+	WebhookURL      string
+	SlackWebhookURL string
+	TeamsWebhookURL string
+	Email           notifiers.EmailConfig
+}
+
+func buildNotifiersFrom(c channels) []notifiers.Notifier {
 	var ns []notifiers.Notifier
-	if cfg.WebhookURL != "" {
-		ns = append(ns, notifiers.NewWebhook(cfg.WebhookURL))
+	if c.WebhookURL != "" {
+		ns = append(ns, notifiers.NewWebhook(c.WebhookURL))
 	}
-	if cfg.SlackWebhookURL != "" {
-		ns = append(ns, notifiers.NewSlack(cfg.SlackWebhookURL))
+	if c.SlackWebhookURL != "" {
+		ns = append(ns, notifiers.NewSlack(c.SlackWebhookURL))
 	}
-	if cfg.TeamsWebhookURL != "" {
-		ns = append(ns, notifiers.NewTeams(cfg.TeamsWebhookURL))
+	if c.TeamsWebhookURL != "" {
+		ns = append(ns, notifiers.NewTeams(c.TeamsWebhookURL))
 	}
-	if cfg.Email.SMTPHost != "" {
-		ns = append(ns, notifiers.NewEmail(cfg.Email))
+	if c.Email.SMTPHost != "" {
+		ns = append(ns, notifiers.NewEmail(c.Email))
 	}
 	return ns
+}
+
+func buildNotifiers(cfg Config) []notifiers.Notifier {
+	return buildNotifiersFrom(channels{WebhookURL: cfg.WebhookURL, SlackWebhookURL: cfg.SlackWebhookURL,
+		TeamsWebhookURL: cfg.TeamsWebhookURL, Email: cfg.Email})
+}
+
+// buildOwnerRoutes returns each configured OwnerRoute's own channels,
+// keyed by owner, for deliver to pick over the global channels.
+func buildOwnerRoutes(routes []OwnerRoute) map[string][]notifiers.Notifier {
+	if len(routes) == 0 {
+		return nil
+	}
+	out := make(map[string][]notifiers.Notifier, len(routes))
+	for _, r := range routes {
+		out[r.Owner] = buildNotifiersFrom(channels{WebhookURL: r.WebhookURL, SlackWebhookURL: r.SlackWebhookURL,
+			TeamsWebhookURL: r.TeamsWebhookURL, Email: r.Email})
+	}
+	return out
 }
 
 // deliver runs one alert cycle: evaluate everything, then send only
 // what StateStore says is new, changed, resolved or due a reminder.
 // Muted subjects send nothing and are forgotten, so unmuting a
 // still-failing record alerts again.
-func deliver(ctx context.Context, engine *alert.Engine, state *alert.StateStore, ns []notifiers.Notifier, now time.Time) {
+// deliver sends each due notification through ns, the global
+// channels, except when the notification has an Owner that matches a
+// key in routes: that owner's own channels are used instead of ns, so
+// a routed owner's items never also duplicate into the global
+// channel. An owner with no matching route (or no owner at all) still
+// falls back to ns.
+func deliver(ctx context.Context, engine *alert.Engine, state *alert.StateStore, ns []notifiers.Notifier, routes map[string][]notifiers.Notifier, now time.Time) {
 	notifications, err := engine.Evaluate(ctx, now)
 	if err != nil {
 		log.Printf("collector: alert evaluate error: %s", logging.Sanitize(err.Error()))
@@ -249,13 +318,19 @@ func deliver(ctx context.Context, engine *alert.Engine, state *alert.StateStore,
 			continue
 		}
 		n.Resolved = resolved
-		errs := notifiers.SendAll(ctx, ns, n)
+		targets := ns
+		if n.Owner != "" {
+			if r, ok := routes[n.Owner]; ok {
+				targets = r
+			}
+		}
+		errs := notifiers.SendAll(ctx, targets, n)
 		for _, sendErr := range errs {
 			log.Printf("collector: notify error: %s", logging.Sanitize(sendErr.Error()))
 		}
 		// Remember it only if at least one channel delivered it (or none
 		// is configured); otherwise retry next cycle.
-		if len(ns) == 0 || len(errs) < len(ns) {
+		if len(targets) == 0 || len(errs) < len(targets) {
 			if err := state.Commit(ctx, key, n.Severity, now); err != nil {
 				log.Printf("collector: alert state error: %s", logging.Sanitize(err.Error()))
 			}
@@ -297,14 +372,14 @@ func goneResolutions(ctx context.Context, engine *alert.Engine, state *alert.Sta
 	return out
 }
 
-func runAlertLoop(engine *alert.Engine, state *alert.StateStore, ns []notifiers.Notifier, interval time.Duration, done <-chan struct{}) {
+func runAlertLoop(engine *alert.Engine, state *alert.StateStore, ns []notifiers.Notifier, routes map[string][]notifiers.Notifier, interval time.Duration, done <-chan struct{}) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			deliver(context.Background(), engine, state, ns, time.Now())
+			deliver(context.Background(), engine, state, ns, routes, time.Now())
 		case <-done:
 			return
 		}
@@ -414,11 +489,12 @@ func Run(cfg Config) error {
 			FailThreshold: cfg.checkerFailThreshold(), StaleAfter: cfg.agentStaleAfter()}
 		state := &alert.StateStore{DB: database, ReminderCritical: cfg.reminderCritical(), ReminderWarning: cfg.reminderWarning()}
 		ns := buildNotifiers(cfg)
+		routes := buildOwnerRoutes(cfg.OwnerRoutes)
 		done := cfg.Done
 		if done == nil {
 			done = make(chan struct{})
 		}
-		go runAlertLoop(engine, state, ns, interval, done)
+		go runAlertLoop(engine, state, ns, routes, interval, done)
 	}
 
 	cleanupDone := cfg.Done

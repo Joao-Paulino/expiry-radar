@@ -48,7 +48,7 @@ func TestDeliver_SendsOnceThenStaysQuiet(t *testing.T) {
 	n := &countingNotifier{}
 
 	for i := 0; i < 3; i++ {
-		deliver(ctx, engine, state, []notifiers.Notifier{n}, now.Add(time.Duration(i)*time.Hour))
+		deliver(ctx, engine, state, []notifiers.Notifier{n}, nil, now.Add(time.Duration(i)*time.Hour))
 	}
 	if len(n.sent) != 1 || n.sent[0].Severity != alert.SeverityCritical {
 		t.Fatalf("want exactly 1 critical alert over 3 cycles, got %+v", n.sent)
@@ -56,7 +56,7 @@ func TestDeliver_SendsOnceThenStaysQuiet(t *testing.T) {
 
 	rec.ExpiresAt = now.Add(300 * 24 * time.Hour) // renewed
 	st.SaveRecords(ctx, "web-01", []checker.ExpiryRecord{rec}, now.Add(4*time.Hour))
-	deliver(ctx, engine, state, []notifiers.Notifier{n}, now.Add(4*time.Hour))
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, nil, now.Add(4*time.Hour))
 	if len(n.sent) != 2 || !n.sent[1].Resolved {
 		t.Fatalf("want a resolved message after renewal, got %+v", n.sent)
 	}
@@ -64,9 +64,65 @@ func TestDeliver_SendsOnceThenStaysQuiet(t *testing.T) {
 	rec.ExpiresAt = now.Add(24 * time.Hour)
 	st.SaveRecords(ctx, "web-01", []checker.ExpiryRecord{rec}, now.Add(5*time.Hour))
 	rs.Upsert(ctx, rules.Rule{Source: "a:443", Name: "a", Kind: "certificate", Muted: true})
-	deliver(ctx, engine, state, []notifiers.Notifier{n}, now.Add(5*time.Hour))
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, nil, now.Add(5*time.Hour))
 	if len(n.sent) != 2 {
 		t.Fatalf("muted record alerted: %+v", n.sent[2:])
+	}
+}
+
+// TestDeliver_RoutesToOwnerChannelOnly proves a record with an owner
+// that has its own route goes only to that owner's notifier, never to
+// the global one — avoiding duplicate noise in the general channel.
+func TestDeliver_RoutesToOwnerChannelOnly(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(filepath.Join(t.TempDir(), "radar.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	st, rs := store.NewSQLite(database), rules.NewSQLite(database)
+	now := time.Now()
+	st.SaveRecords(ctx, "web-01", []checker.ExpiryRecord{{Source: "a:443", Name: "a", Kind: "certificate", ExpiresAt: now.Add(2 * 24 * time.Hour)}}, now)
+	rs.Upsert(ctx, rules.Rule{Source: "a:443", Name: "a", Kind: "certificate", Owner: "equipa-infra"})
+	engine := &alert.Engine{Store: st, Rules: rs, Thresholds: alert.DefaultThresholds()}
+	state := &alert.StateStore{DB: database, ReminderCritical: 24 * time.Hour}
+
+	global := &countingNotifier{}
+	owner := &countingNotifier{}
+	routes := map[string][]notifiers.Notifier{"equipa-infra": {owner}}
+	deliver(ctx, engine, state, []notifiers.Notifier{global}, routes, now)
+
+	if len(owner.sent) != 1 {
+		t.Fatalf("owner channel got %d notifications, want 1", len(owner.sent))
+	}
+	if len(global.sent) != 0 {
+		t.Fatalf("global channel got %d notifications, want 0 (should go only to the owner's own channel)", len(global.sent))
+	}
+}
+
+// TestDeliver_FallsBackToGlobalWhenOwnerHasNoRoute proves an item with
+// no owner, or an owner without a configured route, still alerts
+// through the global channels instead of being silently dropped.
+func TestDeliver_FallsBackToGlobalWhenOwnerHasNoRoute(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(filepath.Join(t.TempDir(), "radar.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	st, rs := store.NewSQLite(database), rules.NewSQLite(database)
+	now := time.Now()
+	st.SaveRecords(ctx, "web-01", []checker.ExpiryRecord{{Source: "a:443", Name: "a", Kind: "certificate", ExpiresAt: now.Add(2 * 24 * time.Hour)}}, now)
+	rs.Upsert(ctx, rules.Rule{Source: "a:443", Name: "a", Kind: "certificate", Owner: "equipa-sem-rota"})
+	engine := &alert.Engine{Store: st, Rules: rs, Thresholds: alert.DefaultThresholds()}
+	state := &alert.StateStore{DB: database, ReminderCritical: 24 * time.Hour}
+
+	global := &countingNotifier{}
+	routes := map[string][]notifiers.Notifier{"equipa-infra": {&countingNotifier{}}}
+	deliver(ctx, engine, state, []notifiers.Notifier{global}, routes, now)
+
+	if len(global.sent) != 1 {
+		t.Fatalf("global channel got %d notifications, want 1 (fallback for an owner with no route)", len(global.sent))
 	}
 }
 
@@ -107,9 +163,9 @@ func TestDeliver_FailedDeliveryIsRetried(t *testing.T) {
 	state := &alert.StateStore{DB: database, ReminderCritical: 24 * time.Hour}
 
 	broken := &failingNotifier{fail: true}
-	deliver(ctx, engine, state, []notifiers.Notifier{broken}, now)
+	deliver(ctx, engine, state, []notifiers.Notifier{broken}, nil, now)
 	ok := &countingNotifier{}
-	deliver(ctx, engine, state, []notifiers.Notifier{ok}, now.Add(time.Hour))
+	deliver(ctx, engine, state, []notifiers.Notifier{ok}, nil, now.Add(time.Hour))
 	if len(ok.sent) != 1 || ok.sent[0].Severity != alert.SeverityWarning {
 		t.Fatalf("warning lost after a failed delivery: %+v", ok.sent)
 	}
@@ -133,12 +189,12 @@ func TestDeliver_GoneItemResolvesItsAlert(t *testing.T) {
 	engine := &alert.Engine{Store: st, Rules: rs, Thresholds: alert.DefaultThresholds()}
 	state := &alert.StateStore{DB: database, ReminderCritical: 24 * time.Hour}
 	n := &countingNotifier{}
-	deliver(ctx, engine, state, []notifiers.Notifier{n}, now)
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, nil, now)
 
 	st.SaveResult(ctx, "agent-1", "azure", nil, now.Add(time.Minute), true) // rotated away
 	st.SaveResult(ctx, "agent-1", "azure", nil, now.Add(2*time.Minute), true)
-	deliver(ctx, engine, state, []notifiers.Notifier{n}, now.Add(time.Hour))
-	deliver(ctx, engine, state, []notifiers.Notifier{n}, now.Add(2*time.Hour))
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, nil, now.Add(time.Hour))
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, nil, now.Add(2*time.Hour))
 	if len(n.sent) != 2 || !n.sent[1].Resolved || !n.sent[1].Gone || n.sent[1].Record.Name != old.Name || n.sent[1].Record.Source != old.Source {
 		t.Fatalf("want alert + one resolution for the gone item, got %+v", n.sent)
 	}
@@ -159,11 +215,11 @@ func TestDeliver_GoneMutedItemIsSilent(t *testing.T) {
 	engine := &alert.Engine{Store: st, Rules: rs, Thresholds: alert.DefaultThresholds()}
 	state := &alert.StateStore{DB: database}
 	n := &countingNotifier{}
-	deliver(ctx, engine, state, []notifiers.Notifier{n}, now)
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, nil, now)
 	rs.Upsert(ctx, rules.Rule{Source: "s", Name: "n", Kind: "secret", Muted: true})
 	st.SaveResult(ctx, "agent-1", "vault", nil, now.Add(time.Minute), true)
 	st.SaveResult(ctx, "agent-1", "vault", nil, now.Add(2*time.Minute), true)
-	deliver(ctx, engine, state, []notifiers.Notifier{n}, now.Add(time.Hour))
+	deliver(ctx, engine, state, []notifiers.Notifier{n}, nil, now.Add(time.Hour))
 	if len(n.sent) != 1 {
 		t.Fatalf("muted gone item notified: %+v", n.sent)
 	}

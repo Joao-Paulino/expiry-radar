@@ -90,6 +90,10 @@ type Notification struct {
 	Detail   string // last checker error, for TypeCheckerFailed
 	Severity Severity
 	Muted    bool
+	// Owner is the record's rules.Rule.Owner, for TypeExpiry only, so
+	// delivery can route it to that owner's own channel instead of
+	// the global ones. Empty when no rule or no owner is set.
+	Owner string
 	Resolved bool // set by the sender when this reports a return to OK
 	// Gone: the item is no longer reported (deleted, renamed, rotated
 	// away). Its ExpiresAt is unknown (zero).
@@ -152,6 +156,7 @@ func (e *Engine) Evaluate(ctx context.Context, now time.Time) ([]Notification, e
 			Record:   record,
 			Severity: sev,
 			Muted:    found && rule.ActiveMute(now),
+			Owner:    rule.Owner,
 		})
 	}
 

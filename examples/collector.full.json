@@ -30,6 +30,10 @@
     "from": "Expiry Radar <alerts@example.com>",
     "to": "secops@example.com"
   },
+  "owner_routes": [
+    { "owner": "equipa-infra", "slack_webhook_url": "https://hooks.slack.com/services/EXAMPLE/EXAMPLE/INFRA" },
+    { "owner": "equipa-apps", "teams_webhook_url": "https://example.webhook.office.com/webhookb2/11111111-1111-1111-1111-111111111111" }
+  ],
 
   "sso_session_hours": 8,
   "oidc_providers": [
