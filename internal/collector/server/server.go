@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -17,8 +18,9 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/auth"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/alert"
-	"github.com/Joao-Paulino/expiry-radar/internal/collector/audit"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/alert/notifiers"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/audit"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/certwatch"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/dashboard"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/db"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/ingest"
@@ -77,12 +79,26 @@ type Config struct {
 	Theme       string `json:"theme"`
 	TLSCertFile string `json:"tls_cert_file"`
 	TLSKeyFile  string `json:"tls_key_file"`
+	// CertReloadInterval controls how often the collector checks
+	// TLSCertFile/TLSKeyFile for a certificate renewed on disk (for
+	// example by certbot after a Let's Encrypt DNS-01 renewal) and
+	// reloads it without restarting. Not configurable from the JSON
+	// config file (operators should not need to tune it); exported so
+	// tests can speed it up. Zero means the default, one minute.
+	CertReloadInterval time.Duration `json:"-"`
 
 	// Ready, if non-nil, receives the actual bound address once the
 	// listener starts, letting tests use ListenAddr "host:0".
 	Ready chan<- string `json:"-"`
 	// Done, if non-nil, signals Run to stop serving and return.
 	Done <-chan struct{} `json:"-"`
+}
+
+func (c Config) certReloadInterval() time.Duration {
+	if c.CertReloadInterval > 0 {
+		return c.CertReloadInterval
+	}
+	return time.Minute
 }
 
 // OwnerRoute sends TypeExpiry alerts for a record whose rules.Rule.Owner
@@ -503,6 +519,16 @@ func Run(cfg Config) error {
 	}
 	go runSessionCleanup(sessions, ssoHandlers.Flows, 10*time.Minute, cleanupDone)
 
+	certs, err := certwatch.New(cfg.TLSCertFile, cfg.TLSKeyFile)
+	if err != nil {
+		return err
+	}
+	reloadDone := cfg.Done
+	if reloadDone == nil {
+		reloadDone = make(chan struct{})
+	}
+	go certs.Watch(cfg.certReloadInterval(), reloadDone, log.Printf)
+
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
 		return err
@@ -513,6 +539,7 @@ func Run(cfg Config) error {
 	}
 
 	srv := NewHTTPServer(securityHeaders(mux))
+	srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: certs.GetCertificate}
 
 	if cfg.Done != nil {
 		go func() {
@@ -521,7 +548,10 @@ func Run(cfg Config) error {
 		}()
 	}
 
-	err = srv.ServeTLS(listener, cfg.TLSCertFile, cfg.TLSKeyFile)
+	// certFile/keyFile are left empty: srv.TLSConfig.GetCertificate
+	// (certs, above) supplies the certificate, so it can be reloaded
+	// without restarting.
+	err = srv.ServeTLS(listener, "", "")
 	if err != nil && err != http.ErrServerClosed {
 		return err
 	}

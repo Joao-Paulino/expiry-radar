@@ -71,6 +71,7 @@ internal/
   auth/             bearer-token middleware for /ingest
   collector/
     server/         wiring: config validation, routes, TLS server, background loops
+    certwatch/      reloads the collector's own TLS cert/key from disk on renewal, no restart, no exec
     ingest/         POST /ingest: validate and store a batch
     store/          SQLite persistence; "what is current" logic
     db/             schema migrations
@@ -266,7 +267,7 @@ flowchart TB
 
 - **Platforms.** Linux amd64 and arm64, Windows amd64, and container images for both binaries (`ghcr.io/joao-paulino/expiry-radar-{agent,collector}`).
 - **Services.** On Windows, `install-service` registers a native service with automatic start, restart on failure, Event Log output and `LocalService` by default. On Linux, a hardened systemd unit runs as a dedicated user (`NoNewPrivileges`, `ProtectSystem=strict`). Both installers verify downloads against `SHA256SUMS`.
-- **Certificates.** `collector gen-cert` creates a self-signed ECDSA P-256 certificate without OpenSSL. A CA-issued certificate can be used instead.
+- **Certificates.** `collector gen-cert` creates a self-signed ECDSA P-256 certificate without OpenSSL. A CA-issued certificate (Let's Encrypt, an internal PKI) can be used instead. Either way, `internal/collector/certwatch` watches `tls_cert_file`/`tls_key_file`'s modification time (checked every minute) and reloads the certificate in memory on change, so a renewal — a cron job or certbot's own timer running outside the collector — never needs a restart. The collector only ever reads those two files: it never executes a script, calls a DNS provider or holds a DNS credential, so M14's TLS automation adds no new attack surface to the process. A bad new pair (for example a renewal that wrote a fresh cert before its key) is rejected and the previous, still-valid certificate keeps being served.
 - **Backups.** Back up `radar.db` (with the collector stopped, or with `sqlite3 .backup`) and the config files. Reinstalling with the installers moves the old folder aside instead of deleting it.
 
 ## 9. Build, test and release
