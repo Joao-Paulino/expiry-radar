@@ -39,6 +39,7 @@ for image in rockylinux:9 debian:12 archlinux:latest; do
  "token":"$AGENT_TOKEN","agent_id":"$id","queue_path":"/tmp/queue.jsonl","interval_seconds":3600,
  "tls_targets":[{"host":"127.0.0.1","port":8443},{"host":"localhost","port":1025,"start_tls":"smtp"}]}
 JSON
+  chmod 600 "$W/$id.json"
   echo "== $image"
   docker run --rm --network host -v "$W:/w:ro" "$image" sh -c \
     "cat /etc/os-release | head -2 && /w/agent version && (timeout 20 /w/agent /w/$id.json; true)"
