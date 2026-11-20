@@ -78,9 +78,10 @@ internal/
       notifiers/    email (SMTP), Slack, Teams
     rules/          per-item mute and owner
     dashboard/      HTML pages, embedded CSS/JS, CSV/JSON export
-    session/        dashboard sessions, CSRF tokens
+    session/        dashboard sessions, CSRF tokens, role (admin/operator/viewer)
     admin/          administrator account: password hash, TOTP, recovery codes, lockout
-    sso/            OpenID Connect login (authorization code + PKCE)
+    audit/          audit log: who did what, when, old/new value and reason
+    sso/            OpenID Connect login (authorization code + PKCE); role mapping from groups/roles to admin/operator/viewer
     export/         CSV and JSON export
   service/          Windows service integration (SCM, Event Log); console fallback
   logging/          log sanitising (strips control characters and secrets)
@@ -161,8 +162,9 @@ SQLite, using the pure-Go driver (no CGO), in one file (`db_path`). Main tables:
 | `agent_checker_health` | per agent and checker: last seen, last success, consecutive failures, last error |
 | `agents` | last time each agent pushed |
 | `alert_state` | what was alerted, at which severity, to deduplicate |
-| `rules` | per item: muted, owner |
-| `admin_account`, `admin_recovery_codes`, `admin_sessions`, `sso_flows` | dashboard authentication |
+| `rules` | per item: muted, owner, mute reason, mute expiry |
+| `admin_account`, `admin_recovery_codes`, `admin_sessions`, `sso_flows` | dashboard authentication; `admin_sessions` also carries the session's actor and role (admin/operator/viewer) |
+| `audit_log` | who did what, when: logins, mutes/unmutes/re-owns and destructive admin actions (forget an agent, sign out all sessions), with old/new value and reason |
 
 Schema changes are forward migrations in `internal/collector/db`, applied at start-up.
 
@@ -184,7 +186,10 @@ flowchart LR
     LC --> EV["Evaluate:<br/>warning ≤ 30 d<br/>critical ≤ 7 d"]
     EV --> RU{"muted?<br/>informational?"}
     RU -- no --> DD{"already sent<br/>at this severity?"}
-    DD -- no --> NT["Notifiers:<br/>email, Slack, Teams"]
+    DD -- no --> OW{"item owner has a<br/>matching owner_route?"}
+    OW -- yes --> NTO["Notifiers:<br/>that owner's channels only"]
+    OW -- no --> NT["Notifiers:<br/>global email, Slack, Teams"]
+    NTO --> AS["alert_state"]
     NT --> AS["alert_state"]
     H["checker health"] --> F["failing checker / silent agent alerts"]
     F --> NT
@@ -193,10 +198,23 @@ flowchart LR
 - An alert is sent once per item per severity. Escalating from warning to critical sends again, and a renewal resets the state.
 - Failing checkers and agents that stop reporting raise their own alerts, because a silent agent means no expiry alerts for everything it watched.
 - Notifier messages are sanitised: no header injection in email, no markup injection in chat.
+- **Owner routing.** An item's `owner` (set from the dashboard's mute/re-own form) is carried on its `alert.Notification`. If `owner_routes` has a matching entry, delivery goes **only** to that owner's own channels (never also to the global ones, to avoid duplicate noise). An owner with no matching route still falls back to the global channels, so nothing is silently dropped.
 
 ### Dashboard
 
-Server-rendered `html/template` pages, with the CSS and a small vanilla JavaScript file embedded in the binary and served from `/static/`. There is no framework and no CDN, so the dashboard works on isolated networks and without JavaScript. Features: summary cards, filters, sorting, per-item mute and owner, history, agent and checker health, CSV/JSON export, and dark, light or auto themes.
+Server-rendered `html/template` pages, with the CSS and a small vanilla JavaScript file embedded in the binary and served from `/static/`. There is no framework and no CDN, so the dashboard works on isolated networks and without JavaScript. Features: summary cards, filters, sorting, per-item mute (with a mandatory reason and optional expiry) and owner, history, agent and checker health, CSV/JSON export, and dark, light or auto themes. Every mute, unmute, re-own and destructive admin action is written to `audit_log` with the actor, old/new value and reason.
+
+### Roles (RBAC)
+
+Three roles — `admin`, `operator`, `viewer` — rank `admin > operator > viewer`; an empty or unknown role satisfies nothing (fails closed). `session.RoleAtLeast(role, min)` is the single gating primitive, checked both in dashboard handlers and before destructive admin actions:
+
+| Role | May do |
+|---|---|
+| `viewer` | Read-only: dashboard, history, export. |
+| `operator` | Everything a viewer can, plus mute/unmute and re-own (`POST /rules`). |
+| `admin` | Everything an operator can, plus forgetting an agent and signing out every session — both are destructive (they end or erase more than the caller's own access) and admin-only, and both are audit-logged. |
+
+Who may log in (`allowed_groups`/`allowed_roles`/`allowed_emails`) and what an already-authorized person may do (`admin_groups`/`operator_groups`/`admin_roles`/`operator_roles`, mapped by `sso.RoleFor`) are independent checks: the login gate always runs first, so being in an admin group never bypasses it. A provider with none of the role keys set keeps the pre-RBAC behavior (every authorized user is admin); setting them on one provider never affects another. The local Administrator account and `admin_tokens` bearer requests are always admin. Upgrading never drops a session or any configuration: a session created before the `role` column existed reads back `''` (added via an additive `ALTER TABLE`, never a destructive migration) and fails closed on gated routes until that browser logs in again, within its normal lifetime (at most 8h) — a safety re-login, not data loss.
 
 ## 7. Security model
 
@@ -212,6 +230,7 @@ flowchart TB
         d["Password (PBKDF2-SHA256, 600k iterations)<br/>+ TOTP or recovery code"] --> e["Session cookie: Secure, HttpOnly,<br/>SameSite=Strict; 30 min idle, 8 h absolute"]
         d2["or OIDC SSO: code + PKCE, nonce,<br/>verified email / group / role allow-list"] --> e
         e --> f["CSRF token on every POST"]
+        f --> rb["RBAC: role on the session,<br/>checked per route (viewer/operator/admin)"]
     end
     subgraph TB3["Boundary 3: agent → checked systems"]
         g["Read-only, keyless credentials,<br/>no redirects, origin-checked pagination"]
@@ -227,6 +246,8 @@ flowchart TB
 | Session theft or CSRF | Strict cookie flags, short lifetimes, CSRF tokens, "sign out all sessions" button. |
 | XSS or clickjacking | Contextual escaping by `html/template`; CSP `default-src 'self'` with no inline scripts or styles; `frame-ancestors 'none'`; HSTS. |
 | SSO misuse | Only allow-listed verified emails, groups or app roles; issuer must be HTTPS; flows are bound to the browser. |
+| Over-privileged session | RBAC: destructive actions (forget an agent, sign out every session) are admin-only; mutating actions (mute/re-own) need operator or higher; an unknown or pre-RBAC role satisfies nothing, so it fails closed rather than defaulting to admin. |
+| Alert routed to the wrong channel | `owner_routes` only ever adds a destination for a matching `owner`; an item with no owner, or an owner with no route, always still reaches the global channels — a misconfigured route narrows delivery, it never silences an alert. |
 | Secrets in logs | `logging.Sanitize` redacts PEM blocks and `password=`/`token=`-style pairs and escapes control characters; config secrets are read from files (`*_file`), never from the command line. |
 | Oversized pushes | `/ingest` reads at most 16 MiB per batch (413 beyond that). |
 | Vulnerable dependencies | `govulncheck` in CI, a release gate on every binary, and a weekly audit that opens an issue. |

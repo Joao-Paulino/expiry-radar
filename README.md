@@ -1061,7 +1061,7 @@ Full vision / Visão completa: [design spec §4](docs/superpowers/specs/2026-11-
 | ✅ | **M8** | Cloud IoT: AWS IoT Core device certificates and registered CAs; Azure IoT Hub and DPS X.509 CA certificates | IoT na cloud: certificados de dispositivo e CAs registadas no AWS IoT Core; certificados CA X.509 do Azure IoT Hub e DPS |
 | ✅ | **M9** | SCADA and industrial software licences: FlexLM license-file expiry checking | Licenças de SCADA e software industrial: verificação de expiração de ficheiros de licença FlexLM |
 | ✅ | **M10** | End of support and firmware for OT/IoT devices, from an inventory file: vendor end-of-life and end-of-security-updates dates per device model and firmware version | Fim de suporte e firmware de equipamentos OT/IoT, a partir de um ficheiro de inventário: datas de fim de vida e de fim de atualizações de segurança por modelo e versão de firmware |
-| 🟡 | **M11** | Teams: roles mapped to IdP groups (viewer, operator, admin); audit log of every change (who muted, re-owned or forgot what, when and why); alerts routed by owner to each team's channel; mute with an expiry date and a mandatory reason (e.g. change ticket) — **done:** session identity and an audit log that records every login | Equipas: papéis mapeados aos grupos do IdP (viewer, operator, admin); registo de auditoria de cada alteração (quem silenciou, mudou o dono ou esqueceu o quê, quando e porquê); alertas encaminhados pelo dono para o canal de cada equipa; silêncio com data de fim e motivo obrigatório (ex.: ticket de mudança) — **concluído:** identidade de sessão e registo de auditoria de cada login |
+| ✅ | **M11** | Teams: roles mapped to IdP groups (viewer, operator, admin); audit log of every change (who muted, re-owned or forgot what, when and why); alerts routed by owner to each team's channel; mute with an expiry date and a mandatory reason (e.g. change ticket) | Equipas: papéis mapeados aos grupos do IdP (viewer, operator, admin); registo de auditoria de cada alteração (quem silenciou, mudou o dono ou esqueceu o quê, quando e porquê); alertas encaminhados pelo dono para o canal de cada equipa; silêncio com data de fim e motivo obrigatório (ex.: ticket de mudança) |
 | ⚪ | **M12** | Additional software licensing vendors, on request: CodeMeter, Sentinel RMS/HASP, SaaS subscriptions | Fabricantes de licenciamento adicionais, a pedido: CodeMeter, Sentinel RMS/HASP, subscrições SaaS |
 | ⚪ | **M13** | Read device model and firmware version directly from the equipment, where a safe read-only protocol allows it (vendor by vendor, on request) | Ler modelo e versão de firmware diretamente do equipamento, quando um protocolo seguro e só de leitura o permitir (fabricante a fabricante, a pedido) |
 | ⚪ | **M14** | Trusted TLS for the collector out of the box: Let's Encrypt via a DNS-01 challenge when a public domain is available (no public IP needed), or a self-issued internal CA otherwise, in both installers (`install-expiry-radar.sh` and `install-expiry-radar.ps1`) | TLS de confiança para o collector logo na instalação: Let's Encrypt via desafio DNS-01 quando há um domínio público (sem precisar de IP público), ou uma CA interna própria caso contrário, em ambos os instaladores (`install-expiry-radar.sh` e `install-expiry-radar.ps1`) |
@@ -1143,6 +1143,14 @@ Só leitura, nunca escreve nos equipamentos; o agente fica na zona OT ou na DMZ 
 - [x] Inventory checker: end of support, firmware support, contracts and domains from CSV/JSON files / Checker de inventário: fim de suporte, firmware, contratos e domínios a partir de ficheiros CSV/JSON
 - Reading model/firmware version directly from the device is tracked as M13 (vendor by vendor, on request) / Ler modelo e versão de firmware diretamente do equipamento passa a ser o M13 (fabricante a fabricante, a pedido)
 
+**Done in M11 / Concluído no M11**
+
+- [x] Session identity and an audit log that records every login / Identidade de sessão e registo de auditoria de cada login
+- [x] Mute with an expiry date and a mandatory reason, fully audit-logged (mute, unmute, extend) / Silêncio com data de fim e motivo obrigatório, com registo de auditoria completo (silenciar, retirar silêncio, prolongar)
+- [x] Roles mapped to IdP groups/roles: admin, operator, viewer; backward-compatible (unconfigured providers keep today's all-admin behavior) / Papéis mapeados a grupos/roles do IdP: admin, operator, viewer; compatível com versões anteriores (fornecedores sem configuração mantêm o comportamento atual, todos admin)
+- [x] Destructive actions (forget an agent, sign out every session) restricted to admin and audit-logged / Ações destrutivas (esquecer um agente, terminar todas as sessões) restritas a admin e registadas em auditoria
+- [x] Alerts routed by owner to each team's own channel, falling back to the global channels when no route matches / Alertas encaminhados pelo dono para o canal de cada equipa, com retorno aos canais globais quando não há rota correspondente
+
 ## 🛡️ Security / Segurança
 
 A tool that watches your secrets must be the most boring thing in your network to attack. / Uma ferramenta que vigia os teus segredos tem de ser a coisa mais aborrecida de atacar na tua rede.
@@ -1153,6 +1161,7 @@ A tool that watches your secrets must be the most boring thing in your network t
 | 👀 | **Read only** everywhere: cloud roles, Vault policies, vCenter, OPC UA (discovery only, no session) / **Só leitura** em todo o lado |
 | 🚪 | **Agents listen on no port**: outbound HTTPS only, so no inbound firewall rule into OT zones / **Os agentes não abrem portas**: só HTTPS de saída |
 | 🔑 | **Per-agent tokens** bound to the agent ID; admin login with PBKDF2 (600k), TOTP and lockout, or SSO (OIDC with PKCE) / **Tokens por agente**; login com PBKDF2, TOTP e bloqueio, ou SSO |
+| 👤 | **RBAC** (admin/operator/viewer) gates every mutating route; destructive actions are admin-only and audit-logged / **RBAC** (admin/operator/viewer) protege todas as rotas que alteram estado; ações destrutivas são só-admin e registadas em auditoria |
 | 🧱 | Strict CSP, HSTS, CSRF tokens, `SameSite=Strict` sessions, request size limits / CSP estrita, HSTS, CSRF, sessões `SameSite=Strict` |
 
 | | Tested on every pull request / Testado em cada pull request |
