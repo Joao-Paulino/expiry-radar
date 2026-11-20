@@ -28,7 +28,7 @@ func newTestStore(t *testing.T) (*Store, *clock) {
 func TestStore_CreateAndLookup(t *testing.T) {
 	ctx := context.Background()
 	st, _ := newTestStore(t)
-	id, s, err := st.Create(ctx)
+	id, s, err := st.Create(ctx, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestStore_CreateAndLookup(t *testing.T) {
 func TestStore_StoresOnlyTheHash(t *testing.T) {
 	ctx := context.Background()
 	st, _ := newTestStore(t)
-	id, _, _ := st.Create(ctx)
+	id, _, _ := st.Create(ctx, "admin")
 	var n int
 	st.DB.QueryRow(`SELECT COUNT(*) FROM admin_sessions WHERE id_hash = ?`, id).Scan(&n)
 	if n != 0 {
@@ -58,7 +58,7 @@ func TestStore_StoresOnlyTheHash(t *testing.T) {
 func TestStore_IdleExpiry(t *testing.T) {
 	ctx := context.Background()
 	st, c := newTestStore(t)
-	id, _, _ := st.Create(ctx)
+	id, _, _ := st.Create(ctx, "admin")
 	c.t = c.t.Add(29 * time.Minute)
 	if _, ok, _ := st.Lookup(ctx, id); !ok {
 		t.Fatal("expired too early")
@@ -77,7 +77,7 @@ func TestStore_IdleExpiry(t *testing.T) {
 func TestStore_AbsoluteExpiry(t *testing.T) {
 	ctx := context.Background()
 	st, c := newTestStore(t)
-	id, _, _ := st.Create(ctx)
+	id, _, _ := st.Create(ctx, "admin")
 	for i := 0; i < 20; i++ { // active every 25 minutes for 8h20
 		c.t = c.t.Add(25 * time.Minute)
 		st.Lookup(ctx, id)
@@ -90,8 +90,8 @@ func TestStore_AbsoluteExpiry(t *testing.T) {
 func TestStore_DeleteAndDeleteAll(t *testing.T) {
 	ctx := context.Background()
 	st, _ := newTestStore(t)
-	a, _, _ := st.Create(ctx)
-	b, _, _ := st.Create(ctx)
+	a, _, _ := st.Create(ctx, "admin")
+	b, _, _ := st.Create(ctx, "admin")
 	st.Delete(ctx, a)
 	if _, ok, _ := st.Lookup(ctx, a); ok {
 		t.Fatal("deleted session still valid")
@@ -122,9 +122,9 @@ func TestCookieAttributes(t *testing.T) {
 func TestStore_DeleteExpired(t *testing.T) {
 	ctx := context.Background()
 	st, c := newTestStore(t)
-	old, _, _ := st.Create(ctx)
+	old, _, _ := st.Create(ctx, "admin")
 	c.t = c.t.Add(31 * time.Minute)
-	live, _, _ := st.Create(ctx)
+	live, _, _ := st.Create(ctx, "admin")
 	n, err := st.DeleteExpired(ctx)
 	if err != nil || n != 1 {
 		t.Fatalf("deleted %d, err %v; want 1", n, err)
@@ -145,7 +145,7 @@ func TestStore_DeleteExpired(t *testing.T) {
 func TestStore_CreateWithLifetime(t *testing.T) {
 	ctx := context.Background()
 	st, c := newTestStore(t)
-	id, _, err := st.CreateWithLifetime(ctx, time.Hour)
+	id, _, err := st.CreateWithLifetime(ctx, "alice@example.com", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,10 +159,41 @@ func TestStore_CreateWithLifetime(t *testing.T) {
 	if _, ok, _ := st.Lookup(ctx, id); ok {
 		t.Fatal("SSO session valid beyond its 1h lifetime")
 	}
-	id2, _, _ := st.CreateWithLifetime(ctx, time.Hour)
+	id2, _, _ := st.CreateWithLifetime(ctx, "alice@example.com", time.Hour)
 	c.t = c.t.Add(61 * time.Minute)
 	if n, _ := st.DeleteExpired(ctx); n != 1 {
 		t.Fatalf("cleanup removed %d sessions, want 1", n)
 	}
 	_ = id2
+}
+
+// TestStore_ActorRoundTrips proves the actor who created a session
+// (the local admin, or an SSO identity) is readable back on Lookup,
+// so a future audit log or "who is logged in" list can use it.
+func TestStore_ActorRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	st, _ := newTestStore(t)
+	id, created, err := st.Create(ctx, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Actor != "admin" {
+		t.Fatalf("Create returned actor %q, want %q", created.Actor, "admin")
+	}
+	got, ok, err := st.Lookup(ctx, id)
+	if err != nil || !ok {
+		t.Fatalf("lookup: ok=%v err=%v", ok, err)
+	}
+	if got.Actor != "admin" {
+		t.Fatalf("Lookup returned actor %q, want %q", got.Actor, "admin")
+	}
+
+	ssoID, _, err := st.CreateWithLifetime(ctx, "alice@example.com", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotSSO, ok, err := st.Lookup(ctx, ssoID)
+	if err != nil || !ok || gotSSO.Actor != "alice@example.com" {
+		t.Fatalf("sso lookup: ok=%v err=%v actor=%q", ok, err, gotSSO.Actor)
+	}
 }

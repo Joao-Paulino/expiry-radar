@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/audit"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/db"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/sso"
@@ -23,6 +24,7 @@ const loginPassword = "correct horse battery staple"
 type loginEnv struct {
 	auth      *admin.Authenticator
 	sessions  *session.Store
+	audit     *audit.Store
 	secret    string
 	get       http.Handler
 	post      http.Handler
@@ -42,6 +44,7 @@ func newLoginEnv(t *testing.T, configured bool) *loginEnv {
 	e := &loginEnv{
 		auth:     &admin.Authenticator{Store: as, Now: time.Now},
 		sessions: &session.Store{DB: database, Now: time.Now},
+		audit:    &audit.Store{DB: database, Now: time.Now},
 	}
 	if configured {
 		h, _ := admin.HashPassword(loginPassword)
@@ -50,7 +53,7 @@ func newLoginEnv(t *testing.T, configured bool) *loginEnv {
 		_, hashes, _ := admin.NewRecoveryCodes()
 		as.SetTOTP(ctx, e.secret, hashes)
 	}
-	e.get, e.post, e.logout, e.revokeAll = LoginHandlers(e.auth, e.sessions, []sso.Button{{Label: "Microsoft", URL: "/auth/microsoft/login"}})
+	e.get, e.post, e.logout, e.revokeAll = LoginHandlers(e.auth, e.sessions, e.audit, []sso.Button{{Label: "Microsoft", URL: "/auth/microsoft/login"}})
 	return e
 }
 
@@ -88,7 +91,7 @@ func TestLoginPage_RendersForm(t *testing.T) {
 
 func TestLoginPost_SuccessSetsFreshSession(t *testing.T) {
 	e := newLoginEnv(t, true)
-	oldID, _, _ := e.sessions.Create(context.Background())
+	oldID, _, _ := e.sessions.Create(context.Background(), "admin")
 	code, _ := admin.TOTPCode(e.secret, time.Now().Unix()/30)
 	rec := e.postLogin(t, loginPassword, code, session.Cookie(oldID))
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
@@ -103,6 +106,24 @@ func TestLoginPost_SuccessSetsFreshSession(t *testing.T) {
 	}
 	if _, ok, _ := e.sessions.Lookup(context.Background(), oldID); ok {
 		t.Fatal("pre-login session still valid (fixation)")
+	}
+}
+
+// TestLoginPost_SuccessWritesAuditEntry proves a successful login is
+// recorded, so a later "recent logins" list has something to show.
+func TestLoginPost_SuccessWritesAuditEntry(t *testing.T) {
+	e := newLoginEnv(t, true)
+	code, _ := admin.TOTPCode(e.secret, time.Now().Unix()/30)
+	rec := e.postLogin(t, loginPassword, code)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("login failed: code=%d", rec.Code)
+	}
+	entries, err := e.audit.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Actor != "admin" || entries[0].Action != "login" {
+		t.Fatalf("got entries %+v, want one login by admin", entries)
 	}
 }
 
@@ -121,7 +142,7 @@ func TestLoginPost_FailureIsGeneric(t *testing.T) {
 
 func TestLogout_DeletesSession(t *testing.T) {
 	e := newLoginEnv(t, true)
-	id, _, _ := e.sessions.Create(context.Background())
+	id, _, _ := e.sessions.Create(context.Background(), "admin")
 	req := httptest.NewRequest("POST", "/logout", nil)
 	req.AddCookie(session.Cookie(id))
 	rec := httptest.NewRecorder()
@@ -139,7 +160,7 @@ func TestLogout_DeletesSession(t *testing.T) {
 
 func TestListPage_IncludesCSRFFieldForSessions(t *testing.T) {
 	e := newLoginEnv(t, true)
-	id, s, _ := e.sessions.Create(context.Background())
+	id, s, _ := e.sessions.Create(context.Background(), "admin")
 	h := session.Middleware(e.sessions, nil, NewMux(&fakeStore{}, &fakeRulesStore{}))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(session.Cookie(id))
@@ -219,8 +240,8 @@ func TestLoginPage_ShowsSSOButtons(t *testing.T) {
 // for everyone at once (e.g. after removing someone from the IdP group).
 func TestRevokeAll_EndsEverySession(t *testing.T) {
 	e := newLoginEnv(t, true)
-	a, _, _ := e.sessions.Create(context.Background())
-	b, _, _ := e.sessions.Create(context.Background())
+	a, _, _ := e.sessions.Create(context.Background(), "admin")
+	b, _, _ := e.sessions.Create(context.Background(), "admin")
 	req := httptest.NewRequest("POST", "/sessions/revoke-all", nil)
 	req.AddCookie(session.Cookie(a))
 	rec := httptest.NewRecorder()
