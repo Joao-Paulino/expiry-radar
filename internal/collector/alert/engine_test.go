@@ -86,6 +86,25 @@ func TestEngine_Evaluate_MutedRecordStillReturnedButMarkedMuted(t *testing.T) {
 	}
 }
 
+// TestEngine_Evaluate_ExpiredMuteNoLongerMarkedMuted proves a mute
+// with a past MuteUntil auto-expires: the record is alerted again,
+// without anyone having to unmute it.
+func TestEngine_Evaluate_ExpiredMuteNoLongerMarkedMuted(t *testing.T) {
+	st := &fakeStore{current: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "a", Name: "b", Kind: "certificate", ExpiresAt: time.Now().Add(1 * time.Hour)}}}}
+	rs := &fakeRulesStore{rule: rules.Rule{Source: "a", Name: "b", Kind: "certificate", Muted: true, MuteUntil: time.Now().Add(-1 * time.Hour)}, found: true}
+	e := &Engine{Store: st, Rules: rs, Thresholds: DefaultThresholds()}
+	notifications, err := e.Evaluate(context.Background(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 1 {
+		t.Fatalf("expected 1 notification, got %d", len(notifications))
+	}
+	if notifications[0].Muted {
+		t.Fatal("expected Muted=false: the mute's MuteUntil is in the past")
+	}
+}
+
 func healthOnly(ns []Notification) map[string]Notification {
 	m := map[string]Notification{}
 	for _, n := range ns {

@@ -95,7 +95,7 @@ func TestEndToEnd_AdminLoginMuteLogout(t *testing.T) {
 	if resp := post("/rules", url.Values{"source": {"a:443"}, "name": {"a"}, "kind": {"certificate"}, "muted": {"on"}}); resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("mute without CSRF: got %d, want 403", resp.StatusCode)
 	}
-	post("/rules", url.Values{"csrf_token": {m[1]}, "source": {"a:443"}, "name": {"a"}, "kind": {"certificate"}, "muted": {"on"}})
+	post("/rules", url.Values{"csrf_token": {m[1]}, "source": {"a:443"}, "name": {"a"}, "kind": {"certificate"}, "muted": {"on"}, "mute_reason": {"e2e test"}})
 	rule, found, err := rules.NewSQLite(database).Get(ctx, "a:443", "a", "certificate")
 	if err != nil || !found || !rule.Muted {
 		t.Fatalf("record not muted: %+v found=%v err=%v", rule, found, err)

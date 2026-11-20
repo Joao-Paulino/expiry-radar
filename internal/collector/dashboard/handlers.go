@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/audit"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/export"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/rules"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
@@ -23,15 +24,17 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{"assetVers
 // recordView pairs a StoredRecord with its mute/owner rule state for
 // rendering in the list view.
 type recordView struct {
-	Record      store.StoredRecord
-	Muted       bool
-	Owner       string
-	Severity    string // expired, critical, warning, ok, info, unknown
-	Days        int
-	Relative    string
-	ExpiresDate string // 2006-01-02, empty when unknown
-	ExpiresFull string // RFC 3339 UTC, for the tooltip
-	CheckedAt   string
+	Record        store.StoredRecord
+	Muted         bool
+	Owner         string
+	MuteReason    string
+	MuteUntilDate string // 2006-01-02, empty when the mute has no expiry
+	Severity      string // expired, critical, warning, ok, info, unknown
+	Days          int
+	Relative      string
+	ExpiresDate   string // 2006-01-02, empty when unknown
+	ExpiresFull   string // RFC 3339 UTC, for the tooltip
+	CheckedAt     string
 }
 
 // listView is the list page model: the records plus the CSRF token of
@@ -69,8 +72,16 @@ type historyView struct {
 	CSRF    string
 }
 
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
 // NewMux returns an http.ServeMux serving the Collector's dashboard.
-func NewMux(st store.Store, rs rules.Store, opts ...Options) *http.ServeMux {
+// a is optional (nil skips the audit log).
+func NewMux(st store.Store, rs rules.Store, a *audit.Store, opts ...Options) *http.ServeMux {
 	theme := themeOrAuto(optionsOf(opts).Theme)
 	mux := http.NewServeMux()
 
@@ -105,8 +116,12 @@ func NewMux(st store.Store, rs rules.Store, opts ...Options) *http.ServeMux {
 				return
 			}
 			if found {
-				view.Muted = rule.Muted
+				view.Muted = rule.ActiveMute(now)
 				view.Owner = rule.Owner
+				view.MuteReason = rule.MuteReason
+				if !rule.MuteUntil.IsZero() {
+					view.MuteUntilDate = rule.MuteUntil.Format("2006-01-02")
+				}
 			}
 			views = append(views, view)
 		}
@@ -199,17 +214,70 @@ func NewMux(st store.Store, rs rules.Store, opts ...Options) *http.ServeMux {
 			return
 		}
 
-		rule := rules.Rule{
-			Source: r.FormValue("source"),
-			Name:   r.FormValue("name"),
-			Kind:   r.FormValue("kind"),
-			Muted:  r.FormValue("muted") == "on",
-			Owner:  r.FormValue("owner"),
+		muted := r.FormValue("muted") == "on"
+		reason := r.FormValue("mute_reason")
+		if muted && reason == "" {
+			http.Error(w, "a mute requires a reason", http.StatusBadRequest)
+			return
 		}
 
-		if err := rs.Upsert(r.Context(), rule); err != nil {
+		var until time.Time
+		if muted {
+			if v := r.FormValue("mute_until"); v != "" {
+				t, err := time.Parse("2006-01-02", v)
+				if err != nil {
+					// Generic message: don't echo the raw value back
+					// (it's attacker-controlled input in an error body).
+					http.Error(w, "mute_until must be a date in YYYY-MM-DD format", http.StatusBadRequest)
+					return
+				}
+				until = t
+			}
+		} else {
+			reason = "" // an inactive mute keeps no stale reason/expiry
+		}
+
+		ctx := r.Context()
+		rule := rules.Rule{
+			Source:     r.FormValue("source"),
+			Name:       r.FormValue("name"),
+			Kind:       r.FormValue("kind"),
+			Muted:      muted,
+			Owner:      r.FormValue("owner"),
+			MuteReason: reason,
+			MuteUntil:  until,
+		}
+
+		prev, found, err := rs.Get(ctx, rule.Source, rule.Name, rule.Kind)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		if err := rs.Upsert(ctx, rule); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if a != nil {
+			actor := session.Actor(ctx)
+			target := rule.Source + "|" + rule.Name + "|" + rule.Kind
+			if !found || prev.Muted != rule.Muted {
+				action := "unmute"
+				if rule.Muted {
+					action = "mute"
+				}
+				if err := a.Log(ctx, actor, action, target, boolStr(found && prev.Muted), boolStr(rule.Muted), rule.MuteReason); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+			if prev.Owner != rule.Owner {
+				if err := a.Log(ctx, actor, "owner", target, prev.Owner, rule.Owner, ""); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
 		}
 
 		http.Redirect(w, r, "/", http.StatusSeeOther)

@@ -11,12 +11,29 @@ import (
 )
 
 type csrfKey struct{}
+type actorKey struct{}
 
 // CSRFToken returns the CSRF token of the session that authenticated
 // the request, or "" for bearer-token requests.
 func CSRFToken(ctx context.Context) string {
 	v, _ := ctx.Value(csrfKey{}).(string)
 	return v
+}
+
+// Actor returns who authenticated the request: the session's Actor
+// for a cookie-authenticated request, "admin-token" for a bearer-token
+// request, or "" when the request isn't authenticated at all (should
+// not happen past Middleware). For an audit log entry.
+func Actor(ctx context.Context) string {
+	v, _ := ctx.Value(actorKey{}).(string)
+	return v
+}
+
+// WithActor returns a context carrying actor, as Middleware sets it.
+// Exported so handlers can be unit-tested without going through
+// Middleware.
+func WithActor(ctx context.Context, actor string) context.Context {
+	return context.WithValue(ctx, actorKey{}, actor)
 }
 
 func validBearer(r *http.Request, tokens []string) (present, ok bool) {
@@ -51,7 +68,7 @@ func Middleware(st *Store, adminTokens []string, next http.Handler) http.Handler
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, "admin-token")))
 			return
 		}
 
@@ -70,7 +87,9 @@ func Middleware(st *Store, adminTokens []string, next http.Handler) http.Handler
 						return
 					}
 				}
-				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), csrfKey{}, sess.CSRFToken)))
+				ctx := context.WithValue(r.Context(), csrfKey{}, sess.CSRFToken)
+				ctx = context.WithValue(ctx, actorKey{}, sess.Actor)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 		}

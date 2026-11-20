@@ -49,7 +49,7 @@ func TestMux_List_SummaryAndTheme(t *testing.T) {
 		rec("o", "secret", now.Add(200*24*time.Hour), nil),
 		rec("o2", "secret", now.Add(300*24*time.Hour), nil),
 	}}
-	body := get(t, NewMux(st, &fakeRulesStore{}, Options{Theme: "dark"}), "/")
+	body := get(t, NewMux(st, &fakeRulesStore{}, nil, Options{Theme: "dark"}), "/")
 	if !strings.Contains(body, `data-theme="dark"`) {
 		t.Fatal("theme not rendered")
 	}
@@ -58,7 +58,7 @@ func TestMux_List_SummaryAndTheme(t *testing.T) {
 			t.Errorf("missing %s", want)
 		}
 	}
-	if !strings.Contains(get(t, NewMux(st, &fakeRulesStore{}), "/"), `data-theme="auto"`) {
+	if !strings.Contains(get(t, NewMux(st, &fakeRulesStore{}, nil), "/"), `data-theme="auto"`) {
 		t.Fatal("default theme must be auto")
 	}
 }
@@ -71,7 +71,7 @@ func TestMux_List_SortedByExpiry(t *testing.T) {
 		rec("soon", "certificate", now.Add(24*time.Hour), nil),
 		rec("info", "access_key", now.Add(-30*24*time.Hour), map[string]string{"alerts": "off"}),
 	}}
-	body := get(t, NewMux(st, &fakeRulesStore{}), "/")
+	body := get(t, NewMux(st, &fakeRulesStore{}, nil), "/")
 	// Informational keys never alert, so they follow everything that can.
 	s, l, i, z := strings.Index(body, `data-name="soon"`), strings.Index(body, `data-name="late"`), strings.Index(body, `data-name="info"`), strings.Index(body, `data-name="zero"`)
 	if s < 0 || l < 0 || i < 0 || z < 0 || !(s < l && l < i && i < z) {
@@ -81,7 +81,7 @@ func TestMux_List_SortedByExpiry(t *testing.T) {
 
 func TestMux_List_RowForm(t *testing.T) {
 	st := &fakeStore{current: []store.StoredRecord{rec(`a&"<b`, "certificate", time.Now().Add(24*time.Hour), nil)}}
-	body := get(t, NewMux(st, &fakeRulesStore{found: true, rule: rules.Rule{Muted: true, Owner: "ana"}}, Options{}), "/")
+	body := get(t, NewMux(st, &fakeRulesStore{found: true, rule: rules.Rule{Muted: true, Owner: "ana"}}, nil, Options{}), "/")
 	for _, want := range []string{`name="source" value="src"`, `name="kind" value="certificate"`, `name="name" value="a&amp;&#34;&lt;b"`, `name="owner" value="ana"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s", want)
@@ -97,7 +97,7 @@ func TestMux_List_RowForm(t *testing.T) {
 
 func TestTemplates_NoInlineScriptOrStyle(t *testing.T) {
 	st := &fakeStore{current: []store.StoredRecord{rec("a", "certificate", time.Now(), nil)}, history: []store.StoredRecord{rec("a", "certificate", time.Now(), nil)}}
-	mux := NewMux(st, &fakeRulesStore{})
+	mux := NewMux(st, &fakeRulesStore{}, nil)
 	for _, p := range []string{"/", "/history?source=src&name=a&kind=certificate"} {
 		checkNoInline(t, p, get(t, mux, p))
 	}
@@ -151,7 +151,7 @@ func TestStaticHandler(t *testing.T) {
 // database) must still show, with its failures and the Forget button.
 func TestMux_List_OrphanCheckerShown(t *testing.T) {
 	st := &fakeStore{health: []store.CheckerHealth{{ReportedBy: "lost-agent", CheckerName: "aws", ConsecutiveFailures: 4, LastError: "denied", LastSeenAt: time.Now()}}}
-	body := get(t, NewMux(st, &fakeRulesStore{}), "/")
+	body := get(t, NewMux(st, &fakeRulesStore{}, nil), "/")
 	for _, want := range []string{"lost-agent", "aws · 4 failures", `name="agent_id" value="lost-agent"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q", want)
@@ -161,7 +161,7 @@ func TestMux_List_OrphanCheckerShown(t *testing.T) {
 
 func TestMux_List_FilterOptionsHaveValues(t *testing.T) {
 	st := &fakeStore{current: []store.StoredRecord{rec("a", "certificate", time.Now().Add(time.Hour), nil)}}
-	if body := get(t, NewMux(st, &fakeRulesStore{}), "/"); !strings.Contains(body, `<option value="certificate">`) || !strings.Contains(body, `<option value="src">`) {
+	if body := get(t, NewMux(st, &fakeRulesStore{}, nil), "/"); !strings.Contains(body, `<option value="certificate">`) || !strings.Contains(body, `<option value="src">`) {
 		t.Error("filter options need explicit values")
 	}
 }

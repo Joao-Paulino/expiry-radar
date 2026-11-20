@@ -161,7 +161,7 @@ func TestLogout_DeletesSession(t *testing.T) {
 func TestListPage_IncludesCSRFFieldForSessions(t *testing.T) {
 	e := newLoginEnv(t, true)
 	id, s, _ := e.sessions.Create(context.Background(), "admin")
-	h := session.Middleware(e.sessions, nil, NewMux(&fakeStore{}, &fakeRulesStore{}))
+	h := session.Middleware(e.sessions, nil, NewMux(&fakeStore{}, &fakeRulesStore{}, nil))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(session.Cookie(id))
 	rec := httptest.NewRecorder()

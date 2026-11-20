@@ -61,6 +61,39 @@ func TestMiddleware_SessionGETExposesCSRF(t *testing.T) {
 	}
 }
 
+// TestMiddleware_SessionExposesActor proves a request authenticated by
+// a session cookie carries who is logged in, for an audit log to use.
+func TestMiddleware_SessionExposesActor(t *testing.T) {
+	st, _ := newTestStore(t)
+	id, _, _ := st.Create(context.Background(), "alice@example.com")
+	var got string
+	h := Middleware(st, []string{adminToken}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = Actor(r.Context())
+	}))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(Cookie(id))
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if got != "alice@example.com" {
+		t.Fatalf("Actor(ctx) = %q, want %q", got, "alice@example.com")
+	}
+}
+
+// TestMiddleware_BearerTokenActorIsAdminToken proves an admin-token
+// request (no session) still carries a usable actor for the audit log.
+func TestMiddleware_BearerTokenActorIsAdminToken(t *testing.T) {
+	st, _ := newTestStore(t)
+	var got string
+	h := Middleware(st, []string{adminToken}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = Actor(r.Context())
+	}))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if got != "admin-token" {
+		t.Fatalf("Actor(ctx) = %q, want %q", got, "admin-token")
+	}
+}
+
 func TestMiddleware_UnauthenticatedBrowserRedirectsToLogin(t *testing.T) {
 	st, _ := newTestStore(t)
 	var csrf string
