@@ -28,7 +28,7 @@ func newTestStore(t *testing.T) (*Store, *clock) {
 func TestStore_CreateAndLookup(t *testing.T) {
 	ctx := context.Background()
 	st, _ := newTestStore(t)
-	id, s, err := st.Create(ctx, "admin")
+	id, s, err := st.Create(ctx, "admin", RoleAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestStore_CreateAndLookup(t *testing.T) {
 func TestStore_StoresOnlyTheHash(t *testing.T) {
 	ctx := context.Background()
 	st, _ := newTestStore(t)
-	id, _, _ := st.Create(ctx, "admin")
+	id, _, _ := st.Create(ctx, "admin", RoleAdmin)
 	var n int
 	st.DB.QueryRow(`SELECT COUNT(*) FROM admin_sessions WHERE id_hash = ?`, id).Scan(&n)
 	if n != 0 {
@@ -58,7 +58,7 @@ func TestStore_StoresOnlyTheHash(t *testing.T) {
 func TestStore_IdleExpiry(t *testing.T) {
 	ctx := context.Background()
 	st, c := newTestStore(t)
-	id, _, _ := st.Create(ctx, "admin")
+	id, _, _ := st.Create(ctx, "admin", RoleAdmin)
 	c.t = c.t.Add(29 * time.Minute)
 	if _, ok, _ := st.Lookup(ctx, id); !ok {
 		t.Fatal("expired too early")
@@ -77,7 +77,7 @@ func TestStore_IdleExpiry(t *testing.T) {
 func TestStore_AbsoluteExpiry(t *testing.T) {
 	ctx := context.Background()
 	st, c := newTestStore(t)
-	id, _, _ := st.Create(ctx, "admin")
+	id, _, _ := st.Create(ctx, "admin", RoleAdmin)
 	for i := 0; i < 20; i++ { // active every 25 minutes for 8h20
 		c.t = c.t.Add(25 * time.Minute)
 		st.Lookup(ctx, id)
@@ -90,8 +90,8 @@ func TestStore_AbsoluteExpiry(t *testing.T) {
 func TestStore_DeleteAndDeleteAll(t *testing.T) {
 	ctx := context.Background()
 	st, _ := newTestStore(t)
-	a, _, _ := st.Create(ctx, "admin")
-	b, _, _ := st.Create(ctx, "admin")
+	a, _, _ := st.Create(ctx, "admin", RoleAdmin)
+	b, _, _ := st.Create(ctx, "admin", RoleAdmin)
 	st.Delete(ctx, a)
 	if _, ok, _ := st.Lookup(ctx, a); ok {
 		t.Fatal("deleted session still valid")
@@ -122,9 +122,9 @@ func TestCookieAttributes(t *testing.T) {
 func TestStore_DeleteExpired(t *testing.T) {
 	ctx := context.Background()
 	st, c := newTestStore(t)
-	old, _, _ := st.Create(ctx, "admin")
+	old, _, _ := st.Create(ctx, "admin", RoleAdmin)
 	c.t = c.t.Add(31 * time.Minute)
-	live, _, _ := st.Create(ctx, "admin")
+	live, _, _ := st.Create(ctx, "admin", RoleAdmin)
 	n, err := st.DeleteExpired(ctx)
 	if err != nil || n != 1 {
 		t.Fatalf("deleted %d, err %v; want 1", n, err)
@@ -145,7 +145,7 @@ func TestStore_DeleteExpired(t *testing.T) {
 func TestStore_CreateWithLifetime(t *testing.T) {
 	ctx := context.Background()
 	st, c := newTestStore(t)
-	id, _, err := st.CreateWithLifetime(ctx, "alice@example.com", time.Hour)
+	id, _, err := st.CreateWithLifetime(ctx, "alice@example.com", RoleViewer, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestStore_CreateWithLifetime(t *testing.T) {
 	if _, ok, _ := st.Lookup(ctx, id); ok {
 		t.Fatal("SSO session valid beyond its 1h lifetime")
 	}
-	id2, _, _ := st.CreateWithLifetime(ctx, "alice@example.com", time.Hour)
+	id2, _, _ := st.CreateWithLifetime(ctx, "alice@example.com", RoleViewer, time.Hour)
 	c.t = c.t.Add(61 * time.Minute)
 	if n, _ := st.DeleteExpired(ctx); n != 1 {
 		t.Fatalf("cleanup removed %d sessions, want 1", n)
@@ -173,7 +173,7 @@ func TestStore_CreateWithLifetime(t *testing.T) {
 func TestStore_ActorRoundTrips(t *testing.T) {
 	ctx := context.Background()
 	st, _ := newTestStore(t)
-	id, created, err := st.Create(ctx, "admin")
+	id, created, err := st.Create(ctx, "admin", RoleAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,12 +188,70 @@ func TestStore_ActorRoundTrips(t *testing.T) {
 		t.Fatalf("Lookup returned actor %q, want %q", got.Actor, "admin")
 	}
 
-	ssoID, _, err := st.CreateWithLifetime(ctx, "alice@example.com", time.Hour)
+	ssoID, _, err := st.CreateWithLifetime(ctx, "alice@example.com", RoleViewer, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	gotSSO, ok, err := st.Lookup(ctx, ssoID)
 	if err != nil || !ok || gotSSO.Actor != "alice@example.com" {
 		t.Fatalf("sso lookup: ok=%v err=%v actor=%q", ok, err, gotSSO.Actor)
+	}
+}
+
+// TestStore_RoleRoundTrips proves the role assigned at login time
+// (admin, operator or viewer) is readable back on Lookup, so the
+// dashboard can gate mutating routes by it.
+func TestStore_RoleRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	st, _ := newTestStore(t)
+	id, created, err := st.Create(ctx, "admin", RoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Role != RoleAdmin {
+		t.Fatalf("Create returned role %q, want %q", created.Role, RoleAdmin)
+	}
+	got, ok, err := st.Lookup(ctx, id)
+	if err != nil || !ok || got.Role != RoleAdmin {
+		t.Fatalf("lookup: ok=%v err=%v role=%q", ok, err, got.Role)
+	}
+
+	opID, created2, err := st.CreateWithLifetime(ctx, "bob@example.com", RoleOperator, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created2.Role != RoleOperator {
+		t.Fatalf("CreateWithLifetime returned role %q, want %q", created2.Role, RoleOperator)
+	}
+	gotOp, ok, err := st.Lookup(ctx, opID)
+	if err != nil || !ok || gotOp.Role != RoleOperator {
+		t.Fatalf("op lookup: ok=%v err=%v role=%q", ok, err, gotOp.Role)
+	}
+}
+
+// TestRoleAtLeast proves the admin > operator > viewer ordering, and
+// that an empty or unrecognized role (a pre-RBAC session the role
+// column migration left blank) satisfies nothing.
+func TestRoleAtLeast(t *testing.T) {
+	cases := []struct {
+		role, min string
+		want      bool
+	}{
+		{RoleAdmin, RoleAdmin, true},
+		{RoleAdmin, RoleOperator, true},
+		{RoleAdmin, RoleViewer, true},
+		{RoleOperator, RoleAdmin, false},
+		{RoleOperator, RoleOperator, true},
+		{RoleOperator, RoleViewer, true},
+		{RoleViewer, RoleOperator, false},
+		{RoleViewer, RoleViewer, true},
+		{"", RoleViewer, false},
+		{"", RoleAdmin, false},
+		{"bogus", RoleViewer, false},
+	}
+	for _, c := range cases {
+		if got := RoleAtLeast(c.role, c.min); got != c.want {
+			t.Errorf("RoleAtLeast(%q, %q) = %v, want %v", c.role, c.min, got, c.want)
+		}
 	}
 }

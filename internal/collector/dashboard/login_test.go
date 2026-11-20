@@ -91,7 +91,7 @@ func TestLoginPage_RendersForm(t *testing.T) {
 
 func TestLoginPost_SuccessSetsFreshSession(t *testing.T) {
 	e := newLoginEnv(t, true)
-	oldID, _, _ := e.sessions.Create(context.Background(), "admin")
+	oldID, _, _ := e.sessions.Create(context.Background(), "admin", session.RoleAdmin)
 	code, _ := admin.TOTPCode(e.secret, time.Now().Unix()/30)
 	rec := e.postLogin(t, loginPassword, code, session.Cookie(oldID))
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
@@ -142,7 +142,7 @@ func TestLoginPost_FailureIsGeneric(t *testing.T) {
 
 func TestLogout_DeletesSession(t *testing.T) {
 	e := newLoginEnv(t, true)
-	id, _, _ := e.sessions.Create(context.Background(), "admin")
+	id, _, _ := e.sessions.Create(context.Background(), "admin", session.RoleAdmin)
 	req := httptest.NewRequest("POST", "/logout", nil)
 	req.AddCookie(session.Cookie(id))
 	rec := httptest.NewRecorder()
@@ -160,7 +160,7 @@ func TestLogout_DeletesSession(t *testing.T) {
 
 func TestListPage_IncludesCSRFFieldForSessions(t *testing.T) {
 	e := newLoginEnv(t, true)
-	id, s, _ := e.sessions.Create(context.Background(), "admin")
+	id, s, _ := e.sessions.Create(context.Background(), "admin", session.RoleAdmin)
 	h := session.Middleware(e.sessions, nil, NewMux(&fakeStore{}, &fakeRulesStore{}, nil))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(session.Cookie(id))
@@ -240,10 +240,11 @@ func TestLoginPage_ShowsSSOButtons(t *testing.T) {
 // for everyone at once (e.g. after removing someone from the IdP group).
 func TestRevokeAll_EndsEverySession(t *testing.T) {
 	e := newLoginEnv(t, true)
-	a, _, _ := e.sessions.Create(context.Background(), "admin")
-	b, _, _ := e.sessions.Create(context.Background(), "admin")
+	a, _, _ := e.sessions.Create(context.Background(), "admin", session.RoleAdmin)
+	b, _, _ := e.sessions.Create(context.Background(), "admin", session.RoleAdmin)
 	req := httptest.NewRequest("POST", "/sessions/revoke-all", nil)
 	req.AddCookie(session.Cookie(a))
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleAdmin))
 	rec := httptest.NewRecorder()
 	e.revokeAll.ServeHTTP(rec, req)
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/login" {
@@ -253,5 +254,23 @@ func TestRevokeAll_EndsEverySession(t *testing.T) {
 		if _, ok, _ := e.sessions.Lookup(context.Background(), id); ok {
 			t.Fatal("a session survived revoke-all")
 		}
+	}
+}
+
+// TestRevokeAll_OperatorIsForbidden proves an operator cannot end
+// everyone's sessions; this is an admin-only action.
+func TestRevokeAll_OperatorIsForbidden(t *testing.T) {
+	e := newLoginEnv(t, true)
+	a, _, _ := e.sessions.Create(context.Background(), "admin", session.RoleAdmin)
+	req := httptest.NewRequest("POST", "/sessions/revoke-all", nil)
+	req.AddCookie(session.Cookie(a))
+	req = req.WithContext(session.WithRole(req.Context(), session.RoleOperator))
+	rec := httptest.NewRecorder()
+	e.revokeAll.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("got %d, want 403", rec.Code)
+	}
+	if _, ok, _ := e.sessions.Lookup(context.Background(), a); !ok {
+		t.Fatal("a forbidden request still ended the session")
 	}
 }

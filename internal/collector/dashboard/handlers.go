@@ -172,6 +172,10 @@ func NewMux(st store.Store, rs rules.Store, a *audit.Store, opts ...Options) *ht
 	})
 
 	mux.HandleFunc("POST /agents/forget", func(w http.ResponseWriter, r *http.Request) {
+		if !session.RoleAtLeast(session.Role(r.Context()), session.RoleAdmin) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		agentID := r.PostFormValue("agent_id")
 		if agentID == "" {
 			http.Error(w, "agent_id is required", http.StatusBadRequest)
@@ -180,6 +184,12 @@ func NewMux(st store.Store, rs rules.Store, a *audit.Store, opts ...Options) *ht
 		if err := st.ForgetAgent(r.Context(), agentID); err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
+		}
+		if a != nil {
+			if err := a.Log(r.Context(), session.Actor(r.Context()), "forget_agent", agentID, "", "", ""); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
@@ -210,6 +220,10 @@ func NewMux(st store.Store, rs rules.Store, a *audit.Store, opts ...Options) *ht
 	})
 
 	mux.HandleFunc("POST /rules", func(w http.ResponseWriter, r *http.Request) {
+		if !session.RoleAtLeast(session.Role(r.Context()), session.RoleOperator) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

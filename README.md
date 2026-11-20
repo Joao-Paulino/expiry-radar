@@ -524,6 +524,29 @@ Qualquer fornecedor OpenID Connect pode ser adicionado, vários ao mesmo tempo; 
 | 🌐 Provider down | The collector and the local login keep working; the SSO button shows an error until the provider is back | O collector e o login local continuam a funcionar; o botão SSO mostra erro até o fornecedor voltar |
 | 🚦 Limits | 20 login starts per address per 10 min; at most 10 000 pending logins | 20 inícios de login por endereço a cada 10 min; no máximo 10 000 logins pendentes |
 
+### 👤 Roles (admin / operator / viewer)
+
+Who may log in and what they may do are two separate checks. `allowed_groups`/`allowed_roles`/`allowed_emails` above decide **whether** someone can sign in at all — that check always runs first. The keys below decide only **what an already-authorized person may do** once signed in: being in an admin group does not bypass the login gate, so someone outside `allowed_*` is still refused even if they also match `admin_groups`.
+Quem pode fazer login e o que pode fazer são duas verificações separadas. `allowed_groups`/`allowed_roles`/`allowed_emails` acima decidem **se** alguém pode entrar — essa verificação corre sempre primeiro. As chaves abaixo decidem apenas **o que uma pessoa já autorizada pode fazer** depois de entrar: estar num grupo admin não ultrapassa o portão de login, por isso alguém fora de `allowed_*` continua recusado mesmo que também corresponda a `admin_groups`.
+
+```json
+{ "name": "microsoft", "display_name": "Microsoft",
+  "issuer": "https://login.microsoftonline.com/<tenant-id>/v2.0",
+  "client_id": "<application (client) id>", "client_secret_file": "/etc/expiry-radar/entra.secret",
+  "allowed_groups": ["<group object id>"],
+  "admin_groups": ["<admins group object id>"],
+  "operator_groups": ["<operators group object id>"] }
+```
+
+| | EN | PT |
+|---|---|---|
+| 🛡️ Admin | Full access: mute/re-own, forget an agent, sign out every session. The local Administrator account is always admin | Acesso total: silenciar/mudar dono, esquecer um agente, terminar todas as sessões. A conta Administrator local é sempre admin |
+| 🔧 Operator | Can mute and re-own; cannot forget an agent or sign out every session (destructive, admin-only) | Pode silenciar e mudar dono; não pode esquecer um agente nem terminar todas as sessões (destrutivo, só admin) |
+| 👁️ Viewer | Read-only: the dashboard, history and exports, nothing that changes state | Só leitura: painel, histórico e exportações, nada que altere estado |
+| ⚙️ Default (no keys set) | A provider with none of `admin_groups`/`admin_roles`/`operator_groups`/`operator_roles` configured keeps today's behavior: every authorized user is admin. Adding these keys to one provider never restricts another provider that hasn't set them | Um fornecedor sem nenhuma destas chaves mantém o comportamento atual: todos os utilizadores autorizados são admin. Adicionar estas chaves a um fornecedor nunca restringe outro que não as tenha |
+| 🪄 Local admin & tokens | The local Administrator login and `admin_tokens` bearer requests are always admin, regardless of these keys | O login do Administrator local e os pedidos com `admin_tokens` são sempre admin, independentemente destas chaves |
+| 🔁 Upgrading | Adding RBAC never discards a session or any configuration: a browser already signed in before the upgrade is treated as the lowest role until it logs in again (within its normal session lifetime, at most 8h) — a safety re-login, not data loss | Ativar RBAC nunca descarta uma sessão ou configuração: um browser já autenticado antes do upgrade é tratado com o papel mais baixo até fazer novo login (dentro da duração normal da sessão, no máximo 8h) — é um novo login de segurança, não perda de dados |
+
 ### 🔑 Tokens
 
 Tokens are shared secrets, so generate them randomly; never invent them.

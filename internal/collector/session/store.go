@@ -25,12 +25,41 @@ const (
 
 // Session is the server-side state of one logged-in browser. Actor is
 // who logged in: "admin" for the local admin account, or the SSO
-// identity (email or subject) for an SSO login.
+// identity (email or subject) for an SSO login. Role is what that
+// actor may do: RoleAdmin, RoleOperator or RoleViewer (or "" for a
+// session created before RBAC, which RoleAtLeast treats as below
+// every role until the browser logs in again).
 type Session struct {
 	CSRFToken  string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 	Actor      string
+	Role       string
+}
+
+// Roles, from most to least privileged. The local admin account is
+// always RoleAdmin; an SSO login's role comes from sso.RoleFor.
+const (
+	RoleAdmin    = "admin"
+	RoleOperator = "operator"
+	RoleViewer   = "viewer"
+)
+
+var roleRank = map[string]int{RoleViewer: 1, RoleOperator: 2, RoleAdmin: 3}
+
+// RoleAtLeast reports whether role meets or exceeds min in privilege.
+// An empty or unrecognized role (including a pre-RBAC session left
+// blank by the "role" column migration) satisfies nothing.
+func RoleAtLeast(role, min string) bool {
+	r, ok := roleRank[role]
+	if !ok {
+		return false
+	}
+	m, ok := roleRank[min]
+	if !ok {
+		return false
+	}
+	return r >= m
 }
 
 // Store keeps sessions in SQLite, indexed by the SHA-256 of their id.
@@ -52,15 +81,16 @@ func hashID(id string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Create starts a new session for actor with the default 8-hour
-// lifetime and returns its id (for the cookie).
-func (s *Store) Create(ctx context.Context, actor string) (string, Session, error) {
-	return s.CreateWithLifetime(ctx, actor, absoluteLifetime)
+// Create starts a new session for actor, with role, with the default
+// 8-hour lifetime, and returns its id (for the cookie).
+func (s *Store) Create(ctx context.Context, actor, role string) (string, Session, error) {
+	return s.CreateWithLifetime(ctx, actor, role, absoluteLifetime)
 }
 
-// CreateWithLifetime starts a session for actor that ends at most
-// lifetime after creation (SSO sessions are shorter than local ones).
-func (s *Store) CreateWithLifetime(ctx context.Context, actor string, lifetime time.Duration) (string, Session, error) {
+// CreateWithLifetime starts a session for actor, with role, that ends
+// at most lifetime after creation (SSO sessions are shorter than
+// local ones).
+func (s *Store) CreateWithLifetime(ctx context.Context, actor, role string, lifetime time.Duration) (string, Session, error) {
 	id, err := randomToken()
 	if err != nil {
 		return "", Session{}, err
@@ -70,11 +100,11 @@ func (s *Store) CreateWithLifetime(ctx context.Context, actor string, lifetime t
 		return "", Session{}, err
 	}
 	now := s.Now()
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO admin_sessions (id_hash, csrf_token, created_at, last_seen_at, max_age_seconds, actor)
-		VALUES (?, ?, ?, ?, ?, ?)`, hashID(id), csrf, now.Unix(), now.Unix(), int64(lifetime/time.Second), actor); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO admin_sessions (id_hash, csrf_token, created_at, last_seen_at, max_age_seconds, actor, role)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, hashID(id), csrf, now.Unix(), now.Unix(), int64(lifetime/time.Second), actor, role); err != nil {
 		return "", Session{}, err
 	}
-	return id, Session{CSRFToken: csrf, CreatedAt: now, LastSeenAt: now, Actor: actor}, nil
+	return id, Session{CSRFToken: csrf, CreatedAt: now, LastSeenAt: now, Actor: actor, Role: role}, nil
 }
 
 // Lookup returns the session for id if it exists and has not passed
@@ -87,8 +117,8 @@ func (s *Store) Lookup(ctx context.Context, id string) (Session, bool, error) {
 	h := hashID(id)
 	var sess Session
 	var created, lastSeen, maxAge int64
-	err := s.DB.QueryRowContext(ctx, `SELECT csrf_token, created_at, last_seen_at, max_age_seconds, actor FROM admin_sessions WHERE id_hash = ?`, h).
-		Scan(&sess.CSRFToken, &created, &lastSeen, &maxAge, &sess.Actor)
+	err := s.DB.QueryRowContext(ctx, `SELECT csrf_token, created_at, last_seen_at, max_age_seconds, actor, role FROM admin_sessions WHERE id_hash = ?`, h).
+		Scan(&sess.CSRFToken, &created, &lastSeen, &maxAge, &sess.Actor, &sess.Role)
 	if err == sql.ErrNoRows {
 		return Session{}, false, nil
 	}
