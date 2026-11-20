@@ -24,7 +24,7 @@ import (
 type Config = server.Config
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  collector <config.json>\n  collector version\n  collector add-agent <config.json> <agent-id>\n  collector gen-cert <dir> [--host ip,dns,...] [--days N]\n  collector install-service <config.json> [--account NAME]\n  collector uninstall-service\n  collector set-admin-password <config.json>\n  collector set-admin-totp <config.json>")
+	fmt.Fprintln(os.Stderr, "usage:\n  collector <config.json>\n  collector version\n  collector add-agent <config.json> <agent-id>\n  collector gen-cert <dir> [--host ip,dns,...] [--days N] [--ca <ca-dir>]\n  collector install-service <config.json> [--account NAME]\n  collector uninstall-service\n  collector set-admin-password <config.json>\n  collector set-admin-totp <config.json>")
 	os.Exit(2)
 }
 
@@ -55,9 +55,9 @@ func main() {
 		}
 		return
 	case "gen-cert":
-		dir, hosts, days, err := parseGenCertArgs(os.Args[2:])
+		dir, hosts, days, caDir, err := parseGenCertArgs(os.Args[2:])
 		if err == nil {
-			err = runGenCert(dir, hosts, days, os.Stdout)
+			err = runGenCert(dir, hosts, days, caDir, os.Stdout)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "collector: %s\n", err)

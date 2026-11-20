@@ -367,13 +367,15 @@ de incluir no Subject Alternative Name (SAN) o endereço que os agentes usam em
 |---|---|
 | Public DNS name, collector reachable from the internet / Nome DNS público, collector acessível da internet | **A. Public CA** (Let's Encrypt) |
 | Company PKI (e.g. Microsoft AD CS) / PKI da empresa | **B. Internal CA** |
+| No public domain, more than a handful of agents, or you'll need to re-issue certificates later / Sem domínio público, mais do que uns poucos agentes, ou vais precisar de reemitir certificados mais tarde | **D. Built-in internal CA** |
 | Lab, home or isolated network / Laboratório, casa ou rede isolada | **C. Self-signed** |
-| Fastest way to start / Forma mais rápida de começar | **C. Self-signed**, move to A or B later / e mudas para A ou B depois |
+| Fastest way to start / Forma mais rápida de começar | **C. Self-signed**, move to A, B or D later / e mudas para A, B ou D depois |
 
 | Option / Opção | EN | PT |
 |---|---|---|
 | **A. Public CA** (e.g. Let's Encrypt) | Best when the collector has a public DNS name. Agents trust it with no extra setting. | O melhor quando o collector tem nome DNS público. Os agentes confiam sem configuração extra. |
 | **B. Internal CA** | Use your company PKI. Give agents the CA certificate in `collector_ca_file` unless it is already in the system trust store. | Usa a PKI da empresa. Dá aos agentes o certificado da CA em `collector_ca_file`, se ainda não estiver no repositório de confiança do sistema. |
+| **D. Built-in internal CA** | No public domain and no company PKI: the collector creates and keeps its own CA, then issues (and later re-issues) leaf certificates from it. Give agents the CA certificate, not the leaf. | Sem domínio público e sem PKI da empresa: o collector cria e mantém a sua própria CA, e emite (e mais tarde reemite) certificados-folha a partir dela. Dá aos agentes o certificado da CA, não o certificado-folha. |
 | **C. Self-signed** | Quick for labs and small setups. Copy the certificate to every agent as `collector_ca_file`. | Rápido para laboratórios e instalações pequenas. Copia o certificado para cada agente como `collector_ca_file`. |
 
 **A. Let's Encrypt**
@@ -434,6 +436,23 @@ Os agentes confiam automaticamente se a CA raiz estiver no repositório de confi
 ✅ Fits company security policy, no external dependency. ⚠️ Agents outside the domain need `collector_ca_file`.
 ✅ Integra-se na política de segurança da empresa, sem dependências externas. ⚠️ Agentes fora do domínio precisam do `collector_ca_file`.
 
+**D. Built-in internal CA / CA interna própria** (no public domain, no company PKI needed / sem domínio público nem PKI da empresa)
+
+```bash
+sudo mkdir -p /etc/expiry-radar
+sudo expiry-radar-collector gen-cert /etc/expiry-radar --host collector.example.com,10.0.0.10 --ca /etc/expiry-radar/ca
+# Windows: .\collector.exe gen-cert C:\ExpiryRadar\collector --host 192.168.1.10 --ca C:\ExpiryRadar\ca
+```
+
+The first run creates the CA in `--ca <dir>` (`ca.crt` + `ca.key`, 10-year validity) and issues `collector.crt`/`collector.key` from it. Run it again later — for a new hostname, a second collector, or just to re-issue — pointing `--ca` at the **same** directory: the CA is reused, not recreated, so agents that already trust it don't need anything new.
+A primeira execução cria a CA em `--ca <dir>` (`ca.crt` + `ca.key`, validade de 10 anos) e emite `collector.crt`/`collector.key` a partir dela. Corre de novo mais tarde — para um novo nome, um segundo collector, ou só para reemitir — apontando o `--ca` para a **mesma** pasta: a CA é reaproveitada, não recriada, por isso os agentes que já confiam nela não precisam de nada novo.
+
+> ⚠️ **Different trust file than C.** With D, agents must trust **`ca.crt`** (the CA, in the `--ca` directory) as `collector_ca_file` — never `collector.crt`, which here is just a leaf certificate the CA issued, not a root of trust. Keep `ca.key` as private as `collector.key`: anyone with it can issue certificates agents will trust.
+> **Ficheiro de confiança diferente do C.** Com D, os agentes têm de confiar no **`ca.crt`** (a CA, na pasta do `--ca`) como `collector_ca_file` — nunca no `collector.crt`, que aqui é só um certificado-folha emitido pela CA, não uma raiz de confiança. Mantém o `ca.key` tão privado como o `collector.key`: quem o tiver pode emitir certificados em que os agentes vão confiar.
+
+✅ No public domain or company PKI needed; re-issuing later reuses the same CA, so agents don't need a new trust file each time. ⚠️ Every agent needs `collector_ca_file` pointed at `ca.crt`, and browsers warn when opening the dashboard (same as C).
+✅ Não precisa de domínio público nem de PKI da empresa; reemitir mais tarde reaproveita a mesma CA, por isso os agentes não precisam de um novo ficheiro de confiança cada vez. ⚠️ Cada agente precisa do `collector_ca_file` a apontar para o `ca.crt`, e os browsers mostram aviso ao abrir o painel (como em C).
+
 **C. Self-signed / Autoassinado** (no OpenSSL needed: the collector generates it / sem OpenSSL: o collector gera-o)
 
 ```bash
@@ -448,8 +467,8 @@ ECDSA P-256, 365 days (`--days N`), `localhost` and `127.0.0.1` always included;
 Substitui o nome DNS e o IP pelos que os agentes vão usar. Depois copia o
 `collector.crt` (nunca o `.key`) para cada agente e aponta o `collector_ca_file` para ele.
 
-**Agents with B or C / Agentes com B ou C:** copy the CA certificate (B: the root CA, C: `collector.crt`) to **every** agent once, and point `agent.json` at it:
-copia o certificado da CA (B: a CA raiz, C: o `collector.crt`) para **cada** agente uma vez e aponta o `agent.json` para ele:
+**Agents with B, C or D / Agentes com B, C ou D:** copy the CA certificate (B: the root CA, C: `collector.crt`, D: `ca.crt`) to **every** agent once, and point `agent.json` at it:
+copia o certificado da CA (B: a CA raiz, C: o `collector.crt`, D: o `ca.crt`) para **cada** agente uma vez e aponta o `agent.json` para ele:
 
 ```json
 {
@@ -458,13 +477,13 @@ copia o certificado da CA (B: a CA raiz, C: o `collector.crt`) para **cada** age
 }
 ```
 
-Windows: `"collector_ca_file": "C:\\ExpiryRadar\\agent\\collector-ca.pem"`. Skip it only when the CA is already in the system trust store. With C, renewing the self-signed certificate means copying it to every agent again. / Só dispensas isto se a CA já estiver no repositório de confiança do sistema. Com C, renovar o certificado autoassinado obriga a copiá-lo de novo para cada agente.
+Windows: `"collector_ca_file": "C:\\ExpiryRadar\\agent\\collector-ca.pem"`. Skip it only when the CA is already in the system trust store. With C, renewing the self-signed certificate means copying it to every agent again; with D, re-issuing from the same `--ca` directory does not — only trusting `ca.crt` for the first time does. / Só dispensas isto se a CA já estiver no repositório de confiança do sistema. Com C, renovar o certificado autoassinado obriga a copiá-lo de novo para cada agente; com D, reemitir a partir da mesma pasta `--ca` não obriga — só confiar no `ca.crt` da primeira vez.
 
 ✅ Quick, no external dependency, works on any network. ⚠️ Every agent needs `collector_ca_file`, and browsers warn when opening the dashboard.
 ✅ Rápido, sem dependências externas, funciona em qualquer rede. ⚠️ Cada agente precisa do `collector_ca_file` e os browsers mostram aviso ao abrir o painel.
 
-> 🔐 The dashboard login (password + TOTP, or SSO) works the same with A, B or C, but TLS is what protects it. With a self-signed certificate, compare the fingerprint the first time (`openssl x509 -in collector.crt -noout -fingerprint -sha256`) instead of clicking through the browser warning.
-> O login do painel (password + TOTP, ou SSO) funciona igual com A, B ou C, mas é o TLS que o protege. Com um certificado autoassinado, compara a impressão digital da primeira vez em vez de aceitar o aviso do browser às cegas.
+> 🔐 The dashboard login (password + TOTP, or SSO) works the same with A, B, C or D, but TLS is what protects it. With a self-signed or internal-CA-issued certificate, compare the fingerprint the first time (`openssl x509 -in collector.crt -noout -fingerprint -sha256`) instead of clicking through the browser warning.
+> O login do painel (password + TOTP, ou SSO) funciona igual com A, B, C ou D, mas é o TLS que o protege. Com um certificado autoassinado ou emitido pela CA interna, compara a impressão digital da primeira vez em vez de aceitar o aviso do browser às cegas.
 
 > 💡 The collector reloads its certificate from disk automatically (checked every
 > minute) whenever it changes, so renewing it needs no restart. Add the collector
@@ -678,7 +697,7 @@ chmod 600 agent.json          # it holds the agent token
 | Field / Campo | EN | PT |
 |---|---|---|
 | `collector_url` | Collector address, e.g. `https://collector:8443` (`/ingest` is added automatically); must use `https://` | Endereço do collector, por exemplo `https://collector:8443` (o `/ingest` é acrescentado automaticamente); tem de usar `https://` |
-| `collector_ca_file` | Collector CA certificate, PEM; only for internal CA or self-signed (options B and C above) | Certificado da CA do collector, em PEM; só para CA interna ou autoassinado (opções B e C acima) |
+| `collector_ca_file` | Collector CA certificate, PEM; only for internal CA, self-signed, or the built-in internal CA (options B, C and D above) | Certificado da CA do collector, em PEM; só para CA interna, autoassinado, ou a CA interna própria (opções B, C e D acima) |
 | `token` | This agent's token (`collector add-agent`); its `agent_id` must match | O token deste agente (`collector add-agent`); o `agent_id` tem de coincidir |
 | `agent_id` | Name of this agent, shown on the dashboard | Nome deste agente, mostrado no painel |
 | `queue_path` | Local file where results wait while the collector is unreachable | Ficheiro local onde os resultados esperam enquanto o collector não responde |

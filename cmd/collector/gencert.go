@@ -16,14 +16,27 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/internalca"
 )
 
-// runGenCert writes a self-signed TLS certificate (ECDSA P-256, SHA-256)
-// for the collector: collector.crt and collector.key in dir. hosts are
-// the IP addresses and DNS names agents will use; localhost and
-// 127.0.0.1 are always included. It never overwrites existing files:
-// a key that is already in use by agents must not change by accident.
-func runGenCert(dir string, hosts []string, days int, out io.Writer) error {
+// runGenCert writes a TLS certificate for the collector: collector.crt
+// and collector.key in dir. hosts are the IP addresses and DNS names
+// agents will use; localhost and 127.0.0.1 are always included. It
+// never overwrites existing files: a key that is already in use by
+// agents must not change by accident.
+//
+// When caDir is empty, the certificate is self-signed (ECDSA P-256,
+// SHA-256), as before: agents must trust collector.crt itself.
+//
+// When caDir is set, the certificate is issued by a reusable internal
+// CA kept in caDir (created there if it doesn't exist yet, M14: a
+// fallback for installations with no public domain for Let's
+// Encrypt). In this mode agents must trust caDir/ca.crt instead —
+// collector.crt is now a leaf certificate, not a root of trust — which
+// lets the installer issue more certificates later from the same CA
+// without redistributing trust to every agent again.
+func runGenCert(dir string, hosts []string, days int, caDir string, out io.Writer) error {
 	if days <= 0 {
 		days = 365
 	}
@@ -33,6 +46,11 @@ func runGenCert(dir string, hosts []string, days int, out io.Writer) error {
 			return fmt.Errorf("%s already exists; remove it first if you really want a new certificate", p)
 		}
 	}
+
+	if caDir != "" {
+		return runGenCertFromCA(dir, certPath, keyPath, hosts, days, caDir, out)
+	}
+
 	tmpl := &x509.Certificate{
 		SerialNumber:          new(big.Int).SetInt64(time.Now().UnixNano()),
 		Subject:               pkix.Name{CommonName: "expiry-radar-collector"},
@@ -84,6 +102,42 @@ func runGenCert(dir string, hosts []string, days int, out io.Writer) error {
 	return nil
 }
 
+// runGenCertFromCA issues the collector's leaf certificate from the
+// internal CA in caDir (created there if missing) instead of
+// self-signing, and writes it to certPath/keyPath.
+func runGenCertFromCA(dir, certPath, keyPath string, hosts []string, days int, caDir string, out io.Writer) error {
+	ca, err := internalca.EnsureCA(caDir)
+	if err != nil {
+		return err
+	}
+	certDER, key, err := ca.IssueCertificate(hosts, days)
+	if err != nil {
+		return err
+	}
+	if days <= 0 {
+		days = 365
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	if err := writeFileExcl(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		return err
+	}
+	if err := writeFileExcl(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), 0o644); err != nil {
+		_ = os.Remove(keyPath) // best effort: never leave a key without its certificate
+		return err
+	}
+	fmt.Fprintf(out, "Wrote %s and %s (valid %d days), issued by the internal CA in %s\n", certPath, keyPath, days, caDir)
+	fmt.Fprintf(out, "Copy %s to every agent (collector_ca_file) — NOT %s: agents must trust the CA, not this leaf certificate.\n",
+		filepath.Join(caDir, "ca.crt"), filepath.Base(certPath))
+	fmt.Fprintln(out, "Keep collector.key and the CA's own key (ca.key in the CA directory) private.")
+	return nil
+}
+
 func writeFileExcl(path string, data []byte, perm os.FileMode) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm) // #nosec G304 -- operator-chosen output directory; O_EXCL never overwrites
 	if err != nil {
@@ -102,10 +156,11 @@ func ipStrings(ips []net.IP) []string {
 	return out
 }
 
-// parseGenCertArgs handles: gen-cert <dir> [--host a,b,...] [--days N]
-func parseGenCertArgs(args []string) (dir string, hosts []string, days int, err error) {
+// parseGenCertArgs handles:
+// gen-cert <dir> [--host a,b,...] [--days N] [--ca <ca-dir>]
+func parseGenCertArgs(args []string) (dir string, hosts []string, days int, caDir string, err error) {
 	if len(args) < 1 {
-		return "", nil, 0, errors.New("usage: collector gen-cert <dir> [--host ip,dns,...] [--days N]")
+		return "", nil, 0, "", errors.New("usage: collector gen-cert <dir> [--host ip,dns,...] [--days N] [--ca <ca-dir>]")
 	}
 	dir = args[0]
 	for i := 1; i < len(args); i++ {
@@ -116,11 +171,14 @@ func parseGenCertArgs(args []string) (dir string, hosts []string, days int, err 
 		case args[i] == "--days" && i+1 < len(args):
 			i++
 			if _, e := fmt.Sscanf(args[i], "%d", &days); e != nil || days <= 0 || days > 3650 {
-				return "", nil, 0, fmt.Errorf("--days must be 1..3650")
+				return "", nil, 0, "", fmt.Errorf("--days must be 1..3650")
 			}
+		case args[i] == "--ca" && i+1 < len(args):
+			i++
+			caDir = args[i]
 		default:
-			return "", nil, 0, fmt.Errorf("unknown argument %q", args[i])
+			return "", nil, 0, "", fmt.Errorf("unknown argument %q", args[i])
 		}
 	}
-	return dir, hosts, days, nil
+	return dir, hosts, days, caDir, nil
 }
