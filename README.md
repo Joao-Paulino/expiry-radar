@@ -485,6 +485,15 @@ Windows: `"collector_ca_file": "C:\\ExpiryRadar\\agent\\collector-ca.pem"`. Skip
 | 🗑️ Retired agent | **Forget** on the dashboard removes it and stops its alerts; it comes back if it reports again | **Esquecer** no painel remove-o e para os alertas; volta se reportar de novo |
 | 👻 Gone items | An item missing from **two** later error-free runs of the same agent and checker (deleted, renamed, rotated away) leaves the dashboard, and its open alert gets one "no longer reported, verify it was removed on purpose" notification. Runs with errors never hide anything, and an item another agent still reports stays. `agent_id` must be unique per agent: two hosts sharing one would hide each other's items | Um item que falta em **duas** execuções posteriores sem erros do mesmo agente e checker (apagado, renomeado, rodado) sai do painel, e o alerta aberto recebe uma notificação "já não é reportado, confirma que foi removido de propósito". Execuções com erros nunca escondem nada, e um item que outro agente ainda reporta fica. O `agent_id` tem de ser único por agente: dois hosts com o mesmo esconderiam os itens um do outro |
 | 📮 Delivery | An alert is only marked as sent when at least one channel delivered it; otherwise it is retried next cycle | Um alerta só fica marcado como enviado quando pelo menos um canal o entregou; senão é tentado no ciclo seguinte |
+| 👤 Owner routing | An item with an **owner** set (dashboard's mute/re-own form) and a matching entry in `owner_routes` alerts **only** to that owner's own channels, never also to the global ones above. An owner with no matching route still falls back to the global channels | Um item com **owner** definido (formulário de silenciar/mudar dono do painel) e uma entrada correspondente em `owner_routes` alerta **só** para os canais desse dono, nunca também para os globais acima. Um owner sem rota correspondente continua a usar os canais globais |
+
+```json
+"webhook_url": "https://example.com/hook",
+"owner_routes": [
+  { "owner": "equipa-infra", "slack_webhook_url": "https://hooks.slack.com/services/…/infra" },
+  { "owner": "equipa-apps", "teams_webhook_url": "https://outlook.office.com/webhook/…/apps" }
+]
+```
 
 The dashboard's **Agents** section shows every agent and checker with last seen, last success and failures.
 A secção **Agents** do painel mostra cada agente e verificador com a última vez visto, último sucesso e falhas.

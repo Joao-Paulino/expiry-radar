@@ -171,6 +171,45 @@ func TestConfig_Validate_RejectsWeakTokens(t *testing.T) {
 	}
 }
 
+// TestConfig_Validate_OwnerRoutes proves an owner route needs an
+// owner and at least one channel, and that two routes cannot claim
+// the same owner (the second would silently never be used).
+func TestConfig_Validate_OwnerRoutes(t *testing.T) {
+	strong := "0123456789abcdef0123456789abcdef"
+	base := server.Config{
+		DBPath:      "radar.db",
+		ListenAddr:  "127.0.0.1:0",
+		AuthTokens:  []string{strong},
+		AdminTokens: []string{strong + "x"},
+		TLSCertFile: "cert.pem",
+		TLSKeyFile:  "key.pem",
+	}
+	ok := base
+	ok.OwnerRoutes = []server.OwnerRoute{{Owner: "equipa-infra", SlackWebhookURL: "https://hooks.example.com/a"}}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("valid owner route rejected: %v", err)
+	}
+	cases := map[string]server.OwnerRoute{
+		"no owner":     {SlackWebhookURL: "https://hooks.example.com/a"},
+		"no channel":   {Owner: "equipa-infra"},
+	}
+	for name, r := range cases {
+		c := base
+		c.OwnerRoutes = []server.OwnerRoute{r}
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: expected a validation error", name)
+		}
+	}
+	dup := base
+	dup.OwnerRoutes = []server.OwnerRoute{
+		{Owner: "equipa-infra", SlackWebhookURL: "https://hooks.example.com/a"},
+		{Owner: "equipa-infra", SlackWebhookURL: "https://hooks.example.com/b"},
+	}
+	if err := dup.Validate(); err == nil {
+		t.Error("duplicate owner route: expected a validation error")
+	}
+}
+
 // TestRun_BrowserWithoutSessionRedirectsToLogin proves an
 // unauthenticated browser is sent to the login page, and that the
 // login page itself is reachable without authentication.
