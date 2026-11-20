@@ -3,9 +3,12 @@
 Version assessed: v0.8.1. Numbering follows ASVS 4.0.3. Status: ✅ met, ⚠️ partial, ❌ not met, N/A not applicable.
 Requirements that do not apply to a single-binary Go service with server-rendered pages (for example SOAP, GraphQL, file upload, WebSockets) are grouped as N/A per chapter. Evidence points to code, tests or the [pentest report](PENTEST-2026-11.md).
 
+> **Update (M11, after v0.8.1):** role separation (V4.1.5, admin/operator/viewer RBAC) has since been added — see the row below and [docs/ARCHITECTURE.md §7](../ARCHITECTURE.md#roles-rbac). The rest of this assessment still reflects v0.8.1 and has not been re-run against the current codebase.
+> **Atualização (M11, depois da v0.8.1):** a separação de papéis (V4.1.5, RBAC admin/operator/viewer) foi entretanto acrescentada — ver a linha abaixo e [docs/ARQUITETURA.md §7](../ARQUITETURA.md#papéis-rbac). O resto desta avaliação ainda reflete a v0.8.1 e não foi refeita sobre o código atual.
+
 ## Resumo (PT-PT)
 
-Autoavaliação da Expiry Radar contra o OWASP ASVS 4.0.3 nível 2. Os capítulos de autenticação, sessões, controlo de acessos, validação, criptografia, erros/logs, proteção de dados, comunicações e configuração estão cumpridos. As lacunas parciais são: dependências de CI fixadas por tag e não por SHA (V14.2), sem separação de papéis de administrador (V4.1.5) e tokens partilhados ainda aceites por compatibilidade (V2.10). Não é uma certificação independente.
+Autoavaliação da Expiry Radar contra o OWASP ASVS 4.0.3 nível 2. Os capítulos de autenticação, sessões, controlo de acessos, validação, criptografia, erros/logs, proteção de dados, comunicações e configuração estão cumpridos. As lacunas parciais são: dependências de CI fixadas por tag e não por SHA (V14.2) e tokens partilhados ainda aceites por compatibilidade (V2.10). A separação de papéis de administrador (V4.1.5) foi resolvida no M11 (RBAC), depois desta avaliação. Não é uma certificação independente.
 
 ## V1 Architecture, design and threat modelling
 
@@ -59,7 +62,7 @@ Autoavaliação da Expiry Radar contra o OWASP ASVS 4.0.3 nível 2. Os capítulo
 | 4.2.1 IDOR protection | ✅ | agent can only write as its bound id (BUSL-02) |
 | 4.2.2 Anti-CSRF | ✅ | per-session token on cookie POSTs (CSRF-01/02/03) |
 | 4.3.1 Admin interfaces protected by MFA | ✅ | TOTP mandatory for password login; SSO delegates MFA to the IdP |
-| Role separation | ⚠️ | single admin role (by design, documented in pentest §6) |
+| 4.1.5 / Role separation | ✅ (added M11, after this assessment) | admin/operator/viewer RBAC, fail-closed on unknown role; see `internal/collector/session`, `internal/collector/sso/roles.go` |
 
 ## V5 Validation, sanitisation and encoding
 

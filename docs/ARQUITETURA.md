@@ -78,9 +78,10 @@ internal/
       notifiers/    email (SMTP), Slack, Teams
     rules/          silenciar e dono por item
     dashboard/      páginas HTML, CSS/JS embebidos, exportação CSV/JSON
-    session/        sessões do painel, tokens CSRF
+    session/        sessões do painel, tokens CSRF, papel (admin/operator/viewer)
     admin/          conta de administrador: hash da password, TOTP, códigos de recuperação, bloqueio
-    sso/            login OpenID Connect (authorization code + PKCE)
+    audit/          registo de auditoria: quem fez o quê, quando, valor antigo/novo e motivo
+    sso/            login OpenID Connect (authorization code + PKCE); mapeamento de grupos/roles para admin/operator/viewer
     export/         exportação CSV e JSON
   service/          integração com serviços Windows (SCM, Event Log); modo consola
   logging/          limpeza de logs (remove caracteres de controlo e segredos)
@@ -161,8 +162,9 @@ SQLite, com o driver em Go puro (sem CGO), num único ficheiro (`db_path`). Tabe
 | `agent_checker_health` | por agente e checker: última vez visto, último sucesso, falhas consecutivas, último erro |
 | `agents` | última vez que cada agente enviou dados |
 | `alert_state` | o que já foi alertado e com que severidade, para não repetir |
-| `rules` | por item: silenciado, dono |
-| `admin_account`, `admin_recovery_codes`, `admin_sessions`, `sso_flows` | autenticação do painel |
+| `rules` | por item: silenciado, dono, motivo do silêncio, data de fim do silêncio |
+| `admin_account`, `admin_recovery_codes`, `admin_sessions`, `sso_flows` | autenticação do painel; `admin_sessions` também guarda o actor e o papel da sessão (admin/operator/viewer) |
+| `audit_log` | quem fez o quê, quando: logins, silenciar/retirar silêncio/mudar dono e ações destrutivas de admin (esquecer um agente, terminar todas as sessões), com valor antigo/novo e motivo |
 
 As alterações ao esquema são migrações progressivas em `internal/collector/db`, aplicadas no arranque.
 
@@ -184,7 +186,10 @@ flowchart LR
     LC --> EV["Avaliar:<br/>aviso ≤ 30 d<br/>crítico ≤ 7 d"]
     EV --> RU{"silenciado?<br/>informativo?"}
     RU -- não --> DD{"já enviado<br/>nesta severidade?"}
-    DD -- não --> NT["Notificadores:<br/>email, Slack, Teams"]
+    DD -- não --> OW{"o dono do item tem<br/>owner_route correspondente?"}
+    OW -- sim --> NTO["Notificadores:<br/>só os canais desse dono"]
+    OW -- não --> NT["Notificadores:<br/>email, Slack, Teams globais"]
+    NTO --> AS["alert_state"]
     NT --> AS["alert_state"]
     H["saúde dos checkers"] --> F["alertas de checker em falha / agente em silêncio"]
     F --> NT
@@ -193,10 +198,23 @@ flowchart LR
 - Cada item gera um alerta por severidade. Passar de aviso a crítico volta a enviar, e uma renovação repõe o estado.
 - Checkers em falha e agentes que deixam de reportar geram alertas próprios, porque um agente calado significa nenhum alerta de expiração para tudo o que ele vigiava.
 - As mensagens dos notificadores são limpas: sem injeção de cabeçalhos no email nem de formatação no chat.
+- **Encaminhamento por dono.** O `owner` de um item (definido no formulário de silenciar/mudar dono do painel) viaja no seu `alert.Notification`. Se `owner_routes` tiver uma entrada correspondente, a entrega vai **só** para os canais desse dono (nunca também para os globais, para evitar duplicação de ruído). Um dono sem rota correspondente continua a cair nos canais globais — nada se perde silenciosamente.
 
 ### Painel
 
-Páginas geradas no servidor com `html/template`, com o CSS e um pequeno ficheiro de JavaScript simples embebidos no binário e servidos em `/static/`. Não há framework nem CDN, por isso o painel funciona em redes isoladas e sem JavaScript. Funcionalidades: cartões de resumo, filtros, ordenação, silenciar e dono por item, histórico, saúde dos agentes e checkers, exportação CSV/JSON e temas escuro, claro ou automático.
+Páginas geradas no servidor com `html/template`, com o CSS e um pequeno ficheiro de JavaScript simples embebidos no binário e servidos em `/static/`. Não há framework nem CDN, por isso o painel funciona em redes isoladas e sem JavaScript. Funcionalidades: cartões de resumo, filtros, ordenação, silenciar (com motivo obrigatório e data de fim opcional) e dono por item, histórico, saúde dos agentes e checkers, exportação CSV/JSON e temas escuro, claro ou automático. Cada silenciar, retirar silêncio, mudar dono e ação destrutiva de admin fica registado em `audit_log`, com o actor, o valor antigo/novo e o motivo.
+
+### Papéis (RBAC)
+
+Três papéis — `admin`, `operator`, `viewer` — ordenados `admin > operator > viewer`; um papel vazio ou desconhecido não satisfaz nenhum (falha fechado). O `session.RoleAtLeast(role, min)` é o único mecanismo de controlo, verificado tanto nos handlers do painel como antes de ações destrutivas de admin:
+
+| Papel | Pode fazer |
+|---|---|
+| `viewer` | Só leitura: painel, histórico, exportação. |
+| `operator` | Tudo o que um viewer pode, mais silenciar/retirar silêncio e mudar dono (`POST /rules`). |
+| `admin` | Tudo o que um operator pode, mais esquecer um agente e terminar todas as sessões — ambas destrutivas (acabam com ou apagam mais do que o acesso do próprio chamador) e só para admin, e ambas registadas em auditoria. |
+
+Quem pode entrar (`allowed_groups`/`allowed_roles`/`allowed_emails`) e o que uma pessoa já autorizada pode fazer (`admin_groups`/`operator_groups`/`admin_roles`/`operator_roles`, mapeados pelo `sso.RoleFor`) são verificações independentes: o portão de login corre sempre primeiro, por isso estar num grupo admin nunca o ultrapassa. Um fornecedor sem nenhuma destas chaves mantém o comportamento anterior ao RBAC (todos os utilizadores autorizados são admin); defini-las num fornecedor nunca afeta outro. A conta Administrator local e os pedidos com `admin_tokens` são sempre admin. Fazer upgrade nunca descarta uma sessão nem configuração: uma sessão criada antes de existir a coluna `role` lê `''` (acrescentada por um `ALTER TABLE` aditivo, nunca uma migração destrutiva) e falha fechado nas rotas protegidas até esse browser fazer novo login, dentro da sua duração normal (no máximo 8h) — é um novo login de segurança, não perda de dados.
 
 ## 7. Modelo de segurança
 
@@ -212,6 +230,7 @@ flowchart TB
         d["Password (PBKDF2-SHA256, 600k iterações)<br/>+ TOTP ou código de recuperação"] --> e["Cookie de sessão: Secure, HttpOnly,<br/>SameSite=Strict; 30 min inativo, 8 h no máximo"]
         d2["ou SSO OIDC: code + PKCE, nonce,<br/>lista de emails verificados / grupos / roles"] --> e
         e --> f["Token CSRF em cada POST"]
+        f --> rb["RBAC: papel na sessão,<br/>verificado por rota (viewer/operator/admin)"]
     end
     subgraph TB3["Fronteira 3: agente → sistemas verificados"]
         g["Só leitura, credenciais sem chaves,<br/>sem redirects, paginação na mesma origem"]
@@ -227,6 +246,8 @@ flowchart TB
 | Roubo de sessão ou CSRF | Cookies com flags restritas, durações curtas, tokens CSRF e botão "terminar todas as sessões". |
 | XSS ou clickjacking | Escape contextual pelo `html/template`; CSP `default-src 'self'` sem scripts nem estilos inline; `frame-ancestors 'none'`; HSTS. |
 | Abuso do SSO | Só entram emails verificados, grupos ou roles da aplicação que estejam na lista; o emissor tem de ser HTTPS; o fluxo fica ligado ao browser que o iniciou. |
+| Sessão com privilégios excessivos | RBAC: ações destrutivas (esquecer um agente, terminar todas as sessões) só para admin; ações que alteram estado (silenciar/mudar dono) precisam de operator ou superior; um papel desconhecido ou anterior ao RBAC não satisfaz nada, por isso falha fechado em vez de assumir admin por omissão. |
+| Alerta encaminhado para o canal errado | O `owner_routes` só acrescenta um destino para um `owner` correspondente; um item sem dono, ou um dono sem rota, continua sempre a chegar aos canais globais — uma rota mal configurada restringe a entrega, nunca silencia um alerta. |
 | Segredos nos logs | O `logging.Sanitize` oculta blocos PEM e pares do tipo `password=`/`token=` e escapa caracteres de controlo; os segredos da config são lidos de ficheiros (`*_file`), nunca da linha de comandos. |
 | Envios demasiado grandes | O `/ingest` lê no máximo 16 MiB por lote (413 acima disso). |
 | Dependências vulneráveis | `govulncheck` no CI, gate no release sobre cada binário e auditoria semanal que abre uma issue. |
