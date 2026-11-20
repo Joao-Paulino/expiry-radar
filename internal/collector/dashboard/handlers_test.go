@@ -107,6 +107,28 @@ func TestMux_PostRules_UpsertsAndRedirects(t *testing.T) {
 	}
 }
 
+// TestMux_PostRules_InvalidMuteUntilDoesNotEchoInput proves a bad
+// mute_until value gets a generic error, not one that echoes the raw
+// input back in the response (ZAP flagged this as a disclosure risk:
+// an attacker-controlled value reflected verbatim in an error body).
+func TestMux_PostRules_InvalidMuteUntilDoesNotEchoInput(t *testing.T) {
+	rs := &fakeRulesStore{}
+	mux := NewMux(&fakeStore{}, rs, nil)
+	payload := "<script>very-unusual-marker-xyz</script>"
+	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "muted": {"on"},
+		"mute_reason": {"r"}, "mute_until": {payload}}
+	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), payload) {
+		t.Fatalf("response echoes the raw input back: %s", rec.Body.String())
+	}
+}
+
 // TestMux_PostRules_MuteWithoutReasonIsRejected proves a mute is
 // refused unless the caller states why, so the audit log and the
 // dashboard always show a reason for every active mute.

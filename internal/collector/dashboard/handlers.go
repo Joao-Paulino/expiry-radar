@@ -226,7 +226,9 @@ func NewMux(st store.Store, rs rules.Store, a *audit.Store, opts ...Options) *ht
 			if v := r.FormValue("mute_until"); v != "" {
 				t, err := time.Parse("2006-01-02", v)
 				if err != nil {
-					http.Error(w, "mute_until: "+err.Error(), http.StatusBadRequest)
+					// Generic message: don't echo the raw value back
+					// (it's attacker-controlled input in an error body).
+					http.Error(w, "mute_until must be a date in YYYY-MM-DD format", http.StatusBadRequest)
 					return
 				}
 				until = t
