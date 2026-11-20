@@ -22,6 +22,7 @@ cat > "$W/collector.json" <<JSON
  "tls_cert_file":"$W/collector.crt","tls_key_file":"$W/collector.key",
  "auth_tokens":["$AGENT_TOKEN"],"admin_tokens":["$ADMIN_TOKEN"]}
 JSON
+chmod 600 "$W/collector.json"
 "$W/collector" "$W/collector.json" > "$W/collector.log" 2>&1 &
 trap 'kill %1 2>/dev/null || true; echo "--- collector crash (if any)"; grep -m1 -A60 -E "^(fatal error|panic|runtime: )" "$W/collector.log" || true; echo "--- collector log (tail)"; tail -20 "$W/collector.log"' EXIT
 for _ in $(seq 1 30); do curl -sk -o /dev/null https://127.0.0.1:18443/login && break; sleep 1; done

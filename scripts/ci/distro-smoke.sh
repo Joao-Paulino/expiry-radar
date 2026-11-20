@@ -23,6 +23,7 @@ cat > "$W/collector.json" <<JSON
  "tls_cert_file":"$W/tls.crt","tls_key_file":"$W/tls.key",
  "auth_tokens":["$AGENT_TOKEN"],"admin_tokens":["$ADMIN_TOKEN"]}
 JSON
+chmod 600 "$W/collector.json"
 "$W/collector" "$W/collector.json" > "$W/collector.log" 2>&1 &
 trap 'kill %1 2>/dev/null || true; docker rm -f mailpit >/dev/null 2>&1 || true' EXIT
 for i in $(seq 1 30); do curl -sk -o /dev/null https://127.0.0.1:8443/login && break; sleep 1; done
