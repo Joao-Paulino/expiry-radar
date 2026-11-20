@@ -49,7 +49,7 @@ func TestMiddleware_WrongBearerIs401(t *testing.T) {
 
 func TestMiddleware_SessionGETExposesCSRF(t *testing.T) {
 	st, _ := newTestStore(t)
-	id, s, _ := st.Create(context.Background())
+	id, s, _ := st.Create(context.Background(), "admin")
 	var csrf string
 	h := Middleware(st, []string{adminToken}, handlerRecordingCSRF(&csrf))
 	req := httptest.NewRequest("GET", "/", nil)
@@ -87,7 +87,7 @@ func TestMiddleware_UnauthenticatedAPIIs401(t *testing.T) {
 
 func TestMiddleware_SessionPOSTRequiresCSRF(t *testing.T) {
 	st, _ := newTestStore(t)
-	id, s, _ := st.Create(context.Background())
+	id, s, _ := st.Create(context.Background(), "admin")
 	var csrf string
 	h := Middleware(st, []string{adminToken}, handlerRecordingCSRF(&csrf))
 	for name, tc := range map[string]struct {
@@ -130,7 +130,7 @@ func TestMiddleware_ExpiredSessionCookieIsUnauthenticated(t *testing.T) {
 // the log with the client address, and never the token itself.
 func TestMiddleware_LogsCSRFRejection(t *testing.T) {
 	st, _ := newTestStore(t)
-	id, s, _ := st.Create(context.Background())
+	id, s, _ := st.Create(context.Background(), "admin")
 	var b strings.Builder
 	log.SetOutput(&b)
 	defer log.SetOutput(os.Stderr)

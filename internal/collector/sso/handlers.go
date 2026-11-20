@@ -17,6 +17,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/audit"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
 )
@@ -34,6 +35,7 @@ type Handlers struct {
 	PublicURL       string
 	Flows           *FlowStore
 	Sessions        *session.Store
+	Audit           *audit.Store // optional; nil skips the audit log
 	SessionLifetime time.Duration
 	HTTPClient      *http.Client // for provider calls; nil = default
 
@@ -290,14 +292,19 @@ func (h *Handlers) callback(w http.ResponseWriter, r *http.Request) {
 			log.Printf("sso: dropping the previous session failed: %s", logging.Sanitize(err.Error()))
 		}
 	}
-	id, _, err := h.Sessions.CreateWithLifetime(ctx, h.SessionLifetime)
+	who := claims.Email
+	if who == "" {
+		who = idt.Subject
+	}
+	id, _, err := h.Sessions.CreateWithLifetime(ctx, who, h.SessionLifetime)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	who := claims.Email
-	if who == "" {
-		who = idt.Subject
+	if h.Audit != nil {
+		if err := h.Audit.Log(ctx, who, "login", p.Name, "", "", ""); err != nil {
+			log.Printf("sso: audit log error: %s", logging.Sanitize(err.Error()))
+		}
 	}
 	log.Printf("sso: login success via %s (%s, from %s)", p.Name, logging.Sanitize(who), logging.Sanitize(r.RemoteAddr))
 	http.SetCookie(w, &http.Cookie{Name: BindCookieName, Value: "", Path: "/", Secure: true, HttpOnly: true, MaxAge: -1})

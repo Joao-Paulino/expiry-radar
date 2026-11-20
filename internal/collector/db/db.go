@@ -94,7 +94,8 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
     csrf_token TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     last_seen_at INTEGER NOT NULL,
-    max_age_seconds INTEGER NOT NULL DEFAULT 28800 -- absolute lifetime
+    max_age_seconds INTEGER NOT NULL DEFAULT 28800, -- absolute lifetime
+    actor TEXT NOT NULL DEFAULT '' -- "admin", or the SSO identity
 );
 
 -- Pending SSO logins: state (hashed), nonce and PKCE verifier; 10 min, single use.
@@ -105,6 +106,21 @@ CREATE TABLE IF NOT EXISTS sso_flows (
     verifier TEXT NOT NULL,
     created_at INTEGER NOT NULL
 );
+
+-- Who did what: logins and rule changes (mute, owner), for accountability.
+-- Generic by design so a later action (e.g. an RBAC change) reuses it
+-- without a schema change.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target TEXT NOT NULL DEFAULT '',
+    old_value TEXT NOT NULL DEFAULT '',
+    new_value TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log(at);
 `
 
 // Open opens (creating if absent) a SQLite database at path and runs
@@ -133,6 +149,9 @@ func Open(path string) (*sql.DB, error) {
 // IF NOT EXISTS cannot add columns.
 func migrate(database *sql.DB) error {
 	if err := addColumnIfMissing(database, "admin_sessions", "max_age_seconds", "INTEGER NOT NULL DEFAULT 28800"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(database, "admin_sessions", "actor", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	// Rows written before checker_name existed keep '' (see store.ListCurrent).

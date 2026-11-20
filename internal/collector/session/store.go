@@ -23,11 +23,14 @@ const (
 	absoluteLifetime = 8 * time.Hour
 )
 
-// Session is the server-side state of one logged-in browser.
+// Session is the server-side state of one logged-in browser. Actor is
+// who logged in: "admin" for the local admin account, or the SSO
+// identity (email or subject) for an SSO login.
 type Session struct {
 	CSRFToken  string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
+	Actor      string
 }
 
 // Store keeps sessions in SQLite, indexed by the SHA-256 of their id.
@@ -49,15 +52,15 @@ func hashID(id string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Create starts a new session with the default 8-hour lifetime and
-// returns its id (for the cookie).
-func (s *Store) Create(ctx context.Context) (string, Session, error) {
-	return s.CreateWithLifetime(ctx, absoluteLifetime)
+// Create starts a new session for actor with the default 8-hour
+// lifetime and returns its id (for the cookie).
+func (s *Store) Create(ctx context.Context, actor string) (string, Session, error) {
+	return s.CreateWithLifetime(ctx, actor, absoluteLifetime)
 }
 
-// CreateWithLifetime starts a session that ends at most lifetime after
-// creation (SSO sessions are shorter than local ones).
-func (s *Store) CreateWithLifetime(ctx context.Context, lifetime time.Duration) (string, Session, error) {
+// CreateWithLifetime starts a session for actor that ends at most
+// lifetime after creation (SSO sessions are shorter than local ones).
+func (s *Store) CreateWithLifetime(ctx context.Context, actor string, lifetime time.Duration) (string, Session, error) {
 	id, err := randomToken()
 	if err != nil {
 		return "", Session{}, err
@@ -67,11 +70,11 @@ func (s *Store) CreateWithLifetime(ctx context.Context, lifetime time.Duration) 
 		return "", Session{}, err
 	}
 	now := s.Now()
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO admin_sessions (id_hash, csrf_token, created_at, last_seen_at, max_age_seconds)
-		VALUES (?, ?, ?, ?, ?)`, hashID(id), csrf, now.Unix(), now.Unix(), int64(lifetime/time.Second)); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO admin_sessions (id_hash, csrf_token, created_at, last_seen_at, max_age_seconds, actor)
+		VALUES (?, ?, ?, ?, ?, ?)`, hashID(id), csrf, now.Unix(), now.Unix(), int64(lifetime/time.Second), actor); err != nil {
 		return "", Session{}, err
 	}
-	return id, Session{CSRFToken: csrf, CreatedAt: now, LastSeenAt: now}, nil
+	return id, Session{CSRFToken: csrf, CreatedAt: now, LastSeenAt: now, Actor: actor}, nil
 }
 
 // Lookup returns the session for id if it exists and has not passed
@@ -84,8 +87,8 @@ func (s *Store) Lookup(ctx context.Context, id string) (Session, bool, error) {
 	h := hashID(id)
 	var sess Session
 	var created, lastSeen, maxAge int64
-	err := s.DB.QueryRowContext(ctx, `SELECT csrf_token, created_at, last_seen_at, max_age_seconds FROM admin_sessions WHERE id_hash = ?`, h).
-		Scan(&sess.CSRFToken, &created, &lastSeen, &maxAge)
+	err := s.DB.QueryRowContext(ctx, `SELECT csrf_token, created_at, last_seen_at, max_age_seconds, actor FROM admin_sessions WHERE id_hash = ?`, h).
+		Scan(&sess.CSRFToken, &created, &lastSeen, &maxAge, &sess.Actor)
 	if err == sql.ErrNoRows {
 		return Session{}, false, nil
 	}

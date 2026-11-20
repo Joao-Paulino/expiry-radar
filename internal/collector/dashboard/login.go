@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/audit"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/sso"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
@@ -50,7 +51,8 @@ const genericLoginError = "Invalid credentials. / Credenciais inválidas."
 // be wrapped in session.Middleware so it is CSRF-protected.
 // buttons are the SSO providers shown on the login page. revokeAll
 // ends every session and, like logout, must sit behind session.Middleware.
-func LoginHandlers(auth *admin.Authenticator, sessions *session.Store, buttons []sso.Button, opts ...Options) (get, post, logout, revokeAll http.Handler) {
+// a is optional (nil skips the audit log).
+func LoginHandlers(auth *admin.Authenticator, sessions *session.Store, a *audit.Store, buttons []sso.Button, opts ...Options) (get, post, logout, revokeAll http.Handler) {
 	theme := optionsOf(opts).Theme
 	render := func(w http.ResponseWriter, msg string) { renderLogin(w, msg, buttons, theme) }
 
@@ -101,11 +103,16 @@ func LoginHandlers(auth *admin.Authenticator, sessions *session.Store, buttons [
 				log.Printf("dashboard: dropping the previous session failed: %s", logging.Sanitize(err.Error()))
 			}
 		}
-		id, _, err := sessions.Create(ctx)
+		id, _, err := sessions.Create(ctx, "admin")
 		if err != nil {
 			log.Printf("dashboard: session create error: %s", logging.Sanitize(err.Error()))
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
+		}
+		if a != nil {
+			if err := a.Log(ctx, "admin", "login", "", "", "", ""); err != nil {
+				log.Printf("dashboard: audit log error: %s", logging.Sanitize(err.Error()))
+			}
 		}
 		if res.RecoveryCode {
 			log.Printf("dashboard: login success with a recovery code, %d left (from %s)", res.RecoveryCodesLeft, logging.Sanitize(r.RemoteAddr))

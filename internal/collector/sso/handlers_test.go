@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/audit"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/db"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
 )
@@ -19,6 +20,7 @@ type env struct {
 	h        *Handlers
 	idp      *fakeIdP
 	sessions *session.Store
+	audit    *audit.Store
 	clock    *clock
 	mux      *http.ServeMux
 }
@@ -36,14 +38,15 @@ func newEnv(t *testing.T, allow ProviderConfig) *env {
 	allow.Name, allow.DisplayName, allow.Issuer, allow.ClientID, allow.ClientSecretFile = "test", "Test IdP", idp.srv.URL, "client", secret
 	c := &clock{t: time.Now()}
 	sessions := &session.Store{DB: database, Now: c.now}
+	auditLog := &audit.Store{DB: database, Now: c.now}
 	h := &Handlers{
 		Providers: []ProviderConfig{allow}, PublicURL: "https://collector.test",
-		Flows: &FlowStore{DB: database, Now: c.now}, Sessions: sessions,
+		Flows: &FlowStore{DB: database, Now: c.now}, Sessions: sessions, Audit: auditLog,
 		SessionLifetime: time.Hour, HTTPClient: idp.srv.Client(),
 	}
 	mux := http.NewServeMux()
 	h.Register(mux)
-	return &env{h: h, idp: idp, sessions: sessions, clock: c, mux: mux}
+	return &env{h: h, idp: idp, sessions: sessions, audit: auditLog, clock: c, mux: mux}
 }
 
 // start runs /auth/test/login and returns the state, the binding cookie
@@ -117,6 +120,22 @@ func TestCallback_Success(t *testing.T) {
 	e.clock.t = e.clock.t.Add(61 * time.Minute)
 	if _, ok, _ := e.sessions.Lookup(context.Background(), c.Value); ok {
 		t.Fatal("SSO session outlived its 1h lifetime")
+	}
+}
+
+// TestCallback_SuccessWritesAuditEntry proves a successful SSO login
+// is recorded under the signed-in identity, not a generic actor.
+func TestCallback_SuccessWritesAuditEntry(t *testing.T) {
+	e := newEnv(t, emailAllowed())
+	e.idp.claim = map[string]any{"email": "joao@example.com", "email_verified": true}
+	state, bind := e.start(t)
+	e.callback(t, state, bind)
+	entries, err := e.audit.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Actor != "joao@example.com" || entries[0].Action != "login" {
+		t.Fatalf("got entries %+v, want one login by joao@example.com", entries)
 	}
 }
 

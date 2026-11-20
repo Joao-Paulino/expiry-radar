@@ -17,6 +17,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/auth"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/alert"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/audit"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/alert/notifiers"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/dashboard"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/db"
@@ -387,13 +388,14 @@ func Run(cfg Config) error {
 	dashboardMux := dashboard.NewMux(st, rs, dashboard.Options{Theme: cfg.Theme})
 
 	sessions := &session.Store{DB: database, Now: time.Now}
+	auditLog := &audit.Store{DB: database, Now: time.Now}
 	authenticator := &admin.Authenticator{Store: &admin.Store{DB: database}, Now: time.Now}
 	ssoHandlers := &sso.Handlers{
-		Providers: cfg.OIDCProviders, PublicURL: cfg.PublicURL, Sessions: sessions,
+		Providers: cfg.OIDCProviders, PublicURL: cfg.PublicURL, Sessions: sessions, Audit: auditLog,
 		Flows: &sso.FlowStore{DB: database, Now: time.Now}, SessionLifetime: cfg.SSOSessionLifetime(),
 		HTTPClient: &http.Client{Timeout: 15 * time.Second}, // discovery, token and signing-key requests
 	}
-	loginGet, loginPost, logout, revokeAll := dashboard.LoginHandlers(authenticator, sessions, ssoHandlers.Buttons(), dashboard.Options{Theme: cfg.Theme})
+	loginGet, loginPost, logout, revokeAll := dashboard.LoginHandlers(authenticator, sessions, auditLog, ssoHandlers.Buttons(), dashboard.Options{Theme: cfg.Theme})
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", dashboard.StaticHandler())
