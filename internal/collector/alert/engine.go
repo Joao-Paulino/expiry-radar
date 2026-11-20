@@ -151,7 +151,7 @@ func (e *Engine) Evaluate(ctx context.Context, now time.Time) ([]Notification, e
 			Type:     TypeExpiry,
 			Record:   record,
 			Severity: sev,
-			Muted:    found && rule.Muted,
+			Muted:    found && rule.ActiveMute(now),
 		})
 	}
 

@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS rules (
     kind TEXT NOT NULL,
     muted BOOLEAN NOT NULL DEFAULT 0,
     owner TEXT NOT NULL DEFAULT '',
+    mute_reason TEXT NOT NULL DEFAULT '',
+    mute_until INTEGER NOT NULL DEFAULT 0, -- unix seconds, 0 = no expiry
     PRIMARY KEY (source, name, kind)
 );
 
@@ -152,6 +154,12 @@ func migrate(database *sql.DB) error {
 		return err
 	}
 	if err := addColumnIfMissing(database, "admin_sessions", "actor", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(database, "rules", "mute_reason", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(database, "rules", "mute_until", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	// Rows written before checker_name existed keep '' (see store.ListCurrent).

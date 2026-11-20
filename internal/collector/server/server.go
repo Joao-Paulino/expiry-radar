@@ -384,11 +384,11 @@ func Run(cfg Config) error {
 
 	st := store.NewSQLite(database)
 	rs := rules.NewSQLite(database)
+	auditLog := &audit.Store{DB: database, Now: time.Now}
 
-	dashboardMux := dashboard.NewMux(st, rs, dashboard.Options{Theme: cfg.Theme})
+	dashboardMux := dashboard.NewMux(st, rs, auditLog, dashboard.Options{Theme: cfg.Theme})
 
 	sessions := &session.Store{DB: database, Now: time.Now}
-	auditLog := &audit.Store{DB: database, Now: time.Now}
 	authenticator := &admin.Authenticator{Store: &admin.Store{DB: database}, Now: time.Now}
 	ssoHandlers := &sso.Handlers{
 		Providers: cfg.OIDCProviders, PublicURL: cfg.PublicURL, Sessions: sessions, Audit: auditLog,

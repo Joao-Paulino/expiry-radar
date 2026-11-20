@@ -38,6 +38,8 @@
 <div class="pop"><form class="rowform" method="post" action="/rules">{{if $csrf}}<input type="hidden" name="csrf_token" value="{{$csrf}}">{{end}}
 <input type="hidden" name="source" value="{{.Record.Source}}"><input type="hidden" name="name" value="{{.Record.Name}}"><input type="hidden" name="kind" value="{{.Record.Kind}}">
 <label><input type="checkbox" name="muted"{{if .Muted}} checked{{end}}> Mute alerts / Silenciar</label>
+<label>Reason (required to mute) / Motivo (obrigatório para silenciar) <input type="text" name="mute_reason" value="{{.MuteReason}}" placeholder="e.g. renewing, ticket OPS-123"></label>
+<label>Mute until (optional) / Silenciar até (opcional) <input type="date" name="mute_until" value="{{.MuteUntilDate}}"></label>
 <label>Owner <input type="text" name="owner" value="{{.Owner}}" placeholder="owner / dono"></label>
 <button type="submit" class="primary">Save / Guardar</button>
 <a class="btn" href="/history?source={{.Record.Source}}&amp;name={{.Record.Name}}&amp;kind={{.Record.Kind}}">History / Histórico</a>
@@ -66,6 +68,8 @@
 <input type="text" name="name" placeholder="name" required>
 <input type="text" name="kind" placeholder="kind" required>
 <label><input type="checkbox" name="muted"> Muted</label>
+<input type="text" name="mute_reason" placeholder="reason, required to mute">
+<input type="date" name="mute_until" placeholder="mute until (optional)">
 <input type="text" name="owner" placeholder="owner">
 <button type="submit" class="primary">Save</button>
 </form></details>

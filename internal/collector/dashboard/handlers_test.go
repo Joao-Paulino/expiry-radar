@@ -6,12 +6,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/audit"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/db"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/rules"
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/store"
 )
 
@@ -67,7 +71,7 @@ func (f *fakeRulesStore) List(ctx context.Context) ([]rules.Rule, error) {
 
 func TestMux_List_Returns200WithRecords(t *testing.T) {
 	st := &fakeStore{current: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "a", Name: "b", Kind: "certificate", ExpiresAt: time.Now().Add(48 * time.Hour)}}}}
-	mux := NewMux(st, &fakeRulesStore{})
+	mux := NewMux(st, &fakeRulesStore{}, nil)
 	req := httptest.NewRequest("GET", "/", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -81,8 +85,9 @@ func TestMux_List_Returns200WithRecords(t *testing.T) {
 
 func TestMux_PostRules_UpsertsAndRedirects(t *testing.T) {
 	rs := &fakeRulesStore{}
-	mux := NewMux(&fakeStore{}, rs)
-	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "muted": {"on"}, "owner": {"joao"}}
+	mux := NewMux(&fakeStore{}, rs, nil)
+	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "muted": {"on"}, "owner": {"joao"},
+		"mute_reason": {"renewing next sprint, ticket OPS-123"}, "mute_until": {"2027-01-15"}}
 	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -93,11 +98,89 @@ func TestMux_PostRules_UpsertsAndRedirects(t *testing.T) {
 	if !rs.upserted.Muted || rs.upserted.Owner != "joao" {
 		t.Fatalf("got %+v", rs.upserted)
 	}
+	if rs.upserted.MuteReason != "renewing next sprint, ticket OPS-123" {
+		t.Fatalf("MuteReason = %q", rs.upserted.MuteReason)
+	}
+	wantUntil := time.Date(2027, 1, 15, 0, 0, 0, 0, time.UTC)
+	if !rs.upserted.MuteUntil.Equal(wantUntil) {
+		t.Fatalf("MuteUntil = %v, want %v", rs.upserted.MuteUntil, wantUntil)
+	}
+}
+
+// TestMux_PostRules_MuteWithoutReasonIsRejected proves a mute is
+// refused unless the caller states why, so the audit log and the
+// dashboard always show a reason for every active mute.
+func TestMux_PostRules_MuteWithoutReasonIsRejected(t *testing.T) {
+	rs := &fakeRulesStore{}
+	mux := NewMux(&fakeStore{}, rs, nil)
+	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "muted": {"on"}}
+	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400", rec.Code)
+	}
+	if rs.upserted != (rules.Rule{}) {
+		t.Fatalf("expected no upsert, got %+v", rs.upserted)
+	}
+}
+
+// TestMux_PostRules_UnmutingClearsReasonAndUntil proves turning a
+// mute off drops its stale reason/expiry rather than leaving them
+// behind for the next mute.
+func TestMux_PostRules_UnmutingClearsReasonAndUntil(t *testing.T) {
+	rs := &fakeRulesStore{}
+	mux := NewMux(&fakeStore{}, rs, nil)
+	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "owner": {"joao"}}
+	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("got %d, want 303", rec.Code)
+	}
+	if rs.upserted.Muted || rs.upserted.MuteReason != "" || !rs.upserted.MuteUntil.IsZero() {
+		t.Fatalf("got %+v, want unmuted with reason/until cleared", rs.upserted)
+	}
+}
+
+// TestMux_PostRules_WritesAuditEntry proves a mute change is
+// recorded under the authenticated actor, with the reason, for a
+// later "who did what" view.
+func TestMux_PostRules_WritesAuditEntry(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "radar.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	a := &audit.Store{DB: database, Now: time.Now}
+	rs := &fakeRulesStore{}
+	mux := NewMux(&fakeStore{}, rs, a)
+
+	form := url.Values{"source": {"a"}, "name": {"b"}, "kind": {"certificate"}, "muted": {"on"}, "mute_reason": {"renewing"}}
+	req := httptest.NewRequest("POST", "/rules", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(session.WithActor(req.Context(), "alice@example.com"))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("got %d, want 303", rec.Code)
+	}
+
+	entries, err := a.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Actor != "alice@example.com" || entries[0].Action != "mute" ||
+		entries[0].Target != "a|b|certificate" || entries[0].Reason != "renewing" {
+		t.Fatalf("got entries %+v", entries)
+	}
 }
 
 func TestMux_ExportJSON_ReturnsValidArray(t *testing.T) {
 	st := &fakeStore{current: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "a", Name: "b", Kind: "certificate", ExpiresAt: time.Now()}}}}
-	mux := NewMux(st, &fakeRulesStore{})
+	mux := NewMux(st, &fakeRulesStore{}, nil)
 	req := httptest.NewRequest("GET", "/export.json", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -109,7 +192,7 @@ func TestMux_ExportJSON_ReturnsValidArray(t *testing.T) {
 
 func TestMux_History_Returns200(t *testing.T) {
 	st := &fakeStore{history: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "a", Name: "b", Kind: "certificate", ExpiresAt: time.Now()}}}}
-	mux := NewMux(st, &fakeRulesStore{})
+	mux := NewMux(st, &fakeRulesStore{}, nil)
 	req := httptest.NewRequest("GET", "/history?source=a&name=b&kind=certificate", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -123,7 +206,7 @@ func TestMux_History_Returns200(t *testing.T) {
 
 func TestMux_ExportCSV_ReturnsCSV(t *testing.T) {
 	st := &fakeStore{current: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "a", Name: "b", Kind: "certificate", ExpiresAt: time.Now()}}}}
-	mux := NewMux(st, &fakeRulesStore{})
+	mux := NewMux(st, &fakeRulesStore{}, nil)
 	req := httptest.NewRequest("GET", "/export.csv", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -143,7 +226,7 @@ func TestMux_List_ShowsAgents(t *testing.T) {
 		{CheckerName: "tls", ReportedBy: "web-01", LastSeenAt: seen, ConsecutiveFailures: 4, LastError: "dial timeout"},
 	}}
 	rec := httptest.NewRecorder()
-	NewMux(st, &fakeRulesStore{}).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	NewMux(st, &fakeRulesStore{}, nil).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	body := rec.Body.String()
 	for _, want := range []string{"Agents", "web-01", "tls", "2026-11-11 09:30", "4", "dial timeout"} {
 		if !strings.Contains(body, want) {
@@ -168,13 +251,13 @@ func TestMux_ForgetAgent(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/agents/forget", strings.NewReader("agent_id=old-web"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	NewMux(st, &fakeRulesStore{}).ServeHTTP(rec, req)
+	NewMux(st, &fakeRulesStore{}, nil).ServeHTTP(rec, req)
 	if rec.Code != http.StatusSeeOther || len(st.forgotten) != 1 || st.forgotten[0] != "old-web" {
 		t.Fatalf("code=%d forgotten=%v", rec.Code, st.forgotten)
 	}
 	st2 := &fakeStore{agents: []store.AgentSeen{{AgentID: "web-01", LastSeenAt: time.Now()}}}
 	rec = httptest.NewRecorder()
-	NewMux(st2, &fakeRulesStore{}).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	NewMux(st2, &fakeRulesStore{}, nil).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if !strings.Contains(rec.Body.String(), `action="/agents/forget"`) {
 		t.Fatal("no Forget button on the dashboard")
 	}
@@ -186,7 +269,7 @@ func TestMux_List_ShowsStatus(t *testing.T) {
 	st := &fakeStore{current: []store.StoredRecord{{ExpiryRecord: checker.ExpiryRecord{Source: "aws://iam/1/user/bob/access_key_1", Name: "bob · key 1",
 		Kind: "access_key", ExpiresAt: time.Now().Add(-48 * time.Hour), Metadata: map[string]string{"status": "inactive", "alerts": "off"}}}}}
 	rec := httptest.NewRecorder()
-	NewMux(st, &fakeRulesStore{}).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	NewMux(st, &fakeRulesStore{}, nil).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if !strings.Contains(rec.Body.String(), "inactive (no alerts)") {
 		t.Fatal("status not shown")
 	}
