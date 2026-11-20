@@ -539,7 +539,7 @@ func Run(cfg Config) error {
 	}
 
 	srv := NewHTTPServer(securityHeaders(mux))
-	srv.TLSConfig = &tls.Config{GetCertificate: certs.GetCertificate}
+	srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: certs.GetCertificate}
 
 	if cfg.Done != nil {
 		go func() {
