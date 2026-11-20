@@ -1008,6 +1008,7 @@ Outros sistemas de licenciamento (CodeMeter, Sentinel RMS/HASP, subscrições Sa
 | EN | PT |
 |---|---|
 | Two agents checking the same `host:port` overwrite each other; use fully qualified names | Dois agentes que verificam o mesmo `host:porta` sobrepõem-se; usa nomes totalmente qualificados |
+| On Linux/macOS the agent and collector refuse to start if their config file (it holds tokens/secrets) is readable or writable by group/other — `chmod 600`. On Windows this isn't checked yet (NTFS ACLs, not POSIX bits); rely on the ACLs the installer sets | Em Linux/macOS, agente e collector recusam arrancar se o ficheiro de configuração (tem tokens/segredos) for legível ou escrevível por grupo/outros — `chmod 600`. No Windows ainda não há esta verificação (ACLs NTFS, não bits POSIX); depende das ACLs definidas pelo instalador |
 
 ## 🗺️ Roadmap
 

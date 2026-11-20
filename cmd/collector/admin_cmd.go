@@ -18,9 +18,13 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/admin"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/db"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
+	"github.com/Joao-Paulino/expiry-radar/internal/configperm"
 )
 
 func loadConfig(path string) (Config, error) {
+	if err := configperm.Check(path); err != nil {
+		return Config{}, err
+	}
 	data, err := os.ReadFile(path) // #nosec G304 -- path comes from the operator's own configuration, not from remote input
 	if err != nil {
 		return Config{}, fmt.Errorf("reading config: %w", err)
