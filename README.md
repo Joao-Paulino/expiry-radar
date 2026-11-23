@@ -240,7 +240,7 @@ sudo install -m 755 expiry-radar-collector-$v-linux-amd64 /opt/expiry-radar/expi
 sudo install -m 755 expiry-radar-agent-$v-linux-amd64 /opt/expiry-radar/expiry-radar-agent
 
 # configs: /etc/expiry-radar/collector.json and/e agent.json
-sudo chown root:expiry-radar /etc/expiry-radar/*.json && sudo chmod 640 /etc/expiry-radar/*.json
+sudo chown expiry-radar:expiry-radar /etc/expiry-radar/*.json && sudo chmod 600 /etc/expiry-radar/*.json
 
 for svc in collector agent; do
 sudo tee /etc/systemd/system/expiry-radar-$svc.service >/dev/null <<EOF

@@ -203,7 +203,7 @@ EOF
   # Service user owns the data; secrets readable by root and the service only
   chown -R "$SVC_USER:$SVC_USER" "$COL_DIR"
   chmod 750 "$COL_DIR"
-  chmod 640 "$COL_DIR/collector.json" "$COL_DIR/collector.key"
+  chmod 600 "$COL_DIR/collector.json" "$COL_DIR/collector.key"
   chmod 644 "$COL_DIR/collector.crt"
 
   write_unit expiry-radar-collector "Expiry Radar Collector" "$COL_BIN" "$COL_DIR/collector.json" "$COL_DIR"
@@ -278,7 +278,7 @@ if [ "$OPTION" = "2" ] || [ "$OPTION" = "3" ]; then
 EOF
   chown -R "$SVC_USER:$SVC_USER" "$AGENT_DIR"
   chmod 750 "$AGENT_DIR"
-  chmod 640 "$AGENT_DIR/agent.json"
+  chmod 600 "$AGENT_DIR/agent.json"
 
   write_unit expiry-radar-agent "Expiry Radar Agent" "$AGENT_BIN" "$AGENT_DIR/agent.json" "$AGENT_DIR"
   systemctl daemon-reload
