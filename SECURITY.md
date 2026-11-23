@@ -2,8 +2,8 @@
 
 ## Supported versions / Versões suportadas
 
-Only the latest release receives security fixes. Releases older than v0.2.1 were withdrawn because of known vulnerabilities in their dependencies.
-Só o release mais recente recebe correções de segurança. Os releases anteriores à v0.2.1 foram retirados por terem vulnerabilidades conhecidas nas dependências.
+Only the latest release receives security fixes. Releases older than v0.2.1 were withdrawn because of known vulnerabilities in their dependencies. v1.0.0 and v1.1.0 were withdrawn for an unrelated reason: a release-pipeline bug published them with no binaries attached; use v1.0.1 and v1.1.1 instead.
+Só o release mais recente recebe correções de segurança. Os releases anteriores à v0.2.1 foram retirados por terem vulnerabilidades conhecidas nas dependências. A v1.0.0 e a v1.1.0 foram retiradas por um motivo diferente: um problema na pipeline de release publicou-as sem binários anexados; usa a v1.0.1 e a v1.1.1.
 
 ## Reporting a vulnerability / Reportar uma vulnerabilidade
 
