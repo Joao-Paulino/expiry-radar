@@ -104,8 +104,14 @@ function Generate-Certs {
     $answer = Read-Host "[PT] IP/nome que os agentes usam [Enter para $ip] / [EN] IP/name agents will use [Enter for $ip]"
     if (-not [string]::IsNullOrWhiteSpace($answer)) { $ip = $answer.Trim() }
 
+    $useCa = Read-Host "[PT] Usar uma CA interna própria? Recomendado sem dominio publico: permite reemitir certificados mais tarde sem voltar a distribuir confianca a cada agente. [S/n] / [EN] Use a built-in internal CA? Recommended with no public domain: lets you re-issue certificates later without redistributing trust to every agent. [Y/n]"
+
     # O próprio collector gera o certificado / The collector generates the certificate itself
-    & $Bin gen-cert $Dir --host $ip
+    if ($useCa -match '^[nN]') {
+        & $Bin gen-cert $Dir --host $ip
+    } else {
+        & $Bin gen-cert $Dir --host $ip --ca "$Dir\ca"
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[PT] Erro ao gerar o certificado." -ForegroundColor Red
         Write-Host "[EN] Error generating the certificate." -ForegroundColor Red
@@ -117,6 +123,16 @@ function Generate-Certs {
 
     Write-Host "[PT] Certificado emitido para: $ip" -ForegroundColor Green
     Write-Host "[EN] Certificate issued for: $ip" -ForegroundColor Green
+}
+
+function Trust-Cert-For {
+    # The file agents must trust: the internal CA's ca.crt when gen-cert
+    # created one, otherwise the self-signed leaf.
+    # O ficheiro em que os agentes devem confiar: ca.crt da CA interna
+    # quando o gen-cert criou uma, caso contrário o certificado autoassinado.
+    param([string]$Dir)
+    if (Test-Path "$Dir\ca\ca.crt") { return "$Dir\ca\ca.crt" }
+    return "$Dir\collector.crt"
 }
 
 function Add-Agent {
@@ -236,7 +252,7 @@ if ($OPTION -eq "2" -or $OPTION -eq "3") {
         Write-Host "[PT] A copiar o certificado e a usar um token só deste agente..." -ForegroundColor Yellow
         Write-Host "[EN] Copying the certificate and using a token for this agent only..." -ForegroundColor Yellow
 
-        Copy-Item -Path "$CHECK_COL_DIR\collector.crt" -Destination "$AGENT_DIR\collector.crt" -Force
+        Copy-Item -Path (Trust-Cert-For -Dir $CHECK_COL_DIR) -Destination "$AGENT_DIR\collector.crt" -Force
 
         if ($global:FIRST_AGENT) {
             $AGENT_ID = $global:FIRST_AGENT.Id
@@ -260,7 +276,7 @@ if ($OPTION -eq "2" -or $OPTION -eq "3") {
         Write-Host "[PT] No collector: <collector.exe> add-agent collector.json <id> dá o token deste agente." -ForegroundColor Yellow
         Write-Host "[EN] On the collector: <collector.exe> add-agent collector.json <id> gives this agent's token." -ForegroundColor Yellow
         $AGENT_TOKEN = Read-Host "[PT] Token do Agente / [EN] Agent Token"
-        $COL_CRT = Read-Host "[PT] Caminho do certificado do Collector / [EN] Collector certificate path"
+        $COL_CRT = Read-Host "[PT] Caminho do certificado de confianca (collector.crt, ou ca.crt se o collector usa CA interna) / [EN] Trust certificate path (collector.crt, or ca.crt if the collector uses an internal CA)"
         $AGENT_ID = Read-Host "[PT] ID do Agente / [EN] Agent ID"
     }
 
