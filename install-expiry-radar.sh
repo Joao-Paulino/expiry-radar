@@ -95,10 +95,21 @@ generate_certs() {
   IP=$(hostname -I 2>/dev/null | awk '{print $1}')
   read -rp "[PT] IP/nome que os agentes usam [Enter para ${IP:-localhost}] / [EN] IP/name agents will use: " ANSWER
   COL_HOST=${ANSWER:-${IP:-localhost}}
+  read -rp "[PT] Usar uma CA interna própria? Recomendado sem domínio público: permite reemitir certificados mais tarde sem voltar a distribuir confiança a cada agente. [S/n] / [EN] Use a built-in internal CA? Recommended with no public domain: lets you re-issue certificates later without redistributing trust to every agent. [Y/n]: " USE_CA
   # The collector generates its own certificate (no OpenSSL) / O collector gera o certificado (sem OpenSSL)
-  "$BIN" gen-cert "$DIR" --host "$COL_HOST"
+  if [[ "$USE_CA" =~ ^[nN] ]]; then
+    "$BIN" gen-cert "$DIR" --host "$COL_HOST"
+  else
+    "$BIN" gen-cert "$DIR" --host "$COL_HOST" --ca "$DIR/ca"
+  fi
   TOKEN_ADMIN=$(new_token)
   echo -e "${GREEN}[PT] Certificado emitido para: $COL_HOST / [EN] Certificate issued for: $COL_HOST${NC}"
+}
+
+# trust_cert_for <collector-dir>: the file agents must trust — the internal
+# CA's ca.crt when gen-cert created one, otherwise the self-signed leaf.
+trust_cert_for() {
+  if [ -f "$1/ca/ca.crt" ]; then echo "$1/ca/ca.crt"; else echo "$1/collector.crt"; fi
 }
 
 add_agent() { # add_agent <collector-bin> <collector.json> <agent-id>: prints the new token
@@ -215,7 +226,7 @@ if [ "$OPTION" = "2" ] || [ "$OPTION" = "3" ]; then
   CHECK_COL_DIR=${COL_DIR:-$DEFAULT_COL_DIR}
   if [ -f "$CHECK_COL_DIR/collector.json" ] && [ -f "$CHECK_COL_DIR/collector.crt" ]; then
     echo -e "${GREEN}[PT] Collector encontrado nesta máquina: certificado copiado, token só deste agente. / [EN] Local collector found: certificate copied, token for this agent only.${NC}"
-    cp -f "$CHECK_COL_DIR/collector.crt" "$AGENT_DIR/collector.crt"
+    cp -f "$(trust_cert_for "$CHECK_COL_DIR")" "$AGENT_DIR/collector.crt"
     if [ -n "${FIRST_AGENT_TOKEN:-}" ]; then
       AGENT_ID=$FIRST_AGENT_ID; AGENT_TOKEN=$FIRST_AGENT_TOKEN
     else
@@ -231,7 +242,7 @@ if [ "$OPTION" = "2" ] || [ "$OPTION" = "3" ]; then
     read -rp "[PT] IP/nome do Collector / [EN] Collector IP/name: " COL_IP
     echo -e "${YELLOW}[PT] No collector: sudo expiry-radar-collector add-agent collector.json <id> dá o token deste agente. / [EN] On the collector, add-agent gives this agent's token.${NC}"
     read -rsp "[PT] Token do agente / [EN] Agent token: " AGENT_TOKEN; echo
-    read -rp "[PT] Caminho do collector.crt / [EN] Path to collector.crt: " COL_CRT
+    read -rp "[PT] Caminho do certificado de confiança (collector.crt, ou ca.crt se o collector usa CA interna) / [EN] Path to the trust certificate (collector.crt, or ca.crt if the collector uses an internal CA): " COL_CRT
     read -rp "[PT] ID do agente (ex: linux-web-01) / [EN] Agent ID: " AGENT_ID
     [ -f "$COL_CRT" ] || { echo -e "${RED}[PT] Certificado não encontrado: $COL_CRT / [EN] Certificate not found${NC}"; exit 1; }
     cp -f "$COL_CRT" "$AGENT_DIR/collector.crt"; COL_CRT="$AGENT_DIR/collector.crt"
