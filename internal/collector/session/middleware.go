@@ -75,6 +75,15 @@ func safeMethod(m string) bool {
 	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
 }
 
+// Forbidden writes the standard 403 response for a role check that
+// failed (the request is authenticated, but the session's role is too
+// low for this action) — "Operation not permitted / Operação não
+// permitida" rather than the bare word "forbidden", so a viewer or
+// operator hitting a gated action sees why, in both languages.
+func Forbidden(w http.ResponseWriter) {
+	http.Error(w, "Operation not permitted / Operação não permitida", http.StatusForbidden)
+}
+
 // Middleware lets a request through when it carries a valid admin
 // bearer token, or a valid session cookie (state-changing session
 // requests must also carry the session's csrf_token form field).

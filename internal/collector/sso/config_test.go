@@ -33,9 +33,10 @@ func TestValidateProviders(t *testing.T) {
 		"entra MSA tenant": func(p *ProviderConfig) {
 			p.Issuer = "https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0"
 		},
-		"no client id":   func(p *ProviderConfig) { p.ClientID = "" },
-		"no allow rule":  func(p *ProviderConfig) { p.AllowedGroups = nil },
-		"missing secret": func(p *ProviderConfig) { p.ClientSecretFile = "/nonexistent" },
+		"no client id":     func(p *ProviderConfig) { p.ClientID = "" },
+		"no allow rule":    func(p *ProviderConfig) { p.AllowedGroups = nil },
+		"missing secret":   func(p *ProviderConfig) { p.ClientSecretFile = "/nonexistent" },
+		"bad default_role": func(p *ProviderConfig) { p.DefaultRole = "superuser" },
 	}
 	for name, mutate := range cases {
 		p := validProvider(t)
@@ -56,6 +57,22 @@ func TestValidateProviders(t *testing.T) {
 	for _, bad := range []string{"", "http://collector:8443", "https://collector:8443/path?x"} {
 		if err := ValidateProviders([]ProviderConfig{validProvider(t)}, bad); err == nil || !strings.Contains(err.Error(), "public_url") {
 			t.Errorf("public_url %q: got %v", bad, err)
+		}
+	}
+}
+
+// TestValidateProviders_DefaultRoleAccepted proves each of the three
+// legal role values, plus the empty (legacy) default, passes
+// validation — this is what a provider like Google, whose tokens never
+// carry group/role claims, needs to land its authorized users anywhere
+// but viewer.
+func TestValidateProviders_DefaultRoleAccepted(t *testing.T) {
+	const pub = "https://collector.example.com:8443"
+	for _, role := range []string{"", "admin", "operator", "viewer"} {
+		p := validProvider(t)
+		p.DefaultRole = role
+		if err := ValidateProviders([]ProviderConfig{p}, pub); err != nil {
+			t.Errorf("default_role %q rejected: %v", role, err)
 		}
 	}
 }

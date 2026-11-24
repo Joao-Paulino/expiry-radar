@@ -13,9 +13,13 @@ import (
 // keeps today's behavior: session.RoleAdmin. Once the provider
 // configures at least one of those, a user is session.RoleAdmin if
 // they match an admin group/role, session.RoleOperator if they match
-// an operator group/role, and session.RoleViewer otherwise. Group
-// comparison is case-insensitive, matching Authorize's own rule for
-// Entra object IDs.
+// an operator group/role, and otherwise DefaultRole (or
+// session.RoleViewer if DefaultRole is unset). Group comparison is
+// case-insensitive, matching Authorize's own rule for Entra object
+// IDs. DefaultRole exists for providers whose claims never carry
+// groups/roles at all (Google): such a provider can never match an
+// admin or operator key, so DefaultRole is the only way its
+// authorized users can land anywhere but viewer once RBAC is active.
 func RoleFor(p ProviderConfig, c Claims) string {
 	if len(p.AdminGroups)+len(p.AdminRoles)+len(p.OperatorGroups)+len(p.OperatorRoles) == 0 {
 		return session.RoleAdmin
@@ -25,6 +29,9 @@ func RoleFor(p ProviderConfig, c Claims) string {
 	}
 	if matchesAny(p.OperatorRoles, c.Roles) || matchesAnyGroup(p.OperatorGroups, c.Groups) {
 		return session.RoleOperator
+	}
+	if p.DefaultRole != "" {
+		return p.DefaultRole
 	}
 	return session.RoleViewer
 }

@@ -572,12 +572,26 @@ Quem pode fazer login e o que pode fazer são duas verificações separadas. `al
   "operator_groups": ["<operators group object id>"] }
 ```
 
+Google (and any other provider whose tokens carry no groups/roles) can't be split by `*_groups`/`*_roles` — use `default_role` to cap everyone who signs in through it at one level:
+
+```json
+{ "name": "google", "display_name": "Google",
+  "issuer": "https://accounts.google.com",
+  "client_id": "<client id>.apps.googleusercontent.com", "client_secret_file": "/etc/expiry-radar/google.secret",
+  "allowed_emails": ["ops@example.com"],
+  "admin_groups": ["unused-but-required-to-turn-on-rbac"],
+  "default_role": "operator" }
+```
+
+(`admin_groups` here only needs to be non-empty — Google never sends a `groups` claim, so it can never actually match; it just switches this provider's RBAC on so `default_role` takes effect.)
+
 | | EN | PT |
 |---|---|---|
 | 🛡️ Admin | Full access: mute/re-own, forget an agent, sign out every session. The local Administrator account is always admin | Acesso total: silenciar/mudar dono, esquecer um agente, terminar todas as sessões. A conta Administrator local é sempre admin |
 | 🔧 Operator | Can mute and re-own; cannot forget an agent or sign out every session (destructive, admin-only) | Pode silenciar e mudar dono; não pode esquecer um agente nem terminar todas as sessões (destrutivo, só admin) |
 | 👁️ Viewer | Read-only: the dashboard, history and exports, nothing that changes state | Só leitura: painel, histórico e exportações, nada que altere estado |
 | ⚙️ Default (no keys set) | A provider with none of `admin_groups`/`admin_roles`/`operator_groups`/`operator_roles` configured keeps today's behavior: every authorized user is admin. Adding these keys to one provider never restricts another provider that hasn't set them | Um fornecedor sem nenhuma destas chaves mantém o comportamento atual: todos os utilizadores autorizados são admin. Adicionar estas chaves a um fornecedor nunca restringe outro que não as tenha |
+| 🧭 `default_role` | Some providers' tokens never carry group/role claims at all (Google, notably), so they can never match `admin_groups`/`admin_roles`/`operator_groups`/`operator_roles` — once RBAC is active, every authorized user there is stuck at viewer. Set `"default_role": "operator"` (or `"admin"`) on that provider to raise the floor for everyone who signs in through it. It's all-or-nothing per provider: a claims-less provider cannot tell two of its users apart, so `default_role` applies to every authorized user of that provider alike. It never overrides an actual admin/operator match | Alguns fornecedores nunca enviam claims de grupo/role (nomeadamente o Google), por isso nunca correspondem a `admin_groups`/`admin_roles`/`operator_groups`/`operator_roles` — com RBAC ativo, todos os utilizadores autorizados aí ficam presos em viewer. Define `"default_role": "operator"` (ou `"admin"`) nesse fornecedor para subir o nível de todos os que entram por ele. É tudo-ou-nada por fornecedor: um fornecedor sem claims não distingue utilizadores entre si, por isso `default_role` aplica-se a todos os autorizados desse fornecedor da mesma forma. Nunca substitui uma correspondência real de admin/operator |
 | 🪄 Local admin & tokens | The local Administrator login and `admin_tokens` bearer requests are always admin, regardless of these keys | O login do Administrator local e os pedidos com `admin_tokens` são sempre admin, independentemente destas chaves |
 | 🔁 Upgrading | Adding RBAC never discards a session or any configuration: a browser already signed in before the upgrade is treated as the lowest role until it logs in again (within its normal session lifetime, at most 8h) — a safety re-login, not data loss | Ativar RBAC nunca descarta uma sessão ou configuração: um browser já autenticado antes do upgrade é tratado com o papel mais baixo até fazer novo login (dentro da duração normal da sessão, no máximo 8h) — é um novo login de segurança, não perda de dados |
 

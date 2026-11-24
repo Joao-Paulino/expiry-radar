@@ -20,6 +20,22 @@ func handlerRecordingCSRF(got *string) http.Handler {
 	})
 }
 
+// TestForbidden_WritesBilingualMessage proves the shared role-check
+// failure response replaces the bare word "forbidden" with a message a
+// signed-in but under-privileged user (viewer/operator) can actually
+// read, in both languages.
+func TestForbidden_WritesBilingualMessage(t *testing.T) {
+	rec := httptest.NewRecorder()
+	Forbidden(rec)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("got code %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Operation not permitted") || !strings.Contains(body, "Operação não permitida") {
+		t.Fatalf("body %q missing bilingual message", body)
+	}
+}
+
 func TestMiddleware_BearerToken(t *testing.T) {
 	st, _ := newTestStore(t)
 	var csrf string
