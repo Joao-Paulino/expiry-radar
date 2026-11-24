@@ -30,12 +30,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: go
           queries: security-extended
       - run: go build ./...
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
         with:
           category: codeql-go
           output: codeql-results
@@ -69,7 +69,7 @@ jobs:
         # the SARIF copy goes to the Security tab either way.
         run: gosec -fmt sarif -out gosec.sarif -stdout -verbose text ./...
       - if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: gosec.sarif
           category: gosec
