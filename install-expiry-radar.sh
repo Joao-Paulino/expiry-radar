@@ -91,25 +91,164 @@ new_token() { od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
 
 generate_certs() {
   local DIR=$1 BIN=$2
-  local IP
-  IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-  read -rp "[PT] IP/nome que os agentes usam [Enter para ${IP:-localhost}] / [EN] IP/name agents will use: " ANSWER
-  COL_HOST=${ANSWER:-${IP:-localhost}}
-  read -rp "[PT] Usar uma CA interna própria? Recomendado sem domínio público: permite reemitir certificados mais tarde sem voltar a distribuir confiança a cada agente. [S/n] / [EN] Use a built-in internal CA? Recommended with no public domain: lets you re-issue certificates later without redistributing trust to every agent. [Y/n]: " USE_CA
-  # The collector generates its own certificate (no OpenSSL) / O collector gera o certificado (sem OpenSSL)
-  if [[ "$USE_CA" =~ ^[nN] ]]; then
-    "$BIN" gen-cert "$DIR" --host "$COL_HOST"
-  else
-    "$BIN" gen-cert "$DIR" --host "$COL_HOST" --ca "$DIR/ca"
-  fi
+  CERT_MODE="selfsigned" # default; dns01_setup overrides to "acme"
+  echo "[PT] Certificado do Collector: / [EN] Collector certificate:"
+  echo "  1) Self-signed (rápido, laboratório / quick, lab)"
+  echo "  2) CA interna própria (sem domínio público / no public domain)"
+  echo "  3) Let's Encrypt via DNS-01 (domínio público, sem precisar da porta 80 / public domain, no port 80 needed)"
+  read -rp "[1-3, Enter=2]: " CERT_CHOICE
+  CERT_CHOICE=${CERT_CHOICE:-2}
+  case "$CERT_CHOICE" in
+    3)
+      dns01_setup "$DIR"
+      ;;
+    1)
+      local IP
+      IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+      read -rp "[PT] IP/nome que os agentes usam [Enter para ${IP:-localhost}] / [EN] IP/name agents will use: " ANSWER
+      COL_HOST=${ANSWER:-${IP:-localhost}}
+      "$BIN" gen-cert "$DIR" --host "$COL_HOST"
+      ;;
+    *)
+      local IP
+      IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+      read -rp "[PT] IP/nome que os agentes usam [Enter para ${IP:-localhost}] / [EN] IP/name agents will use: " ANSWER
+      COL_HOST=${ANSWER:-${IP:-localhost}}
+      "$BIN" gen-cert "$DIR" --host "$COL_HOST" --ca "$DIR/ca"
+      ;;
+  esac
   TOKEN_ADMIN=$(new_token)
   echo -e "${GREEN}[PT] Certificado emitido para: $COL_HOST / [EN] Certificate issued for: $COL_HOST${NC}"
 }
 
 # trust_cert_for <collector-dir>: the file agents must trust — the internal
 # CA's ca.crt when gen-cert created one, otherwise the self-signed leaf.
+# Never called when CERT_MODE=acme: a publicly-trusted certificate needs no
+# trust file distributed to agents at all.
 trust_cert_for() {
   if [ -f "$1/ca/ca.crt" ]; then echo "$1/ca/ca.crt"; else echo "$1/collector.crt"; fi
+}
+
+# dns01_setup <collector-dir>: issues a publicly-trusted certificate via
+# certbot's DNS-01 challenge (no inbound port 80/443 needed during
+# validation, unlike --standalone). Never installs certbot or any plugin
+# itself — only checks for them and prints the exact command to run when
+# missing, so re-running this installer after installing them picks up
+# right here. Writes collector.crt/collector.key the same way every other
+# option does, plus a certbot renewal deploy hook so future renewals keep
+# them current with no collector restart (certwatch.go reloads on change).
+dns01_setup() {
+  local DIR=$1
+  read -rp "[PT] Domínio público do Collector (ex: collector.example.com) / [EN] Collector's public domain: " DOMAIN
+  [ -n "$DOMAIN" ] || { echo -e "${RED}[PT] Domínio é obrigatório / [EN] Domain is required${NC}"; exit 1; }
+  read -rp "[PT] Email de contacto (para o Let's Encrypt/ACME) / [EN] Contact email (for Let's Encrypt/ACME): " LE_EMAIL
+  [ -n "$LE_EMAIL" ] || { echo -e "${RED}[PT] Email é obrigatório / [EN] Email is required${NC}"; exit 1; }
+
+  echo "[PT] Fornecedor de DNS: / [EN] DNS provider:"
+  echo "  1) Cloudflare"
+  echo "  2) Route53 (AWS)"
+  echo "  3) Google Cloud DNS"
+  echo "  4) DigitalOcean"
+  echo "  5) Azure DNS (plugin de terceiros / third-party plugin)"
+  echo "  6) GoDaddy (plugin de terceiros / third-party plugin)"
+  echo "  7) Outro / Other"
+  read -rp "[1-7]: " DNS_PROVIDER
+
+  if ! command -v certbot >/dev/null; then
+    echo -e "${RED}[PT] certbot não está instalado. Instala-o (ex: sudo apt install certbot, ou sudo pip3 install certbot) e volta a correr este instalador."
+    echo -e "[EN] certbot is not installed. Install it (e.g. sudo apt install certbot, or sudo pip3 install certbot) and re-run this installer.${NC}"
+    exit 1
+  fi
+
+  local CERTBOT_ARGS=(certonly --non-interactive --agree-tos -m "$LE_EMAIL" -d "$DOMAIN")
+  case "$DNS_PROVIDER" in
+    1) # Cloudflare — official plugin
+      certbot plugins --text 2>/dev/null | grep -qi dns-cloudflare || {
+        echo -e "${RED}[PT] Falta o plugin certbot-dns-cloudflare. Instala (ex: sudo apt install python3-certbot-dns-cloudflare) e volta a correr."
+        echo -e "[EN] Missing the certbot-dns-cloudflare plugin. Install it (e.g. sudo apt install python3-certbot-dns-cloudflare) and re-run.${NC}"
+        exit 1
+      }
+      read -rsp "[PT] Cloudflare API token (com permissão DNS:Edit na zona) / [EN] Cloudflare API token (DNS:Edit on the zone): " CF_TOKEN; echo
+      local CRED_DIR="$DIR/dns01-credentials"; mkdir -p "$CRED_DIR"; chmod 700 "$CRED_DIR"
+      printf 'dns_cloudflare_api_token = %s\n' "$CF_TOKEN" > "$CRED_DIR/cloudflare.ini"
+      chmod 600 "$CRED_DIR/cloudflare.ini"
+      CERTBOT_ARGS+=(--dns-cloudflare --dns-cloudflare-credentials "$CRED_DIR/cloudflare.ini")
+      ;;
+    2) # Route53 — official plugin, no credentials file: AWS's own chain
+      certbot plugins --text 2>/dev/null | grep -qi dns-route53 || {
+        echo -e "${RED}[PT] Falta o plugin certbot-dns-route53. Instala (ex: sudo apt install python3-certbot-dns-route53) e volta a correr."
+        echo -e "[EN] Missing the certbot-dns-route53 plugin. Install it (e.g. sudo apt install python3-certbot-dns-route53) and re-run.${NC}"
+        exit 1
+      }
+      read -rp "[PT] AWS Access Key ID / [EN] AWS Access Key ID: " AWS_ID
+      read -rsp "[PT] AWS Secret Access Key / [EN] AWS Secret Access Key: " AWS_SECRET; echo
+      export AWS_ACCESS_KEY_ID="$AWS_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET"
+      echo -e "${YELLOW}[PT] Para as renovações automáticas (certbot renew) também funcionarem, estas credenciais têm de estar acessíveis ao root depois (ex: ~/.aws/credentials). Esta emissão agora usa-as só nesta chamada."
+      echo -e "[EN] For automatic renewals (certbot renew) to keep working, these credentials must stay available to root afterwards (e.g. ~/.aws/credentials). This issuance only uses them for this one call.${NC}"
+      CERTBOT_ARGS+=(--dns-route53)
+      ;;
+    3) # Google Cloud DNS — official plugin, existing service-account JSON
+      certbot plugins --text 2>/dev/null | grep -qi dns-google || {
+        echo -e "${RED}[PT] Falta o plugin certbot-dns-google. Instala (ex: sudo apt install python3-certbot-dns-google) e volta a correr."
+        echo -e "[EN] Missing the certbot-dns-google plugin. Install it (e.g. sudo apt install python3-certbot-dns-google) and re-run.${NC}"
+        exit 1
+      }
+      read -rp "[PT] Caminho da chave JSON da service account (com permissão dns.admin) / [EN] Path to the service account JSON key (dns.admin permission): " GCP_JSON
+      [ -f "$GCP_JSON" ] || { echo -e "${RED}[PT] Ficheiro não encontrado: $GCP_JSON / [EN] File not found${NC}"; exit 1; }
+      CERTBOT_ARGS+=(--dns-google --dns-google-credentials "$GCP_JSON")
+      ;;
+    4) # DigitalOcean — official plugin
+      certbot plugins --text 2>/dev/null | grep -qi dns-digitalocean || {
+        echo -e "${RED}[PT] Falta o plugin certbot-dns-digitalocean. Instala (ex: sudo apt install python3-certbot-dns-digitalocean) e volta a correr."
+        echo -e "[EN] Missing the certbot-dns-digitalocean plugin. Install it (e.g. sudo apt install python3-certbot-dns-digitalocean) and re-run.${NC}"
+        exit 1
+      }
+      read -rsp "[PT] DigitalOcean API token / [EN] DigitalOcean API token: " DO_TOKEN; echo
+      local CRED_DIR="$DIR/dns01-credentials"; mkdir -p "$CRED_DIR"; chmod 700 "$CRED_DIR"
+      printf 'dns_digitalocean_token = %s\n' "$DO_TOKEN" > "$CRED_DIR/digitalocean.ini"
+      chmod 600 "$CRED_DIR/digitalocean.ini"
+      CERTBOT_ARGS+=(--dns-digitalocean --dns-digitalocean-credentials "$CRED_DIR/digitalocean.ini")
+      ;;
+    5|6|7) # Azure/GoDaddy (third-party) / other: run certbot yourself, we just pick up the result
+      local NAME="outro fornecedor / other provider"
+      [ "$DNS_PROVIDER" = "5" ] && NAME="Azure DNS (certbot-dns-azure, https://docs.certbot-dns-azure.co.uk/)"
+      [ "$DNS_PROVIDER" = "6" ] && NAME="GoDaddy (certbot-dns-godaddy, procura no PyPI / search PyPI)"
+      echo -e "${YELLOW}[PT] $NAME não tem um comando automático aqui (plugin de terceiros ou sem suporte direto). Instala o plugin certo e corre tu mesmo, por exemplo:"
+      echo -e "  sudo certbot certonly --agree-tos -m $LE_EMAIL -a <nome-do-plugin> -d $DOMAIN"
+      echo -e "[EN] $NAME has no automatic command here (third-party plugin, or not directly supported). Install the right plugin and run it yourself, for example:"
+      echo -e "  sudo certbot certonly --agree-tos -m $LE_EMAIL -a <plugin-name> -d $DOMAIN${NC}"
+      read -rp "[PT] Prime Enter quando o certificado estiver emitido para $DOMAIN / [EN] Press Enter once the certificate is issued for $DOMAIN: " _
+      CERTBOT_ARGS=()
+      ;;
+    *)
+      echo -e "${RED}[PT] Opção inválida / [EN] Invalid option${NC}"; exit 1 ;;
+  esac
+
+  if [ ${#CERTBOT_ARGS[@]} -gt 0 ]; then
+    certbot "${CERTBOT_ARGS[@]}" || { echo -e "${RED}[PT] certbot falhou / [EN] certbot failed${NC}"; exit 1; }
+  fi
+
+  local LIVE_DIR="/etc/letsencrypt/live/$DOMAIN"
+  if [ ! -f "$LIVE_DIR/fullchain.pem" ] || [ ! -f "$LIVE_DIR/privkey.pem" ]; then
+    echo -e "${RED}[PT] Certificado não encontrado em $LIVE_DIR / [EN] Certificate not found at $LIVE_DIR${NC}"
+    exit 1
+  fi
+  cp -f "$LIVE_DIR/fullchain.pem" "$DIR/collector.crt"
+  cp -f "$LIVE_DIR/privkey.pem" "$DIR/collector.key"
+
+  mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+  cat > /etc/letsencrypt/renewal-hooks/deploy/expiry-radar.sh <<HOOK
+#!/bin/sh
+# Installed by the Expiry Radar installer: copies the renewed certificate
+# where the collector reads it. No restart needed — the collector notices
+# the change and reloads it in memory within a minute.
+install -o root -g $SVC_USER -m 640 "\$RENEWED_LINEAGE/fullchain.pem" "$DIR/collector.crt"
+install -o root -g $SVC_USER -m 640 "\$RENEWED_LINEAGE/privkey.pem"   "$DIR/collector.key"
+HOOK
+  chmod 755 /etc/letsencrypt/renewal-hooks/deploy/expiry-radar.sh
+
+  CERT_MODE="acme"
+  COL_HOST="$DOMAIN"
 }
 
 add_agent() { # add_agent <collector-bin> <collector.json> <agent-id>: prints the new token
@@ -225,8 +364,14 @@ if [ "$OPTION" = "2" ] || [ "$OPTION" = "3" ]; then
 
   CHECK_COL_DIR=${COL_DIR:-$DEFAULT_COL_DIR}
   if [ -f "$CHECK_COL_DIR/collector.json" ] && [ -f "$CHECK_COL_DIR/collector.crt" ]; then
-    echo -e "${GREEN}[PT] Collector encontrado nesta máquina: certificado copiado, token só deste agente. / [EN] Local collector found: certificate copied, token for this agent only.${NC}"
-    cp -f "$(trust_cert_for "$CHECK_COL_DIR")" "$AGENT_DIR/collector.crt"
+    if [ "${CERT_MODE:-}" = "acme" ]; then
+      echo -e "${GREEN}[PT] Collector encontrado nesta máquina (CA pública): sem ficheiro de confiança a copiar, token só deste agente. / [EN] Local collector found (public CA): no trust file to copy, token for this agent only.${NC}"
+      COL_CRT=""
+    else
+      echo -e "${GREEN}[PT] Collector encontrado nesta máquina: certificado copiado, token só deste agente. / [EN] Local collector found: certificate copied, token for this agent only.${NC}"
+      cp -f "$(trust_cert_for "$CHECK_COL_DIR")" "$AGENT_DIR/collector.crt"
+      COL_CRT="$AGENT_DIR/collector.crt"
+    fi
     if [ -n "${FIRST_AGENT_TOKEN:-}" ]; then
       AGENT_ID=$FIRST_AGENT_ID; AGENT_TOKEN=$FIRST_AGENT_TOKEN
     else
@@ -235,17 +380,18 @@ if [ "$OPTION" = "2" ] || [ "$OPTION" = "3" ]; then
       AGENT_TOKEN=$(add_agent "$CHECK_COL_DIR/expiry-radar-collector" "$CHECK_COL_DIR/collector.json" "$AGENT_ID")
       systemctl restart expiry-radar-collector 2>/dev/null || true
     fi
-    COL_CRT="$AGENT_DIR/collector.crt"
     COL_IP=${COL_HOST:-localhost}
   else
     echo -e "${YELLOW}[PT] Collector não encontrado localmente; assume-se remoto. / [EN] Collector not found locally; assuming remote.${NC}"
     read -rp "[PT] IP/nome do Collector / [EN] Collector IP/name: " COL_IP
     echo -e "${YELLOW}[PT] No collector: sudo expiry-radar-collector add-agent collector.json <id> dá o token deste agente. / [EN] On the collector, add-agent gives this agent's token.${NC}"
     read -rsp "[PT] Token do agente / [EN] Agent token: " AGENT_TOKEN; echo
-    read -rp "[PT] Caminho do certificado de confiança (collector.crt, ou ca.crt se o collector usa CA interna) / [EN] Path to the trust certificate (collector.crt, or ca.crt if the collector uses an internal CA): " COL_CRT
+    read -rp "[PT] Caminho do certificado de confiança (collector.crt, ou ca.crt se o collector usa CA interna; deixa em branco se o collector usa CA pública, ex: Let's Encrypt) / [EN] Path to the trust certificate (collector.crt, or ca.crt if the collector uses an internal CA; leave blank if the collector uses a public CA, e.g. Let's Encrypt): " COL_CRT
     read -rp "[PT] ID do agente (ex: linux-web-01) / [EN] Agent ID: " AGENT_ID
-    [ -f "$COL_CRT" ] || { echo -e "${RED}[PT] Certificado não encontrado: $COL_CRT / [EN] Certificate not found${NC}"; exit 1; }
-    cp -f "$COL_CRT" "$AGENT_DIR/collector.crt"; COL_CRT="$AGENT_DIR/collector.crt"
+    if [ -n "$COL_CRT" ]; then
+      [ -f "$COL_CRT" ] || { echo -e "${RED}[PT] Certificado não encontrado: $COL_CRT / [EN] Certificate not found${NC}"; exit 1; }
+      cp -f "$COL_CRT" "$AGENT_DIR/collector.crt"; COL_CRT="$AGENT_DIR/collector.crt"
+    fi
   fi
 
   # Local certificate folders that exist and the service user can read
