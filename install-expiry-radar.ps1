@@ -97,6 +97,22 @@ function Write-Utf8NoBom {
 
 function Generate-Certs {
     param([string]$Dir, [string]$Bin)
+    Write-Host "[PT] Certificado do Collector: / [EN] Collector certificate:"
+    Write-Host "  1) Self-signed (rapido, laboratorio / quick, lab)"
+    Write-Host "  2) CA interna propria (sem dominio publico / no public domain)"
+    Write-Host "  3) Let's Encrypt via DNS-01 (dominio publico, sem precisar da porta 80 / public domain, no port 80 needed)"
+    $certChoice = Read-Host "[1-3, Enter=2]"
+    if ([string]::IsNullOrWhiteSpace($certChoice)) { $certChoice = "2" }
+
+    if ($certChoice -eq "3") {
+        Dns01-Setup -Dir $Dir
+        $global:TOKEN_ADMIN = New-Token
+        Write-Host "[PT] Certificado emitido para: $($global:COL_HOST)" -ForegroundColor Green
+        Write-Host "[EN] Certificate issued for: $($global:COL_HOST)" -ForegroundColor Green
+        return
+    }
+
+    $global:CERT_MODE = "selfsigned" # default; Dns01-Setup overrides to "acme"
     Write-Host "[PT] A gerar certificado TLS e tokens..." -ForegroundColor Yellow
     Write-Host "[EN] Generating TLS certificate and tokens..." -ForegroundColor Yellow
 
@@ -104,10 +120,8 @@ function Generate-Certs {
     $answer = Read-Host "[PT] IP/nome que os agentes usam [Enter para $ip] / [EN] IP/name agents will use [Enter for $ip]"
     if (-not [string]::IsNullOrWhiteSpace($answer)) { $ip = $answer.Trim() }
 
-    $useCa = Read-Host "[PT] Usar uma CA interna própria? Recomendado sem dominio publico: permite reemitir certificados mais tarde sem voltar a distribuir confianca a cada agente. [S/n] / [EN] Use a built-in internal CA? Recommended with no public domain: lets you re-issue certificates later without redistributing trust to every agent. [Y/n]"
-
     # O próprio collector gera o certificado / The collector generates the certificate itself
-    if ($useCa -match '^[nN]') {
+    if ($certChoice -eq "1") {
         & $Bin gen-cert $Dir --host $ip
     } else {
         & $Bin gen-cert $Dir --host $ip --ca "$Dir\ca"
@@ -125,11 +139,162 @@ function Generate-Certs {
     Write-Host "[EN] Certificate issued for: $ip" -ForegroundColor Green
 }
 
+# Dns01-Setup <collector-dir>: issues a publicly-trusted certificate via
+# certbot's DNS-01 challenge (no inbound port 80/443 needed during
+# validation). Never installs certbot or any plugin itself — only checks
+# for them. Certbot's default layout on Windows isn't reliably documented
+# (Windows support is still beta upstream), so unlike the Linux installer
+# this never guesses a live-certificate path: it always asks the operator
+# where certbot put fullchain.pem/privkey.pem once it's done, for every
+# provider. Writes collector.crt/collector.key like every other option;
+# never called when $CERT_MODE stays "selfsigned".
+function Dns01-Setup {
+    param([string]$Dir)
+
+    $domain = Read-Host "[PT] Dominio publico do Collector (ex: collector.example.com) / [EN] Collector's public domain"
+    if ([string]::IsNullOrWhiteSpace($domain)) {
+        Write-Host "[PT] Dominio e obrigatorio. / [EN] Domain is required." -ForegroundColor Red
+        exit 1
+    }
+    $leEmail = Read-Host "[PT] Email de contacto (para o Let's Encrypt/ACME) / [EN] Contact email (for Let's Encrypt/ACME)"
+    if ([string]::IsNullOrWhiteSpace($leEmail)) {
+        Write-Host "[PT] Email e obrigatorio. / [EN] Email is required." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "[PT] Fornecedor de DNS: / [EN] DNS provider:"
+    Write-Host "  1) Cloudflare"
+    Write-Host "  2) Route53 (AWS)"
+    Write-Host "  3) Google Cloud DNS"
+    Write-Host "  4) DigitalOcean"
+    Write-Host "  5) Azure DNS (plugin de terceiros / third-party plugin)"
+    Write-Host "  6) GoDaddy (plugin de terceiros / third-party plugin)"
+    Write-Host "  7) Outro / Other"
+    $dnsProvider = Read-Host "[1-7]"
+
+    if (-not (Get-Command certbot -ErrorAction SilentlyContinue)) {
+        Write-Host "[PT] certbot nao esta instalado. Instala-o e volta a correr este instalador." -ForegroundColor Red
+        Write-Host "[EN] certbot is not installed. Install it and re-run this installer." -ForegroundColor Red
+        exit 1
+    }
+    $pluginsText = & certbot plugins --text 2>$null
+
+    $certbotArgs = @("certonly", "--non-interactive", "--agree-tos", "-m", $leEmail, "-d", $domain)
+    $runCertbot = $true
+
+    switch ($dnsProvider) {
+        "1" { # Cloudflare — official plugin
+            if ($pluginsText -notmatch "(?i)dns-cloudflare") {
+                Write-Host "[PT] Falta o plugin certbot-dns-cloudflare. Instala-o e volta a correr." -ForegroundColor Red
+                Write-Host "[EN] Missing the certbot-dns-cloudflare plugin. Install it and re-run." -ForegroundColor Red
+                exit 1
+            }
+            $cfToken = Read-Host "[PT] Cloudflare API token (com permissao DNS:Edit na zona) / [EN] Cloudflare API token (DNS:Edit on the zone)" -AsSecureString
+            $credDir = "$Dir\dns01-credentials"
+            New-Item -ItemType Directory -Path $credDir -Force | Out-Null
+            $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($cfToken))
+            Write-Utf8NoBom -Path "$credDir\cloudflare.ini" -Content "dns_cloudflare_api_token = $plain`n"
+            $certbotArgs += @("--dns-cloudflare", "--dns-cloudflare-credentials", "$credDir\cloudflare.ini")
+        }
+        "2" { # Route53 — official plugin, no credentials file: AWS's own chain
+            if ($pluginsText -notmatch "(?i)dns-route53") {
+                Write-Host "[PT] Falta o plugin certbot-dns-route53. Instala-o e volta a correr." -ForegroundColor Red
+                Write-Host "[EN] Missing the certbot-dns-route53 plugin. Install it and re-run." -ForegroundColor Red
+                exit 1
+            }
+            $awsId = Read-Host "[PT] AWS Access Key ID / [EN] AWS Access Key ID"
+            $awsSecretSecure = Read-Host "[PT] AWS Secret Access Key / [EN] AWS Secret Access Key" -AsSecureString
+            $awsSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($awsSecretSecure))
+            $env:AWS_ACCESS_KEY_ID = $awsId
+            $env:AWS_SECRET_ACCESS_KEY = $awsSecret
+            Write-Host "[PT] Para as renovacoes automaticas (certbot renew) tambem funcionarem, estas credenciais tem de ficar acessiveis depois (ex: variaveis de ambiente do sistema). Esta emissao agora so as usa nesta chamada." -ForegroundColor Yellow
+            Write-Host "[EN] For automatic renewals (certbot renew) to keep working, these credentials must stay available afterwards (e.g. system environment variables). This issuance only uses them for this one call." -ForegroundColor Yellow
+            $certbotArgs += "--dns-route53"
+        }
+        "3" { # Google Cloud DNS — official plugin, existing service-account JSON
+            if ($pluginsText -notmatch "(?i)dns-google") {
+                Write-Host "[PT] Falta o plugin certbot-dns-google. Instala-o e volta a correr." -ForegroundColor Red
+                Write-Host "[EN] Missing the certbot-dns-google plugin. Install it and re-run." -ForegroundColor Red
+                exit 1
+            }
+            $gcpJson = Read-Host "[PT] Caminho da chave JSON da service account (com permissao dns.admin) / [EN] Path to the service account JSON key (dns.admin permission)"
+            if (-not (Test-Path $gcpJson)) {
+                Write-Host "[PT] Ficheiro nao encontrado: $gcpJson / [EN] File not found: $gcpJson" -ForegroundColor Red
+                exit 1
+            }
+            $certbotArgs += @("--dns-google", "--dns-google-credentials", $gcpJson)
+        }
+        "4" { # DigitalOcean — official plugin
+            if ($pluginsText -notmatch "(?i)dns-digitalocean") {
+                Write-Host "[PT] Falta o plugin certbot-dns-digitalocean. Instala-o e volta a correr." -ForegroundColor Red
+                Write-Host "[EN] Missing the certbot-dns-digitalocean plugin. Install it and re-run." -ForegroundColor Red
+                exit 1
+            }
+            $doTokenSecure = Read-Host "[PT] DigitalOcean API token / [EN] DigitalOcean API token" -AsSecureString
+            $doToken = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($doTokenSecure))
+            $credDir = "$Dir\dns01-credentials"
+            New-Item -ItemType Directory -Path $credDir -Force | Out-Null
+            Write-Utf8NoBom -Path "$credDir\digitalocean.ini" -Content "dns_digitalocean_token = $doToken`n"
+            $certbotArgs += @("--dns-digitalocean", "--dns-digitalocean-credentials", "$credDir\digitalocean.ini")
+        }
+        { $_ -in "5", "6", "7" } { # Azure/GoDaddy (third-party) / other: run certbot yourself, we just pick up the result
+            $name = "outro fornecedor / other provider"
+            if ($dnsProvider -eq "5") { $name = "Azure DNS (certbot-dns-azure, https://docs.certbot-dns-azure.co.uk/)" }
+            if ($dnsProvider -eq "6") { $name = "GoDaddy (certbot-dns-godaddy, procura no PyPI / search PyPI)" }
+            Write-Host "[PT] $name nao tem um comando automatico aqui (plugin de terceiros, ou sem suporte direto). Instala o plugin certo e corre tu mesmo, por exemplo:" -ForegroundColor Yellow
+            Write-Host "  certbot certonly --agree-tos -m $leEmail -a <nome-do-plugin> -d $domain"
+            Write-Host "[EN] $name has no automatic command here (third-party plugin, or not directly supported). Install the right plugin and run it yourself, for example:" -ForegroundColor Yellow
+            Write-Host "  certbot certonly --agree-tos -m $leEmail -a <plugin-name> -d $domain"
+            Read-Host "[PT] Prime Enter quando o certificado estiver emitido para $domain / [EN] Press Enter once the certificate is issued for $domain" | Out-Null
+            $runCertbot = $false
+        }
+        default {
+            Write-Host "[PT] Opcao invalida / [EN] Invalid option" -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    if ($runCertbot) {
+        & certbot @certbotArgs
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[PT] certbot falhou. / [EN] certbot failed." -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    # O layout do certbot no Windows nao esta fiavelmente documentado (suporte
+    # ainda beta a montante), por isso pergunta-se sempre ao operador em vez
+    # de assumir um caminho (ex: C:\Certbot\live\<dominio>).
+    # Certbot's layout on Windows isn't reliably documented (upstream support
+    # is still beta), so we always ask the operator instead of guessing a
+    # path (e.g. C:\Certbot\live\<domain>).
+    Write-Host "[PT] O certbot emitiu o certificado. Indica onde ficaram os ficheiros (normalmente debaixo de <config-dir-do-certbot>\live\$domain)." -ForegroundColor Yellow
+    Write-Host "[EN] certbot issued the certificate. Tell us where the files landed (usually under <certbot-config-dir>\live\$domain)." -ForegroundColor Yellow
+    $fullchainPath = Read-Host "[PT] Caminho completo de fullchain.pem / [EN] Full path to fullchain.pem"
+    $privkeyPath = Read-Host "[PT] Caminho completo de privkey.pem / [EN] Full path to privkey.pem"
+    if (-not (Test-Path $fullchainPath) -or -not (Test-Path $privkeyPath)) {
+        Write-Host "[PT] Um dos ficheiros nao foi encontrado. / [EN] One of the files was not found." -ForegroundColor Red
+        exit 1
+    }
+    Copy-Item -Path $fullchainPath -Destination "$Dir\collector.crt" -Force
+    Copy-Item -Path $privkeyPath -Destination "$Dir\collector.key" -Force
+
+    Write-Host "[PT] Para as renovacoes (certbot renew), copia de novo estes dois ficheiros para $Dir depois de cada renovacao (ex: com --deploy-hook ou uma Tarefa Agendada). O collector deteta a mudanca e recarrega sem reiniciar." -ForegroundColor Yellow
+    Write-Host "[EN] For renewals (certbot renew), copy these two files back into $Dir after each renewal (e.g. via --deploy-hook or a Scheduled Task). The collector notices the change and reloads without restarting." -ForegroundColor Yellow
+
+    $global:CERT_MODE = "acme"
+    $global:COL_HOST = $domain
+}
+
 function Trust-Cert-For {
     # The file agents must trust: the internal CA's ca.crt when gen-cert
-    # created one, otherwise the self-signed leaf.
+    # created one, otherwise the self-signed leaf. Never called when
+    # $CERT_MODE is "acme" — a publicly-trusted certificate needs no trust
+    # file distributed to agents at all.
     # O ficheiro em que os agentes devem confiar: ca.crt da CA interna
     # quando o gen-cert criou uma, caso contrário o certificado autoassinado.
+    # Nunca chamada quando $CERT_MODE é "acme" — um certificado de confiança
+    # pública não precisa de nenhum ficheiro de confiança distribuído aos agentes.
     param([string]$Dir)
     if (Test-Path "$Dir\ca\ca.crt") { return "$Dir\ca\ca.crt" }
     return "$Dir\collector.crt"
@@ -249,10 +414,21 @@ if ($OPTION -eq "2" -or $OPTION -eq "3") {
     if ((Test-Path "$CHECK_COL_DIR\collector.json") -and (Test-Path "$CHECK_COL_DIR\collector.crt")) {
         Write-Host "[PT] Deteção automática: O Collector está na mesma máquina!" -ForegroundColor Green
         Write-Host "[EN] Auto-detection: Collector is on the same machine!" -ForegroundColor Green
-        Write-Host "[PT] A copiar o certificado e a usar um token só deste agente..." -ForegroundColor Yellow
-        Write-Host "[EN] Copying the certificate and using a token for this agent only..." -ForegroundColor Yellow
 
-        Copy-Item -Path (Trust-Cert-For -Dir $CHECK_COL_DIR) -Destination "$AGENT_DIR\collector.crt" -Force
+        if ($global:CERT_MODE -eq "acme") {
+            # Certificado de confiança pública (Let's Encrypt/DNS-01): nenhum
+            # ficheiro de confiança a distribuir ao agente.
+            # Publicly-trusted certificate (Let's Encrypt/DNS-01): no trust
+            # file to distribute to the agent.
+            Write-Host "[PT] O Collector usa um certificado de confianca publica (Let's Encrypt); o agente nao precisa de ficheiro de confianca." -ForegroundColor Yellow
+            Write-Host "[EN] The Collector uses a publicly-trusted certificate (Let's Encrypt); the agent needs no trust file." -ForegroundColor Yellow
+            $COL_CRT_PAIR = ""
+        } else {
+            Write-Host "[PT] A copiar o certificado e a usar um token só deste agente..." -ForegroundColor Yellow
+            Write-Host "[EN] Copying the certificate and using a token for this agent only..." -ForegroundColor Yellow
+            Copy-Item -Path (Trust-Cert-For -Dir $CHECK_COL_DIR) -Destination "$AGENT_DIR\collector.crt" -Force
+            $COL_CRT_PAIR = "$AGENT_DIR\collector.crt"
+        }
 
         if ($global:FIRST_AGENT) {
             $AGENT_ID = $global:FIRST_AGENT.Id
@@ -266,17 +442,17 @@ if ($OPTION -eq "2" -or $OPTION -eq "3") {
             Restart-Service ExpiryRadarCollector -ErrorAction SilentlyContinue
         }
 
-        $COL_CRT = "$AGENT_DIR\collector.crt"
+        $COL_CRT = $COL_CRT_PAIR
         $COL_IP = if ($global:COL_HOST) { $global:COL_HOST } else { "localhost" }
     } else {
         Write-Host "[PT] O Collector não foi encontrado localmente. Assume-se máquina remota." -ForegroundColor Yellow
         Write-Host "[EN] Collector not found locally. Assuming remote machine." -ForegroundColor Yellow
-        
+
         $COL_IP = Read-Host "[PT] IP do Collector / [EN] Collector IP"
         Write-Host "[PT] No collector: <collector.exe> add-agent collector.json <id> dá o token deste agente." -ForegroundColor Yellow
         Write-Host "[EN] On the collector: <collector.exe> add-agent collector.json <id> gives this agent's token." -ForegroundColor Yellow
         $AGENT_TOKEN = Read-Host "[PT] Token do Agente / [EN] Agent Token"
-        $COL_CRT = Read-Host "[PT] Caminho do certificado de confianca (collector.crt, ou ca.crt se o collector usa CA interna) / [EN] Trust certificate path (collector.crt, or ca.crt if the collector uses an internal CA)"
+        $COL_CRT = Read-Host "[PT] Caminho do certificado de confianca (collector.crt, ou ca.crt se o collector usa CA interna; deixa em branco se o collector usa um certificado de confianca publica) / [EN] Trust certificate path (collector.crt, or ca.crt if the collector uses an internal CA; leave blank if the collector uses a publicly-trusted certificate)"
         $AGENT_ID = Read-Host "[PT] ID do Agente / [EN] Agent ID"
     }
 
