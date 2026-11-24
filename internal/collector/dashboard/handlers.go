@@ -173,7 +173,7 @@ func NewMux(st store.Store, rs rules.Store, a *audit.Store, opts ...Options) *ht
 
 	mux.HandleFunc("POST /agents/forget", func(w http.ResponseWriter, r *http.Request) {
 		if !session.RoleAtLeast(session.Role(r.Context()), session.RoleAdmin) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			session.Forbidden(w)
 			return
 		}
 		agentID := r.PostFormValue("agent_id")
@@ -221,7 +221,7 @@ func NewMux(st store.Store, rs rules.Store, a *audit.Store, opts ...Options) *ht
 
 	mux.HandleFunc("POST /rules", func(w http.ResponseWriter, r *http.Request) {
 		if !session.RoleAtLeast(session.Role(r.Context()), session.RoleOperator) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			session.Forbidden(w)
 			return
 		}
 		if err := r.ParseForm(); err != nil {

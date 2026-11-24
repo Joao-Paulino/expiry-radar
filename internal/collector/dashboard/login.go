@@ -135,7 +135,7 @@ func LoginHandlers(auth *admin.Authenticator, sessions *session.Store, a *audit.
 	})
 	revokeAll = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !session.RoleAtLeast(session.Role(r.Context()), session.RoleAdmin) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			session.Forbidden(w)
 			return
 		}
 		if err := sessions.DeleteAll(r.Context()); err != nil {

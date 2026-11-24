@@ -80,3 +80,37 @@ func TestRoleFor_GroupComparisonIsCaseInsensitive(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, session.RoleAdmin)
 	}
 }
+
+// TestRoleFor_NoMatchUsesDefaultRole proves that a provider whose
+// claims never carry groups/roles (e.g. Google) can still grant every
+// authorized user a role above viewer, by setting DefaultRole. This is
+// the only way such a provider can land anywhere but RoleAdmin (no RBAC
+// keys set) or RoleViewer (RBAC keys set, nothing ever matches).
+func TestRoleFor_NoMatchUsesDefaultRole(t *testing.T) {
+	p := ProviderConfig{AdminGroups: []string{"admins-oid"}, DefaultRole: session.RoleOperator}
+	c := Claims{} // Google-style: no groups/roles claims at all
+	if got := RoleFor(p, c); got != session.RoleOperator {
+		t.Fatalf("got %q, want %q", got, session.RoleOperator)
+	}
+}
+
+// TestRoleFor_DefaultRoleNeverOverridesAnActualMatch proves DefaultRole
+// only applies when nothing matched; a user who does match an admin
+// group still gets admin even if DefaultRole is set lower.
+func TestRoleFor_DefaultRoleNeverOverridesAnActualMatch(t *testing.T) {
+	p := ProviderConfig{AdminGroups: []string{"admins-oid"}, DefaultRole: session.RoleViewer}
+	c := Claims{Groups: []string{"admins-oid"}}
+	if got := RoleFor(p, c); got != session.RoleAdmin {
+		t.Fatalf("got %q, want %q", got, session.RoleAdmin)
+	}
+}
+
+// TestRoleFor_EmptyDefaultRoleKeepsLegacyViewerFallback proves that
+// leaving DefaultRole unset preserves the pre-existing behavior exactly.
+func TestRoleFor_EmptyDefaultRoleKeepsLegacyViewerFallback(t *testing.T) {
+	p := ProviderConfig{AdminGroups: []string{"admins-oid"}}
+	c := Claims{Groups: []string{"someone-else"}}
+	if got := RoleFor(p, c); got != session.RoleViewer {
+		t.Fatalf("got %q, want %q", got, session.RoleViewer)
+	}
+}

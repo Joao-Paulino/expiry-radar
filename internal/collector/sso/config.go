@@ -6,6 +6,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
 )
 
 // ProviderConfig is one OIDC provider, from collector.json.
@@ -26,11 +28,24 @@ type ProviderConfig struct {
 	// full admin access — so adding RBAC to one provider never
 	// silently restricts another. AdminGroups/AdminRoles are checked
 	// before OperatorGroups/OperatorRoles; a user matching neither
-	// falls through to a read-only viewer role.
+	// falls through to DefaultRole, or to a read-only viewer role if
+	// DefaultRole is unset.
 	AdminGroups    []string `json:"admin_groups"`
 	AdminRoles     []string `json:"admin_roles"`
 	OperatorGroups []string `json:"operator_groups"`
 	OperatorRoles  []string `json:"operator_roles"`
+
+	// DefaultRole is the role granted to an authorized user who
+	// matches none of the four keys above, once RBAC is active for
+	// this provider (i.e. at least one of the four is set). It exists
+	// for providers whose tokens never carry group/role claims at all
+	// (Google, for example): such a provider can never match
+	// AdminGroups/AdminRoles/OperatorGroups/OperatorRoles, so without
+	// DefaultRole every authorized user there is stuck at viewer.
+	// Must be "admin", "operator" or "viewer" when set; empty keeps
+	// the viewer fallback. Setting DefaultRole never overrides an
+	// actual admin/operator match.
+	DefaultRole string `json:"default_role"`
 }
 
 var nameRe = regexp.MustCompile(`^[a-z0-9-]+$`)
@@ -83,6 +98,11 @@ func ValidateProviders(ps []ProviderConfig, publicURL string) error {
 		}
 		if len(p.AllowedEmails)+len(p.AllowedGroups)+len(p.AllowedRoles) == 0 {
 			return fmt.Errorf("sso: provider %q: set at least one of allowed_emails, allowed_groups, allowed_roles", p.Name)
+		}
+		switch p.DefaultRole {
+		case "", session.RoleAdmin, session.RoleOperator, session.RoleViewer:
+		default:
+			return fmt.Errorf("sso: provider %q: default_role must be %q, %q or %q", p.Name, session.RoleAdmin, session.RoleOperator, session.RoleViewer)
 		}
 		if _, err := p.ClientSecret(); err != nil {
 			return err
