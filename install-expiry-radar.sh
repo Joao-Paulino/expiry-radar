@@ -5,7 +5,7 @@ set -euo pipefail
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 
-VERSION="v1.2.0"
+VERSION="v1.3.0"
 REPO="Joao-Paulino/expiry-radar"
 BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
 SVC_USER="expiry-radar"
