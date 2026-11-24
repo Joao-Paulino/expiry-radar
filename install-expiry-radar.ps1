@@ -276,8 +276,14 @@ function Dns01-Setup {
         Write-Host "[PT] Um dos ficheiros nao foi encontrado. / [EN] One of the files was not found." -ForegroundColor Red
         exit 1
     }
-    Copy-Item -Path $fullchainPath -Destination "$Dir\collector.crt" -Force
-    Copy-Item -Path $privkeyPath -Destination "$Dir\collector.key" -Force
+    try {
+        Copy-Item -Path $fullchainPath -Destination "$Dir\collector.crt" -Force -ErrorAction Stop
+        Copy-Item -Path $privkeyPath -Destination "$Dir\collector.key" -Force -ErrorAction Stop
+    } catch {
+        Write-Host "[PT] Erro ao copiar o certificado/chave: $_" -ForegroundColor Red
+        Write-Host "[EN] Error copying the certificate/key: $_" -ForegroundColor Red
+        exit 1
+    }
 
     Write-Host "[PT] Para as renovacoes (certbot renew), copia de novo estes dois ficheiros para $Dir depois de cada renovacao (ex: com --deploy-hook ou uma Tarefa Agendada). O collector deteta a mudanca e recarrega sem reiniciar." -ForegroundColor Yellow
     Write-Host "[EN] For renewals (certbot renew), copy these two files back into $Dir after each renewal (e.g. via --deploy-hook or a Scheduled Task). The collector notices the change and reloads without restarting." -ForegroundColor Yellow
