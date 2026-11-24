@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v7
       # Releases are built with a supported Go (security fixes in the
       # standard library); go.mod only sets the minimum for source builds.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ inputs.go-version || '1.26.x' }}
           check-latest: true # always the newest patch (security fixes)
