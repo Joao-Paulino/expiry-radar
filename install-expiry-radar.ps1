@@ -391,6 +391,16 @@ if ($OPTION -eq "1" -or $OPTION -eq "3") {
     foreach ($f in "collector.key", "collector.json") {
         icacls "$COL_DIR\$f" /inheritance:r /grant "NT AUTHORITY\LocalService:R" /grant "BUILTIN\Administrators:F" | Out-Null
     }
+    # DNS-01 provider credentials (Cloudflare/DigitalOcean API tokens, in
+    # plaintext) only exist when option 3 was used with one of those
+    # providers; lock the whole folder down the same as collector.key.
+    # Credenciais do fornecedor de DNS para o DNS-01 (tokens de API do
+    # Cloudflare/DigitalOcean, em texto limpo) só existem quando se usou a
+    # opção 3 com um desses fornecedores; tranca a pasta toda como o
+    # collector.key.
+    if (Test-Path "$COL_DIR\dns01-credentials") {
+        icacls "$COL_DIR\dns01-credentials" /inheritance:r /grant "NT AUTHORITY\LocalService:R" /grant "BUILTIN\Administrators:F" /T | Out-Null
+    }
     Start-Service ExpiryRadarCollector
     New-NetFirewallRule -DisplayName "Expiry Radar 8443" -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow -ErrorAction SilentlyContinue | Out-Null
     
