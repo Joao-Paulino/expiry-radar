@@ -1,0 +1,31 @@
+# Adds a read-only SSO login to the demo, through a Keycloak that only
+# knows ONE public "viewer" user (password published on purpose: the
+# viewer role cannot mute, re-own, forget an agent or end sessions).
+# Use together with docker-compose.demo.yml:
+#   docker compose -f docker-compose.demo.yml -f docker-compose.demo-sso.yml up -d
+# Setup steps: deploy/demo/keycloak/README.md
+#
+# Keycloak sits behind your TLS reverse proxy at KC_PUBLIC_URL (for
+# example https://login.example.com). Publish ONLY /realms/ and
+# /resources/ there; never /admin or the master realm.
+services:
+  demo:
+    command: ["/data/collector.json"]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    restart: unless-stopped
+    command:
+      - start
+      - --import-realm
+      - --http-enabled=true
+      - --proxy-headers=xforwarded
+      - --hostname=${KC_PUBLIC_URL:?set KC_PUBLIC_URL, e.g. https://login.example.com}
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?set KC_ADMIN_PASSWORD (long and random)}
+    ports: ["127.0.0.1:8080:8080"]
+    volumes:
+      - ./demo/keycloak/rendered:/opt/keycloak/data/import:ro
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]

@@ -1,0 +1,36 @@
+# Expiry Radar demo — see docs: a self-contained collector with example
+# data across multiple checker kinds. Most of it is clearly-fake
+# example data (Vault, Azure, AWS, GCP, VMware, FlexLM licences) — no
+# real infrastructure behind it. The TLS certificate data is real: a
+# real agent runs inside this same container and actually checks a
+# handful of real public domains, same as a real deployment's agent
+# would (see deploy/demo/agent.json).
+#
+# Requires only Docker:
+#   docker compose -f docker-compose.demo.yml up
+#   # then open https://localhost:8443 (self-signed certificate: your
+#   # browser will warn about it, that's expected for a local demo)
+#
+# The administrator password and second-factor login codes are
+# generated on first start and printed to the logs:
+#   docker compose -f docker-compose.demo.yml logs demo
+#
+# This file is demo tooling only — see docker-compose.example.yml for a
+# real deployment (which uses the hardened collector/agent images, a
+# real certificate, and your own agents).
+services:
+  demo:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: demo
+    restart: unless-stopped
+    ports: ["8443:8443"]
+    volumes:
+      - demo-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  demo-data:
