@@ -51,7 +51,7 @@ import (
 // worth randomizing, since the recovery codes and TOTP secret (which
 // actually gate a login) are generated fresh per instance and are
 // never reused across demo containers.
-const demoPassword = "ExpiryRadarDemo!2026"
+const demoPassword = "ExpiryRadarDemo!2026" // #nosec G101 -- public demo-only password, published on purpose; the per-instance TOTP is what gates the login
 
 const collectorBinary = "/usr/local/bin/collector"
 const demoseedBinary = "/usr/local/bin/demoseed"
