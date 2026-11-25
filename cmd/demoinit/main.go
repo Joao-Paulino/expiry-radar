@@ -72,10 +72,9 @@ func main() {
 
 	// Replace this process with the real collector, so it becomes PID 1.
 	env := os.Environ()
-	if err := syscall.Exec(collectorBinary, []string{collectorBinary, cfgPath}, env); err != nil { // #nosec G204 -- fixed binary path, not user input
-		fmt.Fprintf(os.Stderr, "demoinit: exec collector: %s\n", err)
-		os.Exit(1)
-	}
+	err := syscall.Exec(collectorBinary, []string{collectorBinary, cfgPath}, env) // #nosec G204 -- fixed binary path, not user input
+	fmt.Fprintf(os.Stderr, "demoinit: exec collector: %s\n", err)
+	os.Exit(1)
 }
 
 type minimalConfig struct {
@@ -119,7 +118,8 @@ func run(cfgPath string) error {
 		// Already configured from a previous run: show the same
 		// credentials again rather than generating new ones (the old
 		// recovery codes and TOTP secret are still the ones in the DB).
-		if b, err := os.ReadFile(credsPath); err == nil { // #nosec G304 -- fixed path derived from this container's own config
+		b, readErr := os.ReadFile(credsPath) // #nosec G304 -- fixed path derived from this container's own config
+		if readErr == nil {
 			fmt.Print(string(b))
 		} else {
 			fmt.Println("demoinit: administrator account already configured; credentials file not found, see your README's fixed demo password")
