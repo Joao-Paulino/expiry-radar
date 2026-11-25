@@ -51,6 +51,17 @@ powershell -ExecutionPolicy Bypass -File .\install-expiry-radar.ps1
 
 **Docker Compose:** [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) (collector + agent). Then open / Depois abre `https://<host>:8443`. Every option: [examples/](examples/).
 
+**Just want to look around first? / Só queres dar uma vista de olhos primeiro?** A self-contained demo with example data (TLS certificates, Vault, Azure, AWS, GCP, VMware licences, FlexLM) — only Docker required, no real agents or domains:
+
+```bash
+git clone https://github.com/Joao-Paulino/expiry-radar.git && cd expiry-radar/deploy
+docker compose -f docker-compose.demo.yml up
+# login and password shown in: docker compose -f docker-compose.demo.yml logs demo
+```
+
+Open `https://localhost:8443` (self-signed certificate — your browser will warn, that's expected). Everything is generated on first start: TLS certificate, admin password, TOTP secret/recovery codes, and the example data. Restarting the container keeps the same login and data (nothing is regenerated or duplicated).
+Abre `https://localhost:8443` (certificado autoassinado — o browser vai avisar, é esperado). Tudo é gerado no primeiro arranque: certificado TLS, password de administração, segredo TOTP/códigos de recuperação, e os dados de exemplo. Reiniciar o contentor mantém o mesmo login e dados (nada é regenerado ou duplicado).
+
 > ⭐ **Useful? Star the repo** so others in SecOps and OT find it. / **Útil? Dá uma estrela** para que outros em SecOps e OT o encontrem.
 >
 > 💬 **What expires in your environment that we don't cover yet?** [Tell us in Discussions](https://github.com/Joao-Paulino/expiry-radar/discussions). / **O que expira no teu ambiente e ainda não cobrimos?** Conta-nos nas Discussions.

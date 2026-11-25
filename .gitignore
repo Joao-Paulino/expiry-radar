@@ -6,3 +6,4 @@ go.work
 go.work.sum
 out/
 out-vault/
+deploy/demo/keycloak/rendered/
