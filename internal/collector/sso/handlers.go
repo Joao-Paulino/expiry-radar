@@ -8,7 +8,6 @@ import (
 	"errors"
 	"html/template"
 	"log"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -20,6 +19,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/audit"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/session"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
+	"github.com/Joao-Paulino/expiry-radar/internal/netaddr"
 )
 
 // BindCookieName binds a callback to the browser that started the
@@ -168,21 +168,13 @@ func (h *Handlers) discover(ctx context.Context, p ProviderConfig) (*providerCli
 	}, nil
 }
 
-func clientAddress(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
 func (h *Handlers) login(w http.ResponseWriter, r *http.Request) {
 	p, ok := h.provider(r.PathValue("name"))
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	addr := clientAddress(r)
+	addr := netaddr.Client(r)
 	h.mu.Lock()
 	if h.starts == nil {
 		h.starts = admin.NewThrottle(LoginStartsPerAddress, 10*time.Minute)
@@ -307,7 +299,7 @@ func (h *Handlers) callback(w http.ResponseWriter, r *http.Request) {
 			log.Printf("sso: audit log error: %s", logging.Sanitize(err.Error()))
 		}
 	}
-	log.Printf("sso: login success via %s (%s, from %s)", p.Name, logging.Sanitize(who), logging.Sanitize(r.RemoteAddr))
+	log.Printf("sso: login success via %s (%s, from %s)", p.Name, logging.Sanitize(who), logging.Sanitize(netaddr.Client(r)))
 	http.SetCookie(w, &http.Cookie{Name: BindCookieName, Value: "", Path: "/", Secure: true, HttpOnly: true, MaxAge: -1})
 	http.SetCookie(w, session.Cookie(id))
 	// A same-site navigation from this page, not an HTTP redirect: the

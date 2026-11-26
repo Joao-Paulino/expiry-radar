@@ -12,6 +12,7 @@ import (
 	"github.com/Joao-Paulino/expiry-radar/internal/checker"
 	"github.com/Joao-Paulino/expiry-radar/internal/collector/store"
 	"github.com/Joao-Paulino/expiry-radar/internal/logging"
+	"github.com/Joao-Paulino/expiry-radar/internal/netaddr"
 )
 
 // MaxBodyBytes caps one pushed batch. A large estate is a few thousand
@@ -46,13 +47,13 @@ func Handler(st store.Store) http.HandlerFunc {
 			case bound:
 			default:
 				log.Printf("ingest: token bound to agent %q tried to report as %q (from %s)",
-					logging.Sanitize(bound), logging.Sanitize(batch.AgentID), logging.Sanitize(r.RemoteAddr))
+					logging.Sanitize(bound), logging.Sanitize(batch.AgentID), logging.Sanitize(netaddr.Client(r)))
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}
 		} else if auth.IsReservedAgent(ctx, batch.AgentID) {
 			log.Printf("ingest: shared token tried to report as agent %q, which has its own token (from %s)",
-				logging.Sanitize(batch.AgentID), logging.Sanitize(r.RemoteAddr))
+				logging.Sanitize(batch.AgentID), logging.Sanitize(netaddr.Client(r)))
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
