@@ -4,6 +4,9 @@
 // It gives a freshly started "docker compose up" demo a working,
 // logged-in-ready collector with real TLS data and no manual steps:
 //
+//  0. Replaces the placeholder agent and admin tokens of the config with
+//     random per-instance ones (see tokens.go logic below), so no token
+//     that is published in the repository ever works on a running demo.
 //  1. Generates a self-signed certificate on first run (skipped if one
 //     already exists, so a restart doesn't rotate it).
 //  2. Sets a fixed demo administrator password and a fresh TOTP secret
@@ -35,6 +38,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -65,14 +70,15 @@ func main() {
 	}
 	cfgPath := os.Args[1]
 
-	if err := run(cfgPath); err != nil {
+	effectiveCfg, err := run(cfgPath)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "demoinit: %s\n", err)
 		os.Exit(1)
 	}
 
 	// Replace this process with the real collector, so it becomes PID 1.
 	env := os.Environ()
-	err := syscall.Exec(collectorBinary, []string{collectorBinary, cfgPath}, env) // #nosec G204 -- fixed binary path, not user input
+	err = syscall.Exec(collectorBinary, []string{collectorBinary, effectiveCfg}, env) // #nosec G204 -- fixed binary path, effectiveCfg is this container's own generated file
 	fmt.Fprintf(os.Stderr, "demoinit: exec collector: %s\n", err)
 	os.Exit(1)
 }
@@ -83,26 +89,40 @@ type minimalConfig struct {
 	TLSKeyFile  string `json:"tls_key_file"`
 }
 
-func run(cfgPath string) error {
+func run(cfgPath string) (string, error) {
 	data, err := os.ReadFile(cfgPath) // #nosec G304 -- path is this container's own fixed config argument
 	if err != nil {
-		return fmt.Errorf("reading %s: %w", cfgPath, err)
+		return "", fmt.Errorf("reading %s: %w", cfgPath, err)
 	}
 	var cfg minimalConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parsing %s: %w", cfgPath, err)
+		return "", fmt.Errorf("parsing %s: %w", cfgPath, err)
 	}
 	if cfg.DBPath == "" {
-		return fmt.Errorf("%s: db_path is required", cfgPath)
+		return "", fmt.Errorf("%s: db_path is required", cfgPath)
+	}
+
+	dataDir := filepath.Dir(cfg.DBPath)
+	tokens, err := loadOrCreateTokens(dataDir)
+	if err != nil {
+		return "", fmt.Errorf("demo tokens: %w", err)
+	}
+	effective, err := applyTokens(data, tokens)
+	if err != nil {
+		return "", fmt.Errorf("applying demo tokens to %s: %w", cfgPath, err)
+	}
+	effectiveCfg := filepath.Join(dataDir, "collector.effective.json")
+	if err := os.WriteFile(effectiveCfg, effective, 0o600); err != nil {
+		return "", fmt.Errorf("writing %s: %w", effectiveCfg, err)
 	}
 
 	if err := ensureCert(cfg); err != nil {
-		return fmt.Errorf("certificate: %w", err)
+		return "", fmt.Errorf("certificate: %w", err)
 	}
 
 	sqlDB, err := db.Open(cfg.DBPath)
 	if err != nil {
-		return fmt.Errorf("opening %s: %w", cfg.DBPath, err)
+		return "", fmt.Errorf("opening %s: %w", cfg.DBPath, err)
 	}
 	defer sqlDB.Close()
 
@@ -110,7 +130,7 @@ func run(cfgPath string) error {
 	ctx := context.Background()
 	acc, found, err := store.Get(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	credsPath := filepath.Join(filepath.Dir(cfg.DBPath), "demo-credentials.txt")
@@ -127,22 +147,22 @@ func run(cfgPath string) error {
 	} else {
 		creds, err := configureAdmin(ctx, store)
 		if err != nil {
-			return fmt.Errorf("configuring administrator account: %w", err)
+			return "", fmt.Errorf("configuring administrator account: %w", err)
 		}
 		if err := os.WriteFile(credsPath, []byte(creds), 0o600); err != nil {
-			return fmt.Errorf("writing %s: %w", credsPath, err)
+			return "", fmt.Errorf("writing %s: %w", credsPath, err)
 		}
 		fmt.Print(creds)
 	}
 
-	if err := runDemoseed(cfgPath); err != nil {
-		return fmt.Errorf("seeding example data: %w", err)
+	if err := runDemoseed(effectiveCfg); err != nil {
+		return "", fmt.Errorf("seeding example data: %w", err)
 	}
 
-	if err := startAgent(); err != nil {
-		return fmt.Errorf("starting demo agent: %w", err)
+	if err := startAgent(dataDir, tokens.Agent); err != nil {
+		return "", fmt.Errorf("starting demo agent: %w", err)
 	}
-	return nil
+	return effectiveCfg, nil
 }
 
 // ensureCert generates a self-signed certificate for the demo on first
@@ -173,8 +193,20 @@ func ensureCert(cfg minimalConfig) error {
 // binary (see main), nothing in this container can wait() on the
 // agent if it ever exits — there is no init system here to reap it.
 // Acceptable since the agent is designed to run forever.
-func startAgent() error {
-	cmd := exec.Command(agentBinary, demoAgentConfig) // #nosec G204 -- fixed binary and config path, not user input
+func startAgent(dataDir, agentToken string) error {
+	raw, err := os.ReadFile(demoAgentConfig)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", demoAgentConfig, err)
+	}
+	effective, err := agentConfigWithToken(raw, agentToken)
+	if err != nil {
+		return fmt.Errorf("applying the demo token to %s: %w", demoAgentConfig, err)
+	}
+	agentCfg := filepath.Join(dataDir, "agent.effective.json")
+	if err := os.WriteFile(agentCfg, effective, 0o600); err != nil {
+		return fmt.Errorf("writing %s: %w", agentCfg, err)
+	}
+	cmd := exec.Command(agentBinary, agentCfg) // #nosec G204 -- fixed binary, config is this container's own generated file
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Start()
@@ -246,4 +278,108 @@ func configureAdmin(ctx context.Context, store *admin.Store) (string, error) {
 
 func appendLine(b []byte, s string) []byte {
 	return append(append(b, []byte(s)...), '\n')
+}
+
+// tokenPlaceholder marks a token in a demo config that demoinit replaces
+// with a random per-instance one. The two legacy values are the fixed
+// tokens that earlier demo configs published in the repository: they
+// are treated as placeholders too, so a demo that still carries them
+// is rotated on its next start instead of staying open to anyone.
+const (
+	tokenPlaceholder = "generate-on-first-start"
+	legacyAgentToken = "ExpiryRadarDemoTLSAgentToken2026NotASecretJustADemo"        // #nosec G101 -- retired public demo token, recognised only to be replaced
+	legacyAdminToken = "demo-unused-admin-token-not-needed-for-the-dashboard-login" // #nosec G101 -- retired public demo token, recognised only to be replaced
+)
+
+// demoTokens are generated once per data volume and persisted next to
+// the database (0600), so a restart keeps the collector and the
+// in-container agent in agreement.
+type demoTokens struct {
+	Agent string `json:"agent"`
+	Admin string `json:"admin"`
+}
+
+func isPlaceholder(t string) bool {
+	return t == tokenPlaceholder || t == legacyAgentToken || t == legacyAdminToken
+}
+
+func randomToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func loadOrCreateTokens(dir string) (demoTokens, error) {
+	path := filepath.Join(dir, "demo-tokens.json")
+	var t demoTokens
+	raw, err := os.ReadFile(path) // #nosec G304 -- fixed file name inside this container's own data directory
+	if err == nil && json.Unmarshal(raw, &t) == nil && len(t.Agent) >= 32 && len(t.Admin) >= 32 {
+		return t, nil
+	}
+	if t.Agent, err = randomToken(); err != nil {
+		return demoTokens{}, err
+	}
+	if t.Admin, err = randomToken(); err != nil {
+		return demoTokens{}, err
+	}
+	out, err := json.Marshal(t)
+	if err != nil {
+		return demoTokens{}, err
+	}
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		return demoTokens{}, err
+	}
+	return t, nil
+}
+
+// replaceTokens swaps every placeholder in list for token. With
+// ensure set, token is appended when the list ends up without it.
+func replaceTokens(list []any, token string, ensure bool) []any {
+	out := make([]any, 0, len(list)+1)
+	found := false
+	for _, v := range list {
+		if s, ok := v.(string); ok && isPlaceholder(s) {
+			v = token
+		}
+		if s, ok := v.(string); ok && s == token {
+			if found {
+				continue
+			}
+			found = true
+		}
+		out = append(out, v)
+	}
+	if ensure && !found {
+		out = append(out, token)
+	}
+	return out
+}
+
+// applyTokens returns the collector config with its placeholder tokens
+// replaced. The agent token is always present in auth_tokens, because
+// the in-container agent needs it; admin_tokens only loses placeholders.
+func applyTokens(raw []byte, t demoTokens) ([]byte, error) {
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, err
+	}
+	auth, _ := cfg["auth_tokens"].([]any)
+	cfg["auth_tokens"] = replaceTokens(auth, t.Agent, true)
+	if adm, ok := cfg["admin_tokens"].([]any); ok {
+		cfg["admin_tokens"] = replaceTokens(adm, t.Admin, false)
+	}
+	return json.MarshalIndent(cfg, "", "  ")
+}
+
+// agentConfigWithToken returns the agent config with the generated
+// agent token as its token.
+func agentConfigWithToken(raw []byte, token string) ([]byte, error) {
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, err
+	}
+	cfg["token"] = token
+	return json.MarshalIndent(cfg, "", "  ")
 }

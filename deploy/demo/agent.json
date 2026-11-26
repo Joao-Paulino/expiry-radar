@@ -1,7 +1,7 @@
 {
   "collector_url": "https://localhost:8443",
   "collector_ca_file": "/data/collector.crt",
-  "token": "ExpiryRadarDemoTLSAgentToken2026NotASecretJustADemo",
+  "token": "generate-on-first-start",
   "agent_id": "agent-demo-tls",
   "queue_path": "/data/agent-queue.jsonl",
   "interval_seconds": 300,
