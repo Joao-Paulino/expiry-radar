@@ -3,6 +3,6 @@
   "listen_addr": "0.0.0.0:8443",
   "tls_cert_file": "/data/collector.crt",
   "tls_key_file": "/data/collector.key",
-  "auth_tokens": ["ExpiryRadarDemoTLSAgentToken2026NotASecretJustADemo"],
-  "admin_tokens": ["demo-unused-admin-token-not-needed-for-the-dashboard-login"]
+  "auth_tokens": ["generate-on-first-start"],
+  "admin_tokens": ["generate-on-first-start"]
 }

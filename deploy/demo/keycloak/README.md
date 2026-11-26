@@ -57,9 +57,16 @@ O Caddy obtém o certificado sozinho e envia os cabeçalhos `X-Forwarded-*` que 
 ```caddyfile
 # The demo collector itself (self-signed certificate on 8443) / O próprio collector do demo
 expiry.example.com {
-	reverse_proxy https://127.0.0.1:8443 {
-		transport http {
-			tls_insecure_skip_verify
+	# The demo agent runs inside the container and talks to the collector directly,
+	# so nothing from outside needs /ingest / O agente do demo corre dentro do container
+	handle /ingest* {
+		respond 404
+	}
+	handle {
+		reverse_proxy https://127.0.0.1:8443 {
+			transport http {
+				tls_insecure_skip_verify
+			}
 		}
 	}
 }
@@ -98,3 +105,19 @@ curl -s -o /dev/null -w '%{http_code}\n' https://login.example.com/realms/expiry
 
 The first start takes about 2 minutes; the issuer answers empty until Keycloak is up.
 O primeiro arranque demora cerca de 2 minutos; o issuer responde vazio até o Keycloak estar pronto.
+
+## Tokens / Tokens
+
+EN: the demo's agent and admin API tokens are **not** in the repository. On first start
+`demoinit` generates random ones (kept in `demo-tokens.json`, mode 0600, in the data
+volume) and writes the effective configs next to the database. A config that still holds
+`generate-on-first-start`, or one of the retired public tokens from earlier demo versions,
+is rotated automatically. A token you set yourself is kept. Port 8443 is published on
+`127.0.0.1` only; put a TLS proxy such as the Caddy above in front of it.
+
+PT: os tokens de agente e de admin da API do demo **não** estão no repositório. No primeiro
+arranque o `demoinit` gera tokens aleatórios (guardados em `demo-tokens.json`, modo 0600,
+no volume de dados) e escreve as configs efetivas junto à base de dados. Uma config com
+`generate-on-first-start`, ou com um dos tokens públicos antigos de versões anteriores do demo,
+é rodada automaticamente. Um token definido por ti é mantido. A porta 8443 só é publicada em
+`127.0.0.1`; põe à frente um proxy TLS, como o Caddy acima.
