@@ -13,7 +13,7 @@ services:
     command: ["/data/collector.json"]
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0.7
+    image: quay.io/keycloak/keycloak:26.8.2
     restart: unless-stopped
     command:
       - start
